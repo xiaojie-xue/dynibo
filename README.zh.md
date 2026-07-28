@@ -55,8 +55,8 @@ URDF 解析和名称查找只在模型构建阶段分配内存，不进入实时
 | `jacobian_with_tool(q, tool)` | 平移到工具点的 Jacobian |
 | `forward_velocity_kinematics(q, qd, base, tool)` | 末端空间速度 |
 | `jacobian_dot(q, qd)` | Jacobian 的解析时间导数 |
-| `jacobian_dot_times_velocity(q, qd)` | 对流加速度 `J_dot * qd` |
-| `forward_acceleration_kinematics(q, qd, qdd)` | 加速度 `J * qdd + J_dot * qd` |
+| `jacobian_dot_times_velocity(q, qd)` | 直接递推对流加速度 `J_dot * qd` |
+| `forward_acceleration_kinematics(q, qd, qdd)` | 直接递推加速度 `J * qdd + J_dot * qd` |
 
 ### 动力学与关节工具
 
@@ -102,14 +102,14 @@ Pinocchio 3.9.0；数值越小越好。它们用于展示当前机器上的性�
 
 | 操作 | 自由度 | Dyno | Pinocchio | Dyno 加速比 |
 |---|---:|---:|---:|---:|
-| 正运动学 | 4 | 66.6 ns | 81.7 ns | 1.23x |
-| 末端 Jacobian | 4 | 80.9 ns | 137.6 ns | 1.70x |
-| 重力 | 4 | 92.0 ns | 194.7 ns | 2.12x |
-| RNEA | 4 | 148.0 ns | 311.5 ns | 2.11x |
-| 正运动学 | 40 | 658.1 ns | 822.0 ns | 1.25x |
-| 末端 Jacobian | 40 | 762.3 ns | 1.354 µs | 1.78x |
-| 重力 | 40 | 951.3 ns | 1.835 µs | 1.93x |
-| RNEA | 40 | 1.464 µs | 3.151 µs | 2.15x |
+| 正运动学 | 4 | 65.4 ns | 83.6 ns | 1.28x |
+| 末端 Jacobian | 4 | 81.3 ns | 143.5 ns | 1.77x |
+| 重力 | 4 | 88.5 ns | 195.8 ns | 2.21x |
+| RNEA | 4 | 147.0 ns | 306.9 ns | 2.09x |
+| 正运动学 | 40 | 647.4 ns | 813.8 ns | 1.26x |
+| 末端 Jacobian | 40 | 792.8 ns | 1.344 µs | 1.69x |
+| 重力 | 40 | 928.7 ns | 1.839 µs | 1.98x |
+| RNEA | 40 | 1.408 µs | 3.147 µs | 2.23x |
 
 测得的 C ABI 空操作开销约为 0.704 ns。如前所述，由于兼容内核与 Pinocchio 使用
 不同的数值约定，重力和 RNEA 两组数据只比较执行时间。

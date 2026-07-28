@@ -113,6 +113,31 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
     });
     jacobian.finish();
 
+    let mut convective = c.benchmark_group(format!("jacobian_dot_times_velocity/{size}"));
+    convective.throughput(Throughput::Elements(1));
+    convective.bench_function("dyno", |b| {
+        b.iter(|| {
+            black_box(
+                case.arm
+                    .jacobian_dot_times_velocity(black_box(&case.q), black_box(&case.qd)),
+            )
+        });
+    });
+    convective.finish();
+
+    let mut acceleration = c.benchmark_group(format!("forward_acceleration/{size}"));
+    acceleration.throughput(Throughput::Elements(1));
+    acceleration.bench_function("dyno", |b| {
+        b.iter(|| {
+            black_box(case.arm.forward_acceleration_kinematics(
+                black_box(&case.q),
+                black_box(&case.qd),
+                black_box(&case.qdd),
+            ))
+        });
+    });
+    acceleration.finish();
+
     let mut gravity = c.benchmark_group(format!("gravity/{size}"));
     gravity.throughput(Throughput::Elements(1));
     gravity.bench_with_input(BenchmarkId::from_parameter("dyno"), &case.q, |b, q| {

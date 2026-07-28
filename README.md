@@ -60,8 +60,8 @@ safe-Rust implementation and is not a functional-safety certification.
 | `jacobian_with_tool(q, tool)` | Jacobian shifted to a tool point |
 | `forward_velocity_kinematics(q, qd, base, tool)` | End-effector spatial velocity |
 | `jacobian_dot(q, qd)` | Analytical time derivative of the Jacobian |
-| `jacobian_dot_times_velocity(q, qd)` | Convective acceleration `J_dot * qd` |
-| `forward_acceleration_kinematics(q, qd, qdd)` | Acceleration `J * qdd + J_dot * qd` |
+| `jacobian_dot_times_velocity(q, qd)` | Direct-recursive convective acceleration `J_dot * qd` |
+| `forward_acceleration_kinematics(q, qd, qdd)` | Direct-recursive acceleration `J * qdd + J_dot * qd` |
 
 ### Dynamics and joint utilities
 
@@ -113,14 +113,14 @@ rigorous performance claim.
 
 | Operation | DoF | Dyno | Pinocchio | Dyno speedup |
 |---|---:|---:|---:|---:|
-| Forward kinematics | 4 | 66.6 ns | 81.7 ns | 1.23x |
-| End Jacobian | 4 | 80.9 ns | 137.6 ns | 1.70x |
-| Gravity | 4 | 92.0 ns | 194.7 ns | 2.12x |
-| RNEA | 4 | 148.0 ns | 311.5 ns | 2.11x |
-| Forward kinematics | 40 | 658.1 ns | 822.0 ns | 1.25x |
-| End Jacobian | 40 | 762.3 ns | 1.354 µs | 1.78x |
-| Gravity | 40 | 951.3 ns | 1.835 µs | 1.93x |
-| RNEA | 40 | 1.464 µs | 3.151 µs | 2.15x |
+| Forward kinematics | 4 | 65.4 ns | 83.6 ns | 1.28x |
+| End Jacobian | 4 | 81.3 ns | 143.5 ns | 1.77x |
+| Gravity | 4 | 88.5 ns | 195.8 ns | 2.21x |
+| RNEA | 4 | 147.0 ns | 306.9 ns | 2.09x |
+| Forward kinematics | 40 | 647.4 ns | 813.8 ns | 1.26x |
+| End Jacobian | 40 | 792.8 ns | 1.344 µs | 1.69x |
+| Gravity | 40 | 928.7 ns | 1.839 µs | 1.98x |
+| RNEA | 40 | 1.408 µs | 3.147 µs | 2.23x |
 
 The measured no-op C ABI overhead was approximately 0.704 ns. As noted above,
 the gravity and RNEA rows compare runtime only because the compatibility kernel

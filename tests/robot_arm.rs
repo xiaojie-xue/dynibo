@@ -270,6 +270,21 @@ fn jacobian_dot_and_forward_acceleration_match_finite_difference() {
         mixed_numerical,
         epsilon = 2.0e-8
     );
+    assert_relative_eq!(
+        mixed_arm
+            .jacobian_dot_times_velocity(&mixed_q, &mixed_qd)
+            .to_vector(),
+        mixed_numerical * mixed_qd,
+        epsilon = 2.0e-8
+    );
+    let mixed_qdd = JointVector::<2>::new(0.7, -0.4);
+    assert_relative_eq!(
+        mixed_arm
+            .forward_acceleration_kinematics(&mixed_q, &mixed_qd, &mixed_qdd)
+            .to_vector(),
+        mixed_arm.jacobian(&mixed_q) * mixed_qdd + mixed_numerical * mixed_qd,
+        epsilon = 2.0e-8
+    );
 
     for q in [
         JointVector::<4>::new(0.0, FRAC_PI_2, 0.0, 0.0),
@@ -308,11 +323,8 @@ fn gravity_torque_matches_original_two_link_cases() {
             ),
         ],
     );
-    let (tau, _) = arm.gravity_torque(
-        &JointVector::<2>::new(FRAC_PI_2, FRAC_PI_2),
-        &Frame::identity(),
-        Wrench::zeros(),
-    );
+    let q = JointVector::<2>::new(FRAC_PI_2, FRAC_PI_2);
+    let (tau, _) = arm.gravity_torque(&q, &Frame::identity(), Wrench::zeros());
     assert_abs_diff_eq!(tau[0], 0.0, epsilon = 0.1);
     assert_abs_diff_eq!(tau[1], -4.903325, epsilon = 0.1);
 

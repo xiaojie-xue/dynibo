@@ -219,11 +219,7 @@ impl<const N: usize> RobotArm<N> {
 
     /// Convective end-effector acceleration `J_dot(q, qd) * qd`.
     pub fn jacobian_dot_times_velocity(&self, q: &JointVector<N>, qd: &JointVector<N>) -> Motion {
-        let vector = self.jacobian_dot(q, qd) * qd;
-        Motion::new(
-            vector.fixed_rows::<3>(0).into_owned(),
-            vector.fixed_rows::<3>(3).into_owned(),
-        )
+        self.end_acceleration(q, qd, |_| 0.0)
     }
 
     pub fn forward_acceleration_kinematics(
@@ -232,13 +228,7 @@ impl<const N: usize> RobotArm<N> {
         qd: &JointVector<N>,
         qdd: &JointVector<N>,
     ) -> Motion {
-        let jacobian = self.jacobian(q);
-        let mut result = jacobian * qdd;
-        result += self.jacobian_dot(q, qd) * qd;
-        Motion::new(
-            result.fixed_rows::<3>(0).into_owned(),
-            result.fixed_rows::<3>(3).into_owned(),
-        )
+        self.end_acceleration(q, qd, |i| qdd[i])
     }
 
     /// Newton-Euler inverse dynamics compatible with the original C++ code.
@@ -255,8 +245,9 @@ impl<const N: usize> RobotArm<N> {
         end_load: Wrench,
     ) -> (JointVector<N>, Wrench) {
         let mut transforms: [Frame; N] = std::array::from_fn(|_| Frame::identity());
-        let mut alpha: [Vector3<f64>; N] = std::array::from_fn(|_| Vector3::zeros());
-        let mut link_acceleration: [Vector3<f64>; N] = std::array::from_fn(|_| Vector3::zeros());
+        let mut angular_accelerations: [Vector3<f64>; N] =
+            std::array::from_fn(|_| Vector3::zeros());
+        let mut link_accelerations: [Vector3<f64>; N] = std::array::from_fn(|_| Vector3::zeros());
 
         let base_rotation_inverse = base_frame.rotation.inverse();
         let mut omega = base_rotation_inverse * base_velocity.angular;
@@ -270,39 +261,36 @@ impl<const N: usize> RobotArm<N> {
             let rotation_inverse = transform.rotation.inverse();
             let translation = transform.translation.vector;
             let axis = link.axis().as_ref();
+            let rotated_omega = rotation_inverse * omega;
+            let rotated_angular_acceleration = rotation_inverse * angular_acceleration;
+            let translated_acceleration = rotation_inverse
+                * (acceleration
+                    + angular_acceleration.cross(&translation)
+                    + omega.cross(&omega.cross(&translation)));
             match link.kind() {
                 JointKind::Revolute => {
-                    acceleration = rotation_inverse
-                        * (acceleration
-                            + angular_acceleration.cross(&translation)
-                            + omega.cross(&omega.cross(&translation)));
-                    angular_acceleration = rotation_inverse * angular_acceleration
+                    acceleration = translated_acceleration;
+                    angular_acceleration = rotated_angular_acceleration
                         + qdd[i] * axis
-                        + (rotation_inverse * omega).cross(&(qd[i] * axis));
-                    omega = rotation_inverse * omega + qd[i] * axis;
+                        + rotated_omega.cross(&(qd[i] * axis));
+                    omega = rotated_omega + qd[i] * axis;
                 }
                 JointKind::Prismatic => {
-                    acceleration = rotation_inverse
-                        * (acceleration
-                            + angular_acceleration.cross(&translation)
-                            + omega.cross(&omega.cross(&translation)))
+                    acceleration = translated_acceleration
                         + qdd[i] * axis
                         + 2.0 * qd[i] * omega.cross(&(transform.rotation * axis));
-                    angular_acceleration = rotation_inverse * angular_acceleration;
-                    omega = rotation_inverse * omega;
+                    angular_acceleration = rotated_angular_acceleration;
+                    omega = rotated_omega;
                 }
                 JointKind::Fixed => {
-                    acceleration = rotation_inverse
-                        * (acceleration
-                            + angular_acceleration.cross(&translation)
-                            + omega.cross(&omega.cross(&translation)));
-                    angular_acceleration = rotation_inverse * angular_acceleration;
-                    omega = rotation_inverse * omega;
+                    acceleration = translated_acceleration;
+                    angular_acceleration = rotated_angular_acceleration;
+                    omega = rotated_omega;
                 }
             }
-            alpha[i] = angular_acceleration;
+            angular_accelerations[i] = angular_acceleration;
             let center = link.center_of_mass();
-            link_acceleration[i] = acceleration
+            link_accelerations[i] = acceleration
                 + angular_acceleration.cross(center)
                 + omega.cross(&omega.cross(center));
             transforms[i] = transform;
@@ -321,13 +309,13 @@ impl<const N: usize> RobotArm<N> {
                 (UnitQuaternion::identity(), Vector3::zeros())
             };
             let child_force = next_rotation * load.force;
-            let force = child_force + link.mass() * link_acceleration[i];
+            let force = child_force + link.mass() * link_accelerations[i];
             let torque = next_rotation * load.torque
                 + next_translation.cross(&child_force)
                 + link
                     .center_of_mass()
-                    .cross(&(link.mass() * link_acceleration[i]))
-                + link.inertia() * alpha[i];
+                    .cross(&(link.mass() * link_accelerations[i]))
+                + link.inertia() * angular_accelerations[i];
             load = Wrench::new(torque, force);
             joint_force[i] = link.active_force(load);
         }
@@ -384,6 +372,44 @@ impl<const N: usize> RobotArm<N> {
             .links
             .iter()
             .fold(Frame::identity(), |frame, link| frame * link.frame(0.0));
+    }
+
+    fn end_acceleration(
+        &self,
+        q: &JointVector<N>,
+        qd: &JointVector<N>,
+        mut joint_acceleration_at: impl FnMut(usize) -> f64,
+    ) -> Motion {
+        let mut transform = Frame::identity();
+        let mut angular_velocity = Vector3::zeros();
+        let mut angular_acceleration = Vector3::zeros();
+        let mut linear_acceleration = Vector3::zeros();
+
+        for i in 0..N {
+            let parent_origin = transform.translation.vector;
+            transform *= self.links[i].frame(q[i]);
+            let offset = transform.translation.vector - parent_origin;
+            let axis = transform.rotation * self.links[i].axis().as_ref();
+            let joint_acceleration = joint_acceleration_at(i);
+
+            linear_acceleration += angular_acceleration.cross(&offset)
+                + angular_velocity.cross(&angular_velocity.cross(&offset));
+
+            match self.links[i].kind() {
+                JointKind::Revolute => {
+                    angular_acceleration +=
+                        axis * joint_acceleration + angular_velocity.cross(&axis) * qd[i];
+                    angular_velocity += axis * qd[i];
+                }
+                JointKind::Prismatic => {
+                    linear_acceleration +=
+                        axis * joint_acceleration + 2.0 * qd[i] * angular_velocity.cross(&axis);
+                }
+                JointKind::Fixed => {}
+            }
+        }
+
+        Motion::new(angular_acceleration, linear_acceleration)
     }
 }
 
