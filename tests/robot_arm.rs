@@ -136,7 +136,8 @@ fn urdf_rs_loads_test_arm_into_fixed_size_model() {
 fn forward_kinematics_and_jacobian_agree_with_finite_difference() {
     let arm = test_arm();
     let q = JointVector::<4>::new(0.147607, 1.014764, -1.840751, 0.825987);
-    let jacobian = arm.jacobian(&q);
+    let (end, jacobian) = arm.forward_kinematics_and_jacobian(&q);
+    assert_relative_eq!(end, arm.forward_kinematics(&q), epsilon = 1.0e-12);
     let epsilon = 1.0e-7;
 
     for joint in 0..4 {
@@ -201,6 +202,23 @@ fn velocity_is_jacobian_times_joint_velocity() {
         3.15166559e-2,
     );
     assert_relative_eq!(velocity.to_vector(), expected, epsilon = 1.0e-8);
+
+    let base = Isometry3::from_parts(
+        Translation3::new(0.3, -0.2, 0.5),
+        UnitQuaternion::from_euler_angles(0.2, -0.4, 0.1),
+    );
+    let tool = Isometry3::translation(0.1, -0.03, 0.2);
+    let tool_jacobian_velocity = arm.jacobian_with_tool(&q, &tool) * qd;
+    let expected_with_frames = Motion::new(
+        base.rotation * tool_jacobian_velocity.fixed_rows::<3>(0).into_owned(),
+        base.rotation * tool_jacobian_velocity.fixed_rows::<3>(3).into_owned(),
+    );
+    assert_relative_eq!(
+        arm.forward_velocity_kinematics(&q, &qd, &base, &tool)
+            .to_vector(),
+        expected_with_frames.to_vector(),
+        epsilon = 1.0e-12
+    );
 }
 
 #[test]

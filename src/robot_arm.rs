@@ -87,20 +87,20 @@ impl<const N: usize> RobotArm<N> {
             })
     }
 
-    /// Geometric Jacobian in the base frame, angular rows first.
-    pub fn jacobian(&self, q: &JointVector<N>) -> Jacobian<N> {
-        let end = self.forward_kinematics(q);
+    /// Computes the end frame and base-frame geometric Jacobian in one chain traversal.
+    pub fn forward_kinematics_and_jacobian(&self, q: &JointVector<N>) -> (Frame, Jacobian<N>) {
         let mut transform = Frame::identity();
+        let mut origins: [Vector3<f64>; N] = std::array::from_fn(|_| Vector3::zeros());
         let mut jacobian: Jacobian<N> = Jacobian::zeros();
+
         for i in 0..N {
             transform *= self.links[i].frame(q[i]);
             let axis = transform.rotation * self.links[i].axis().as_ref();
+
             match self.links[i].kind() {
                 JointKind::Revolute => {
+                    origins[i] = transform.translation.vector;
                     jacobian.fixed_view_mut::<3, 1>(0, i).copy_from(&axis);
-                    let linear =
-                        axis.cross(&(end.translation.vector - transform.translation.vector));
-                    jacobian.fixed_view_mut::<3, 1>(3, i).copy_from(&linear);
                 }
                 JointKind::Prismatic => {
                     jacobian.fixed_view_mut::<3, 1>(3, i).copy_from(&axis);
@@ -108,13 +108,27 @@ impl<const N: usize> RobotArm<N> {
                 JointKind::Fixed => {}
             }
         }
-        jacobian
+
+        let end_origin = transform.translation.vector;
+        for (i, origin) in origins.iter().enumerate() {
+            if self.links[i].kind() == JointKind::Revolute {
+                let axis = jacobian.fixed_view::<3, 1>(0, i).into_owned();
+                let linear = axis.cross(&(end_origin - origin));
+                jacobian.fixed_view_mut::<3, 1>(3, i).copy_from(&linear);
+            }
+        }
+
+        (transform, jacobian)
+    }
+
+    /// Geometric Jacobian in the base frame, angular rows first.
+    pub fn jacobian(&self, q: &JointVector<N>) -> Jacobian<N> {
+        self.forward_kinematics_and_jacobian(q).1
     }
 
     pub fn jacobian_with_tool(&self, q: &JointVector<N>, tool: &Frame) -> Jacobian<N> {
-        let end = self.forward_kinematics(q);
+        let (end, mut jacobian) = self.forward_kinematics_and_jacobian(q);
         let offset_world = end.rotation * tool.translation.vector;
-        let mut jacobian = self.jacobian(q);
         for i in 0..N {
             let angular = jacobian.fixed_view::<3, 1>(0, i).into_owned();
             let shifted =
@@ -142,17 +156,10 @@ impl<const N: usize> RobotArm<N> {
         base: &Frame,
         tool: &Frame,
     ) -> Motion {
-        let mut jacobian = self.jacobian_with_tool(q, tool);
-        for i in 0..N {
-            let angular = base.rotation * jacobian.fixed_view::<3, 1>(0, i).into_owned();
-            let linear = base.rotation * jacobian.fixed_view::<3, 1>(3, i).into_owned();
-            jacobian.fixed_view_mut::<3, 1>(0, i).copy_from(&angular);
-            jacobian.fixed_view_mut::<3, 1>(3, i).copy_from(&linear);
-        }
-        let vector = jacobian * qd;
+        let vector = self.jacobian_with_tool(q, tool) * qd;
         Motion::new(
-            vector.fixed_rows::<3>(0).into_owned(),
-            vector.fixed_rows::<3>(3).into_owned(),
+            base.rotation * vector.fixed_rows::<3>(0).into_owned(),
+            base.rotation * vector.fixed_rows::<3>(3).into_owned(),
         )
     }
 

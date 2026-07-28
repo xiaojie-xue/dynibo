@@ -49,6 +49,7 @@ URDF 解析和名称查找只在模型构建阶段分配内存，不进入实时
 | 接口 | 结果 |
 |---|---|
 | `forward_kinematics(q)` | 末端位姿 |
+| `forward_kinematics_and_jacobian(q)` | 单次遍历同时得到末端位姿和 Jacobian |
 | `jacobian(q)` | 基座坐标系几何 Jacobian |
 | `jacobian_with_base(q, base)` | 旋转到指定基座坐标系的 Jacobian |
 | `jacobian_with_tool(q, tool)` | 平移到工具点的 Jacobian |
@@ -94,6 +95,24 @@ C++ 数值回归结果可以复现。因此，下述重力和 RNEA benchmark 比
 和关节输入，对比 Dyno 与 Pinocchio 的正运动学、末端关节 Jacobian、重力和 RNEA。
 模型构建及 URDF 解析均在计时区间之外；两边都会复用模型和计算工作区。此外还会
 单独测量一次空操作，用来报告 Rust 到 C ABI 的固定调用开销。
+
+以下冒烟结果使用 `--quick` 在 Intel Core i9-14900K 上测得，工具链为 rustc 1.97.1、
+Pinocchio 3.9.0；数值越小越好。它们用于展示当前机器上的性能趋势，不应视为跨平台
+或具有严格统计意义的性能结论。
+
+| 操作 | 自由度 | Dyno | Pinocchio | Dyno 加速比 |
+|---|---:|---:|---:|---:|
+| 正运动学 | 4 | 66.6 ns | 81.7 ns | 1.23x |
+| 末端 Jacobian | 4 | 80.9 ns | 137.6 ns | 1.70x |
+| 重力 | 4 | 92.0 ns | 194.7 ns | 2.12x |
+| RNEA | 4 | 148.0 ns | 311.5 ns | 2.11x |
+| 正运动学 | 40 | 658.1 ns | 822.0 ns | 1.25x |
+| 末端 Jacobian | 40 | 762.3 ns | 1.354 µs | 1.78x |
+| 重力 | 40 | 951.3 ns | 1.835 µs | 1.93x |
+| RNEA | 40 | 1.464 µs | 3.151 µs | 2.15x |
+
+测得的 C ABI 空操作开销约为 0.704 ns。如前所述，由于兼容内核与 Pinocchio 使用
+不同的数值约定，重力和 RNEA 两组数据只比较执行时间。
 
 只有启用 `pinocchio-bench` feature 时才需要安装 Pinocchio。C++ 桥接、`cc`、
 `pkg-config` 和 Criterion 都不会成为 Dyno 常规构建的运行时依赖。例如，在 x86-64
