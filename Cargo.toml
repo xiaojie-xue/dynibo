@@ -1,0 +1,17 @@
+[package]
+name = "dyno"
+version = "0.1.0"
+edition = "2024"
+description = "Fixed-size robot-arm kinematics and dynamics in Rust"
+license = "Proprietary"
+
+[dependencies]
+nalgebra = "0.34.1"
+urdf-rs = "0.9.0"
+
+[dev-dependencies]
+approx = "0.5.1"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"

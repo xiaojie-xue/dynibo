@@ -1,0 +1,15 @@
+# Rust build output
+/target/
+**/*.rs.bk
+*.profraw
+
+# IDE and editor state
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db

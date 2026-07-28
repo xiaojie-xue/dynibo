@@ -1,0 +1,56 @@
+<?xml version="1.0"?>
+<robot name="test_arm">
+  <link name="test_base_link"/>
+  <link name="test_link_1">
+    <inertial>
+      <origin rpy="0 0 0" xyz="-0.000384 -0.053925 0.104514"/>
+      <mass value="9.442"/>
+      <inertia ixx="0.039273535" ixy="0.000103302" ixz="0.000001826" iyy="0.025432526" iyz="-0.001702912" izz="0.037636201"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_1" type="revolute">
+    <parent link="test_base_link"/><child link="test_link_1"/>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <limit effort="1000" lower="-0.610865238198015" upper="0.610865238198015" velocity="180"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <link name="test_link_2">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.256168 0.000027 0.129994"/>
+      <mass value="7.016"/>
+      <inertia ixx="0.016533114" ixy="0.000002097" ixz="0.006290504" iyy="0.096957399" iyz="-0.000005506" izz="0.093672064"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_2" type="revolute">
+    <parent link="test_link_1"/><child link="test_link_2"/>
+    <origin rpy="1.5707963267948966 0 0" xyz="0 0 0.108"/>
+    <limit effort="1000" lower="-0.523598775598299" upper="2.61799387799149" velocity="180"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <link name="test_link_3">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.231753 -0.000018 0.162294"/>
+      <mass value="4.950"/>
+      <inertia ixx="0.009898399" ixy="-0.000036003" ixz="-0.007772586" iyy="0.063871065" iyz="0.000001262" izz="0.062140634"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_3" type="revolute">
+    <parent link="test_link_2"/><child link="test_link_3"/>
+    <origin rpy="0 0 0" xyz="0.32 0 0"/>
+    <limit effort="1000" lower="-2.70526034059121" upper="2.70526034059121" velocity="180"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <link name="test_link_4">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.003015 0.000107 0.050313"/>
+      <mass value="2.422"/>
+      <inertia ixx="0.002443319" ixy="-0.000029694" ixz="-0.000014008" iyy="0.004903987" iyz="-0.000000529" izz="0.00004853424"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_4" type="revolute">
+    <parent link="test_link_3"/><child link="test_link_4"/>
+    <origin rpy="0 0 0" xyz="0.30 0 0"/>
+    <limit effort="1000" lower="-2.6179938779914944" upper="2.617993877991494" velocity="180"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+</robot>
