@@ -5,12 +5,26 @@ edition = "2024"
 description = "Fixed-size robot-arm kinematics and dynamics in Rust"
 license = "Proprietary"
 
+[features]
+default = []
+pinocchio-bench = ["dep:cc", "dep:pkg-config"]
+
 [dependencies]
 nalgebra = "0.34.1"
 urdf-rs = "0.9.0"
 
 [dev-dependencies]
 approx = "0.5.1"
+criterion = "0.7.0"
+
+[build-dependencies]
+cc = { version = "1.2.49", optional = true }
+pkg-config = { version = "0.3.32", optional = true }
+
+[[bench]]
+name = "pinocchio"
+harness = false
+required-features = ["pinocchio-bench"]
 
 [profile.release]
 codegen-units = 1

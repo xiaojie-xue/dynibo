@@ -10,8 +10,9 @@
 
 - **轻量运行时：** 计算路径使用固定尺寸、基于栈的向量、矩阵和工作数组。FK、
   Jacobian、Jacobian 导数、重力及逆动力学计算期间不进行堆内存分配。
-- **可靠行为：** 库自身不包含 `unsafe` 代码；遇到无效模型会明确返回错误；解析
-  运动学通过有限差分和数值回归用例共同验证。
+- **可靠行为：** 运行时库自身不包含 `unsafe` 代码；遇到无效模型会明确返回错误；
+  解析运动学通过有限差分和数值回归用例共同验证。可选 Pinocchio benchmark 所需的
+  C ABI 被隔离在 benchmark harness 内。
 - **基于 Rust：** 使用 const generics 将关节数量编码进类型，并通过所有权和借用
   明确区分模型数据与计算输入。
 
@@ -84,8 +85,28 @@ let jacobian = arm.jacobian(&q);
 作为后续独立扩展。
 
 兼容动力学内核有意保留已有的数值约定，包括正 Z 方向重力和既有的惯量积符号，使
-C++ 数值回归结果可以复现。在与 Pinocchio 进行性能比较前，建议单独增加遵循标准
-刚体动力学约定的计算内核，并完成交叉验证后再替换兼容行为。
+C++ 数值回归结果可以复现。因此，下述重力和 RNEA benchmark 比较的是执行开销，
+并不表示其数值结果与采用标准刚体动力学约定的 Pinocchio 完全等价。
+
+## Pinocchio 性能基准
+
+可选的 Criterion benchmark 分别在 `N=4` 和 `N=40` 下，使用两边完全相同的 URDF
+和关节输入，对比 Dyno 与 Pinocchio 的正运动学、末端关节 Jacobian、重力和 RNEA。
+模型构建及 URDF 解析均在计时区间之外；两边都会复用模型和计算工作区。此外还会
+单独测量一次空操作，用来报告 Rust 到 C ABI 的固定调用开销。
+
+只有启用 `pinocchio-bench` feature 时才需要安装 Pinocchio。C++ 桥接、`cc`、
+`pkg-config` 和 Criterion 都不会成为 Dyno 常规构建的运行时依赖。例如，在 x86-64
+Linux 的 ROS Humble 环境中执行：
+
+```bash
+export PKG_CONFIG_PATH=/opt/ros/humble/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH
+export LD_LIBRARY_PATH=/opt/ros/humble/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+cargo bench --features pinocchio-bench --bench pinocchio
+```
+
+其他 ROS 发行版或 CPU 架构需要相应调整路径。可添加 `-- --quick` 做快速冒烟验证；
+需要正式比较时应省略该参数。
 
 ## 验证
 
@@ -93,6 +114,8 @@ C++ 数值回归结果可以复现。在与 Pinocchio 进行性能比较前，�
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
+# 已安装 Pinocchio 时：
+cargo clippy --features pinocchio-bench --bench pinocchio -- -D warnings
 ```
 
 集成测试覆盖通用四轴测试 URDF、Jacobian 导数、加速度、逆动力学参考值、

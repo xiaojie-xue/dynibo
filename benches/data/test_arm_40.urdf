@@ -1,0 +1,565 @@
+<?xml version="1.0"?>
+<robot name="test_arm_40">
+  <link name="test_base_link"/>
+  <link name="test_link_1">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_1" type="revolute">
+    <parent link="test_base_link"/>
+    <child link="test_link_1"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_2">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_2" type="revolute">
+    <parent link="test_link_1"/>
+    <child link="test_link_2"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_3">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_3" type="revolute">
+    <parent link="test_link_2"/>
+    <child link="test_link_3"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_4">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_4" type="revolute">
+    <parent link="test_link_3"/>
+    <child link="test_link_4"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_5">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_5" type="revolute">
+    <parent link="test_link_4"/>
+    <child link="test_link_5"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_6">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_6" type="revolute">
+    <parent link="test_link_5"/>
+    <child link="test_link_6"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_7">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_7" type="revolute">
+    <parent link="test_link_6"/>
+    <child link="test_link_7"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_8">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_8" type="revolute">
+    <parent link="test_link_7"/>
+    <child link="test_link_8"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_9">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_9" type="revolute">
+    <parent link="test_link_8"/>
+    <child link="test_link_9"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_10">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_10" type="revolute">
+    <parent link="test_link_9"/>
+    <child link="test_link_10"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_11">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_11" type="revolute">
+    <parent link="test_link_10"/>
+    <child link="test_link_11"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_12">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_12" type="revolute">
+    <parent link="test_link_11"/>
+    <child link="test_link_12"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_13">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_13" type="revolute">
+    <parent link="test_link_12"/>
+    <child link="test_link_13"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_14">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_14" type="revolute">
+    <parent link="test_link_13"/>
+    <child link="test_link_14"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_15">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_15" type="revolute">
+    <parent link="test_link_14"/>
+    <child link="test_link_15"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_16">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_16" type="revolute">
+    <parent link="test_link_15"/>
+    <child link="test_link_16"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_17">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_17" type="revolute">
+    <parent link="test_link_16"/>
+    <child link="test_link_17"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_18">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_18" type="revolute">
+    <parent link="test_link_17"/>
+    <child link="test_link_18"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_19">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_19" type="revolute">
+    <parent link="test_link_18"/>
+    <child link="test_link_19"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_20">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_20" type="revolute">
+    <parent link="test_link_19"/>
+    <child link="test_link_20"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_21">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_21" type="revolute">
+    <parent link="test_link_20"/>
+    <child link="test_link_21"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_22">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_22" type="revolute">
+    <parent link="test_link_21"/>
+    <child link="test_link_22"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_23">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_23" type="revolute">
+    <parent link="test_link_22"/>
+    <child link="test_link_23"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_24">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_24" type="revolute">
+    <parent link="test_link_23"/>
+    <child link="test_link_24"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_25">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_25" type="revolute">
+    <parent link="test_link_24"/>
+    <child link="test_link_25"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_26">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_26" type="revolute">
+    <parent link="test_link_25"/>
+    <child link="test_link_26"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_27">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_27" type="revolute">
+    <parent link="test_link_26"/>
+    <child link="test_link_27"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_28">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_28" type="revolute">
+    <parent link="test_link_27"/>
+    <child link="test_link_28"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_29">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_29" type="revolute">
+    <parent link="test_link_28"/>
+    <child link="test_link_29"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_30">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_30" type="revolute">
+    <parent link="test_link_29"/>
+    <child link="test_link_30"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_31">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_31" type="revolute">
+    <parent link="test_link_30"/>
+    <child link="test_link_31"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_32">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_32" type="revolute">
+    <parent link="test_link_31"/>
+    <child link="test_link_32"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_33">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_33" type="revolute">
+    <parent link="test_link_32"/>
+    <child link="test_link_33"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_34">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_34" type="revolute">
+    <parent link="test_link_33"/>
+    <child link="test_link_34"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_35">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_35" type="revolute">
+    <parent link="test_link_34"/>
+    <child link="test_link_35"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_36">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_36" type="revolute">
+    <parent link="test_link_35"/>
+    <child link="test_link_36"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_37">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_37" type="revolute">
+    <parent link="test_link_36"/>
+    <child link="test_link_37"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_38">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_38" type="revolute">
+    <parent link="test_link_37"/>
+    <child link="test_link_38"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_39">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_39" type="revolute">
+    <parent link="test_link_38"/>
+    <child link="test_link_39"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+  <link name="test_link_40">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.05 0 0"/>
+      <mass value="0.5"/>
+      <inertia ixx="0.002" ixy="0" ixz="0" iyy="0.003" iyz="0" izz="0.004"/>
+    </inertial>
+  </link>
+  <joint name="test_joint_40" type="revolute">
+    <parent link="test_link_39"/>
+    <child link="test_link_40"/>
+    <origin rpy="0 0 0" xyz="0.1 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="100" lower="-3.141592653589793" upper="3.141592653589793" velocity="10"/>
+  </joint>
+</robot>
+

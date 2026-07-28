@@ -12,9 +12,11 @@ for URDF parsing.
 - **Lightweight runtime:** the compute path uses fixed-size, stack-backed
   vectors, matrices, and work arrays. It performs no heap allocation during FK,
   Jacobian, Jacobian-derivative, gravity, or inverse-dynamics evaluation.
-- **Reliable behavior:** the crate contains no project-owned `unsafe` code,
-  rejects invalid models explicitly, and verifies analytical kinematics against
-  finite differences as well as numerical regression cases.
+- **Reliable behavior:** the runtime library contains no project-owned `unsafe`
+  code, rejects invalid models explicitly, and verifies analytical kinematics
+  against finite differences as well as numerical regression cases. The
+  optional Pinocchio benchmark isolates its required C ABI in the benchmark
+  harness.
 - **Rust-based:** const generics make the joint count part of the type, while
   ownership and borrowing keep model data and calculation inputs explicit.
 
@@ -90,9 +92,32 @@ separate extension.
 
 The compatibility dynamics intentionally preserve legacy numerical conventions,
 including positive-Z gravity and the original product-of-inertia signs, so the
-C++ regression values remain reproducible. A future Pinocchio-comparison kernel
-should be introduced separately and validated against standard rigid-body
-dynamics before replacing compatibility behavior.
+C++ regression values remain reproducible. Consequently, the gravity and RNEA
+benchmarks below compare execution cost, not numerical equivalence with
+Pinocchio's standard rigid-body dynamics conventions.
+
+## Pinocchio benchmark
+
+The optional Criterion benchmark compares Dyno and Pinocchio at `N=4` and
+`N=40`, using the same URDF and joint inputs for each implementation. It covers
+forward kinematics, end-joint Jacobian, gravity, and RNEA. Model construction
+and URDF parsing are outside the timed region; both implementations reuse their
+model and calculation workspaces. A separate no-op measurement reports the
+fixed Rust-to-C ABI call overhead.
+
+Pinocchio is only needed when the `pinocchio-bench` feature is selected. The
+bridge, `cc`, `pkg-config`, and Criterion do not become runtime dependencies of
+normal Dyno builds. For a ROS installation such as Humble on x86-64 Linux:
+
+```bash
+export PKG_CONFIG_PATH=/opt/ros/humble/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH
+export LD_LIBRARY_PATH=/opt/ros/humble/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+cargo bench --features pinocchio-bench --bench pinocchio
+```
+
+Adjust the ROS distribution and architecture paths for the local installation.
+Use `-- --quick` for a short smoke run; omit it for measurements intended for
+comparison.
 
 ## Verification
 
@@ -100,6 +125,8 @@ dynamics before replacing compatibility behavior.
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
+# With Pinocchio installed:
+cargo clippy --features pinocchio-bench --bench pinocchio -- -D warnings
 ```
 
 The integration tests cover a generic four-axis test URDF, Jacobian derivatives,
