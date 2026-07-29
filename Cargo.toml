@@ -3,7 +3,7 @@ name = "dyno"
 version = "0.1.0"
 edition = "2024"
 description = "Serial robot-arm kinematics and dynamics with fixed-size calculation types"
-license = "Proprietary"
+license = "MIT"
 
 [features]
 default = []
