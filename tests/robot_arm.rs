@@ -2,19 +2,23 @@
 // by the original C++ tests instead of replacing them with exact PI fractions.
 #![allow(clippy::approx_constant)]
 
-use std::f64::consts::{FRAC_PI_2, PI};
+use std::{
+    f64::consts::{FRAC_PI_2, PI},
+    path::PathBuf,
+};
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
-use dyno::{
-    Error, Frame, JointKind, JointLimit, JointVector, Motion, PassiveJointMap, RobotArm, RobotLink,
-    RobotWithPassiveJoints, Wrench,
-};
+use dyno::{Error, Frame, JointKind, JointLimit, JointVector, Motion, RobotArm, RobotLink, Wrench};
 use nalgebra::{Isometry3, Matrix3, Translation3, UnitQuaternion, Vector3};
 
-const TEST_ARM_URDF: &str = include_str!("data/test_arm.urdf");
-
 fn test_arm() -> RobotArm {
-    RobotArm::from_urdf_str(TEST_ARM_URDF).expect("test URDF must load")
+    RobotArm::from_urdf(urdf_path("test_arm.urdf")).expect("test URDF must load")
+}
+
+fn urdf_path(file_name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/data")
+        .join(file_name)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -118,7 +122,7 @@ fn urdf_rs_loads_test_arm_and_checks_calculation_size() {
     assert_eq!(arm.name(), "test_arm");
     assert_eq!(arm.links().len(), 4);
     assert_eq!(arm.links()[0].name(), "test_link_1");
-    assert_eq!(arm.movable_joint_count(), 4);
+    assert_eq!(arm.joint_count(), 4);
     assert_abs_diff_eq!(arm.links()[1].mass(), 7.016);
     assert_abs_diff_eq!(arm.links()[1].origin().translation.vector.z, 0.108);
 
@@ -135,11 +139,10 @@ fn urdf_rs_loads_test_arm_and_checks_calculation_size() {
 }
 
 #[test]
-fn forward_kinematics_and_jacobian_agree_with_finite_difference() {
+fn jacobian_agrees_with_forward_kinematics_finite_difference() {
     let arm = test_arm();
     let q = JointVector::<4>::new(0.147607, 1.014764, -1.840751, 0.825987);
-    let (end, jacobian) = arm.forward_kinematics_and_jacobian(&q).unwrap();
-    assert_relative_eq!(end, arm.forward_kinematics(&q).unwrap(), epsilon = 1.0e-12);
+    let jacobian = arm.jacobian(&q).unwrap();
     let epsilon = 1.0e-7;
 
     for joint in 0..4 {
@@ -212,7 +215,18 @@ fn velocity_is_jacobian_times_joint_velocity() {
         UnitQuaternion::from_euler_angles(0.2, -0.4, 0.1),
     );
     let tool = Isometry3::translation(0.1, -0.03, 0.2);
-    let tool_jacobian_velocity = arm.jacobian_with_tool(&q, &tool).unwrap() * qd;
+    let end = arm.forward_kinematics(&q).unwrap();
+    let mut tool_jacobian = arm.jacobian(&q).unwrap();
+    let offset_world = end.rotation * tool.translation.vector;
+    for i in 0..4 {
+        let angular = tool_jacobian.fixed_view::<3, 1>(0, i).into_owned();
+        let shifted =
+            tool_jacobian.fixed_view::<3, 1>(3, i).into_owned() + angular.cross(&offset_world);
+        tool_jacobian
+            .fixed_view_mut::<3, 1>(3, i)
+            .copy_from(&shifted);
+    }
+    let tool_jacobian_velocity = tool_jacobian * qd;
     let expected_with_frames = Motion::new(
         base.rotation * tool_jacobian_velocity.fixed_rows::<3>(0).into_owned(),
         base.rotation * tool_jacobian_velocity.fixed_rows::<3>(3).into_owned(),
@@ -227,7 +241,7 @@ fn velocity_is_jacobian_times_joint_velocity() {
 }
 
 #[test]
-fn jacobian_dot_and_forward_acceleration_match_finite_difference() {
+fn forward_acceleration_matches_finite_difference() {
     let arm = test_arm();
     let q = JointVector::<4>::new(0.2, 1.1, -0.7, 0.4);
     let qd = JointVector::<4>::new(-0.3, 0.5, -0.2, 0.8);
@@ -235,57 +249,21 @@ fn jacobian_dot_and_forward_acceleration_match_finite_difference() {
     let numerical = (arm.jacobian(&(q + epsilon * qd)).unwrap()
         - arm.jacobian(&(q - epsilon * qd)).unwrap())
         / (2.0 * epsilon);
-    let analytical = arm.jacobian_dot(&q, &qd).unwrap();
-    assert_relative_eq!(analytical, numerical, epsilon = 2.0e-8);
+    let qdd = JointVector::<4>::new(0.7, -0.4, 0.1, 0.3);
     assert_relative_eq!(
-        arm.jacobian_dot_times_velocity(&q, &qd)
+        arm.forward_acceleration_kinematics(&q, &qd, &qdd)
             .unwrap()
             .to_vector(),
-        analytical * qd,
-        epsilon = 1.0e-12
+        arm.jacobian(&q).unwrap() * qdd + numerical * qd,
+        epsilon = 2.0e-8
     );
 
-    let mixed_arm = RobotArm::from_links(
-        "mixed",
-        [
-            link(
-                "rotation",
-                JointKind::Revolute,
-                [0.0; 3],
-                [0.0; 3],
-                [0.0, 0.0, 1.0],
-                1.0,
-                [0.2, 0.0, 0.0],
-            ),
-            link(
-                "translation",
-                JointKind::Prismatic,
-                [1.0, 0.0, 0.0],
-                [0.0; 3],
-                [1.0, 0.0, 0.0],
-                1.0,
-                [0.1, 0.0, 0.0],
-            ),
-        ],
-    );
+    let mixed_arm = RobotArm::from_urdf(urdf_path("mixed_arm.urdf")).unwrap();
     let mixed_q = JointVector::<2>::new(0.4, 0.2);
     let mixed_qd = JointVector::<2>::new(-0.3, 0.5);
     let mixed_numerical = (mixed_arm.jacobian(&(mixed_q + epsilon * mixed_qd)).unwrap()
         - mixed_arm.jacobian(&(mixed_q - epsilon * mixed_qd)).unwrap())
         / (2.0 * epsilon);
-    assert_relative_eq!(
-        mixed_arm.jacobian_dot(&mixed_q, &mixed_qd).unwrap(),
-        mixed_numerical,
-        epsilon = 2.0e-8
-    );
-    assert_relative_eq!(
-        mixed_arm
-            .jacobian_dot_times_velocity(&mixed_q, &mixed_qd)
-            .unwrap()
-            .to_vector(),
-        mixed_numerical * mixed_qd,
-        epsilon = 2.0e-8
-    );
     let mixed_qdd = JointVector::<2>::new(0.7, -0.4);
     assert_relative_eq!(
         mixed_arm
@@ -310,33 +288,11 @@ fn jacobian_dot_and_forward_acceleration_match_finite_difference() {
 }
 
 #[test]
-fn gravity_torque_matches_original_two_link_cases() {
-    let arm = RobotArm::from_links(
-        "test_gravity",
-        [
-            link(
-                "link1",
-                JointKind::Revolute,
-                [0.0; 3],
-                [0.0; 3],
-                [0.0, 0.0, 1.0],
-                1.0,
-                [0.0, 0.5, 0.0],
-            ),
-            link(
-                "link2",
-                JointKind::Revolute,
-                [1.0, 0.0, 0.0],
-                [FRAC_PI_2, 0.0, 0.0],
-                [0.0, 0.0, 1.0],
-                1.0,
-                [0.0, 0.5, 0.0],
-            ),
-        ],
-    );
+fn gravity_matches_original_two_link_cases() {
+    let arm = RobotArm::from_urdf(urdf_path("gravity_arm.urdf")).unwrap();
     let q = JointVector::<2>::new(FRAC_PI_2, FRAC_PI_2);
     let (tau, _) = arm
-        .gravity_torque(&q, &Frame::identity(), Wrench::zeros())
+        .gravity(&q, &Frame::identity(), Wrench::zeros())
         .unwrap();
     assert_abs_diff_eq!(tau[0], 0.0, epsilon = 0.1);
     assert_abs_diff_eq!(tau[1], -4.903325, epsilon = 0.1);
@@ -346,7 +302,7 @@ fn gravity_torque_matches_original_two_link_cases() {
         UnitQuaternion::from_euler_angles(FRAC_PI_2, 0.0, 0.0),
     );
     let (tau, _) = arm
-        .gravity_torque(&JointVector::<2>::zeros(), &vertical_base, Wrench::zeros())
+        .gravity(&JointVector::<2>::zeros(), &vertical_base, Wrench::zeros())
         .unwrap();
     assert_abs_diff_eq!(tau[0], 9.80665, epsilon = 0.1);
     assert_abs_diff_eq!(tau[1], 0.0, epsilon = 0.1);
@@ -416,78 +372,4 @@ fn inverse_dynamics_matches_test_arm_numeric_reference() {
             .unwrap();
         assert_relative_eq!(tau, expected, epsilon = epsilon);
     }
-}
-
-#[test]
-fn joint_position_saturation_is_element_wise() {
-    let lower = JointVector::<4>::new(-1.0, -2.0, -3.0, -4.0);
-    let upper = JointVector::<4>::new(1.0, 2.0, 3.0, 4.0);
-    let input = JointVector::<4>::new(-2.0, -1.0, 5.0, 3.0);
-    assert_eq!(
-        RobotArm::saturate_joint_position(&lower, &upper, &input),
-        JointVector::<4>::new(-1.0, -1.0, 3.0, 3.0)
-    );
-}
-
-#[derive(Clone, Copy, Debug)]
-struct MimicMap;
-
-impl PassiveJointMap<1, 2> for MimicMap {
-    fn expand(&self, active: &JointVector<1>) -> JointVector<2> {
-        JointVector::<2>::new(active[0], 2.0 * active[0])
-    }
-
-    fn reduce_force(&self, all: &JointVector<2>) -> JointVector<1> {
-        // tau_active = A^T tau_all for q_all = A q_active.
-        JointVector::<1>::new(all[0] + 2.0 * all[1])
-    }
-}
-
-#[test]
-fn passive_joint_adapter_expands_motion_and_reduces_force() {
-    let arm = RobotArm::from_links(
-        "mimic",
-        [
-            link(
-                "active",
-                JointKind::Revolute,
-                [0.0; 3],
-                [0.0; 3],
-                [0.0, 0.0, 1.0],
-                1.0,
-                [0.5, 0.0, 0.0],
-            ),
-            link(
-                "passive",
-                JointKind::Revolute,
-                [1.0, 0.0, 0.0],
-                [0.0; 3],
-                [0.0, 0.0, 1.0],
-                1.0,
-                [0.5, 0.0, 0.0],
-            ),
-        ],
-    );
-    let expected_arm = arm.clone();
-    let passive = RobotWithPassiveJoints::new(arm, MimicMap).unwrap();
-    let q = JointVector::<1>::new(0.2);
-    assert_relative_eq!(
-        passive.forward_kinematics(&q).unwrap(),
-        expected_arm
-            .forward_kinematics(&MimicMap.expand(&q))
-            .unwrap(),
-        epsilon = 1.0e-12
-    );
-
-    let (all_force, _) = expected_arm
-        .gravity_torque(&MimicMap.expand(&q), &Frame::identity(), Wrench::zeros())
-        .unwrap();
-    let (active_force, _) = passive
-        .gravity_torque(&q, &Frame::identity(), Wrench::zeros())
-        .unwrap();
-    assert_relative_eq!(
-        active_force,
-        MimicMap.reduce_force(&all_force),
-        epsilon = 1.0e-12
-    );
 }

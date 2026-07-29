@@ -1,51 +1,29 @@
 use std::path::Path;
 
-use nalgebra::{DVector, Isometry3, Translation3, UnitQuaternion, Vector3};
+use nalgebra::{UnitQuaternion, Vector3};
 
 use crate::{
     Error, Frame, Jacobian, JointKind, JointVector, Motion, Result, RobotLink, Wrench,
     urdf::serial_links,
 };
 
-pub const GRAVITY: f64 = 9.80665;
+const GRAVITY: f64 = 9.80665;
 
 /// Runtime-sized serial robot model with fixed-size calculation inputs and outputs.
 #[derive(Clone, Debug)]
 pub struct RobotArm {
     name: String,
     links: Box<[RobotLink]>,
-    home_offset: Box<[f64]>,
-    home_end_frame: Frame,
 }
 
 impl RobotArm {
-    pub fn from_links<const N: usize>(name: impl Into<String>, links: [RobotLink; N]) -> Self {
-        Self::from_link_vec(name.into(), Vec::from(links))
-    }
-
-    fn from_link_vec(name: String, links: Vec<RobotLink>) -> Self {
-        let home_end_frame = links
-            .iter()
-            .fold(Frame::identity(), |frame, link| frame * link.frame(0.0));
-        let home_offset = vec![0.0; links.len()].into_boxed_slice();
-        Self {
-            name,
-            links: links.into_boxed_slice(),
-            home_offset,
-            home_end_frame,
-        }
-    }
-
-    pub fn from_urdf_str(source: &str) -> Result<Self> {
-        let robot = urdf_rs::read_from_string(source)?;
-        let links = serial_links(&robot)?;
-        Ok(Self::from_link_vec(robot.name, links))
-    }
-
-    pub fn from_urdf_file(path: impl AsRef<Path>) -> Result<Self> {
+    pub fn from_urdf(path: impl AsRef<Path>) -> Result<Self> {
         let robot = urdf_rs::read_file(path)?;
         let links = serial_links(&robot)?;
-        Ok(Self::from_link_vec(robot.name, links))
+        Ok(Self {
+            name: robot.name,
+            links: links.into_boxed_slice(),
+        })
     }
 
     pub fn name(&self) -> &str {
@@ -56,32 +34,11 @@ impl RobotArm {
         &self.links
     }
 
-    pub fn link_mut(&mut self, index: usize) -> Option<&mut RobotLink> {
-        self.links.get_mut(index)
-    }
-
-    pub fn replace_link(&mut self, index: usize, link: RobotLink) -> Option<RobotLink> {
-        if index >= self.links.len() {
-            return None;
-        }
-        let old = std::mem::replace(&mut self.links[index], link);
-        self.update_home_end_frame();
-        Some(old)
-    }
-
-    pub fn home_offset(&self) -> &[f64] {
-        &self.home_offset
-    }
-
-    pub fn home_end_frame(&self) -> Frame {
-        self.home_end_frame
-    }
-
     pub fn joint_count(&self) -> usize {
         self.links.len()
     }
 
-    pub fn validate_joint_count<const N: usize>(&self) -> Result<()> {
+    fn validate_joint_count<const N: usize>(&self) -> Result<()> {
         if self.links.len() == N {
             Ok(())
         } else {
@@ -90,13 +47,6 @@ impl RobotArm {
                 actual: N,
             })
         }
-    }
-
-    pub fn movable_joint_count(&self) -> usize {
-        self.links
-            .iter()
-            .filter(|link| link.kind() != JointKind::Fixed)
-            .count()
     }
 
     pub fn forward_kinematics<const N: usize>(&self, q: &JointVector<N>) -> Result<Frame> {
@@ -111,7 +61,7 @@ impl RobotArm {
     }
 
     /// Computes the end frame and base-frame geometric Jacobian in one chain traversal.
-    pub fn forward_kinematics_and_jacobian<const N: usize>(
+    fn forward_kinematics_and_jacobian<const N: usize>(
         &self,
         q: &JointVector<N>,
     ) -> Result<(Frame, Jacobian<N>)> {
@@ -153,11 +103,13 @@ impl RobotArm {
         Ok(self.forward_kinematics_and_jacobian(q)?.1)
     }
 
-    pub fn jacobian_with_tool<const N: usize>(
+    pub fn forward_velocity_kinematics<const N: usize>(
         &self,
         q: &JointVector<N>,
+        qd: &JointVector<N>,
+        base: &Frame,
         tool: &Frame,
-    ) -> Result<Jacobian<N>> {
+    ) -> Result<Motion> {
         let (end, mut jacobian) = self.forward_kinematics_and_jacobian(q)?;
         let offset_world = end.rotation * tool.translation.vector;
         for i in 0..N {
@@ -166,105 +118,11 @@ impl RobotArm {
                 jacobian.fixed_view::<3, 1>(3, i).into_owned() + angular.cross(&offset_world);
             jacobian.fixed_view_mut::<3, 1>(3, i).copy_from(&shifted);
         }
-        Ok(jacobian)
-    }
-
-    pub fn jacobian_with_base<const N: usize>(
-        &self,
-        q: &JointVector<N>,
-        base: &Frame,
-    ) -> Result<Jacobian<N>> {
-        let mut jacobian = self.jacobian(q)?;
-        for i in 0..N {
-            let angular = base.rotation * jacobian.fixed_view::<3, 1>(0, i).into_owned();
-            let linear = base.rotation * jacobian.fixed_view::<3, 1>(3, i).into_owned();
-            jacobian.fixed_view_mut::<3, 1>(0, i).copy_from(&angular);
-            jacobian.fixed_view_mut::<3, 1>(3, i).copy_from(&linear);
-        }
-        Ok(jacobian)
-    }
-
-    pub fn forward_velocity_kinematics<const N: usize>(
-        &self,
-        q: &JointVector<N>,
-        qd: &JointVector<N>,
-        base: &Frame,
-        tool: &Frame,
-    ) -> Result<Motion> {
-        let vector = self.jacobian_with_tool(q, tool)? * qd;
+        let vector = jacobian * qd;
         Ok(Motion::new(
             base.rotation * vector.fixed_rows::<3>(0).into_owned(),
             base.rotation * vector.fixed_rows::<3>(3).into_owned(),
         ))
-    }
-
-    /// Time derivative of the base-frame geometric Jacobian, angular rows first.
-    pub fn jacobian_dot<const N: usize>(
-        &self,
-        q: &JointVector<N>,
-        qd: &JointVector<N>,
-    ) -> Result<Jacobian<N>> {
-        self.validate_joint_count::<N>()?;
-        let mut transform = Frame::identity();
-        let mut angular_velocity = Vector3::zeros();
-        let mut origin_velocity = Vector3::zeros();
-        let mut origins: [Vector3<f64>; N] = std::array::from_fn(|_| Vector3::zeros());
-        let mut origin_velocities: [Vector3<f64>; N] = std::array::from_fn(|_| Vector3::zeros());
-        let mut axes: [Vector3<f64>; N] = std::array::from_fn(|_| Vector3::zeros());
-        let mut axis_derivatives: [Vector3<f64>; N] = std::array::from_fn(|_| Vector3::zeros());
-
-        for i in 0..N {
-            let parent_origin = transform.translation.vector;
-            let current = transform * self.links[i].frame(q[i]);
-            let offset = current.translation.vector - parent_origin;
-            let axis = current.rotation * self.links[i].axis().as_ref();
-
-            origin_velocity += angular_velocity.cross(&offset);
-            match self.links[i].kind() {
-                JointKind::Revolute => angular_velocity += axis * qd[i],
-                JointKind::Prismatic => origin_velocity += axis * qd[i],
-                JointKind::Fixed => {}
-            }
-
-            origins[i] = current.translation.vector;
-            origin_velocities[i] = origin_velocity;
-            axes[i] = axis;
-            axis_derivatives[i] = angular_velocity.cross(&axis);
-            transform = current;
-        }
-
-        let end_origin = transform.translation.vector;
-        let end_velocity = origin_velocity;
-        let mut jacobian_dot: Jacobian<N> = Jacobian::zeros();
-        for i in 0..N {
-            match self.links[i].kind() {
-                JointKind::Revolute => {
-                    jacobian_dot
-                        .fixed_view_mut::<3, 1>(0, i)
-                        .copy_from(&axis_derivatives[i]);
-                    let linear = axis_derivatives[i].cross(&(end_origin - origins[i]))
-                        + axes[i].cross(&(end_velocity - origin_velocities[i]));
-                    jacobian_dot.fixed_view_mut::<3, 1>(3, i).copy_from(&linear);
-                }
-                JointKind::Prismatic => {
-                    jacobian_dot
-                        .fixed_view_mut::<3, 1>(3, i)
-                        .copy_from(&axis_derivatives[i]);
-                }
-                JointKind::Fixed => {}
-            }
-        }
-        Ok(jacobian_dot)
-    }
-
-    /// Convective end-effector acceleration `J_dot(q, qd) * qd`.
-    pub fn jacobian_dot_times_velocity<const N: usize>(
-        &self,
-        q: &JointVector<N>,
-        qd: &JointVector<N>,
-    ) -> Result<Motion> {
-        self.validate_joint_count::<N>()?;
-        Ok(self.end_acceleration(q, qd, |_| 0.0))
     }
 
     pub fn forward_acceleration_kinematics<const N: usize>(
@@ -370,7 +228,7 @@ impl RobotArm {
     }
 
     /// Gravity joint forces and the resulting base wrench.
-    pub fn gravity_torque<const N: usize>(
+    pub fn gravity<const N: usize>(
         &self,
         q: &JointVector<N>,
         base_frame: &Frame,
@@ -399,33 +257,6 @@ impl RobotArm {
             torque[i] = self.links[i].active_force(load);
         }
         Ok((torque, wrench_to_parent(&transforms[0], load)))
-    }
-
-    pub fn joint_position_limits(&self) -> (DVector<f64>, DVector<f64>) {
-        let lower = DVector::from_iterator(
-            self.links.len(),
-            self.links.iter().map(|link| link.limit().lower),
-        );
-        let upper = DVector::from_iterator(
-            self.links.len(),
-            self.links.iter().map(|link| link.limit().upper),
-        );
-        (lower, upper)
-    }
-
-    pub fn saturate_joint_position<const N: usize>(
-        lower: &JointVector<N>,
-        upper: &JointVector<N>,
-        position: &JointVector<N>,
-    ) -> JointVector<N> {
-        JointVector::from_fn(|i, _| position[i].clamp(lower[i], upper[i]))
-    }
-
-    fn update_home_end_frame(&mut self) {
-        self.home_end_frame = self
-            .links
-            .iter()
-            .fold(Frame::identity(), |frame, link| frame * link.frame(0.0));
     }
 
     fn end_acceleration<const N: usize>(
@@ -477,9 +308,4 @@ fn wrench_to_parent(transform: &Frame, wrench: Wrench) -> Wrench {
 
 fn add_wrench(lhs: Wrench, rhs: Wrench) -> Wrench {
     Wrench::new(lhs.torque + rhs.torque, lhs.force + rhs.force)
-}
-
-#[allow(dead_code)]
-fn translation_frame(translation: Vector3<f64>) -> Frame {
-    Isometry3::from_parts(Translation3::from(translation), UnitQuaternion::identity())
 }

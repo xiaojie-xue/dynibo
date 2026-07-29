@@ -11,8 +11,8 @@ while calculation inputs and outputs remain fixed-size. It uses
 ## Design goals
 
 - **Lightweight runtime:** the compute path uses fixed-size, stack-backed
-  vectors, matrices, and work arrays. It performs no heap allocation during FK,
-  Jacobian, Jacobian-derivative, gravity, or inverse-dynamics evaluation.
+  vectors, matrices, and work arrays. It performs no heap allocation during
+  kinematics, gravity, or inverse-dynamics evaluation.
 - **Reliable behavior:** the runtime library contains no project-owned `unsafe`
   code, rejects invalid models explicitly, and verifies analytical kinematics
   against finite differences as well as numerical regression cases. The
@@ -43,43 +43,31 @@ safe-Rust implementation and is not a functional-safety certification.
 
 | Interface | Result |
 |---|---|
-| `RobotArm::from_links(name, links)` | Construct from `[RobotLink; N]` |
-| `RobotArm::from_urdf_str(source)` | Parse a URDF string |
-| `RobotArm::from_urdf_file(path)` | Parse a URDF file |
-| `name()`, `links()`, `link_mut()` | Inspect or update model data |
-| `replace_link(index, link)` | Replace one link and refresh the home pose |
+| `RobotArm::from_urdf(path)` | Construct a model from a URDF file path |
+| `name()`, `links()` | Inspect model data |
 | `joint_count()` | Return the number of joints parsed from the model |
-| `home_end_frame()` | Return the zero-position end frame |
 
-### Kinematics
+### Calculation API
 
-| Interface | Result |
+To keep the library focused and lightweight, its calculation API is limited to
+the following operations. The two inverse-kinematics entries define the planned
+scope but are not implemented yet.
+
+| Interface | Status and result |
 |---|---|
 | `forward_kinematics(q)` | End-effector frame |
-| `forward_kinematics_and_jacobian(q)` | End frame and Jacobian from one chain traversal |
 | `jacobian(q)` | Base-frame geometric Jacobian |
-| `jacobian_with_base(q, base)` | Jacobian rotated into a base frame |
-| `jacobian_with_tool(q, tool)` | Jacobian shifted to a tool point |
+| `inverse_kinematics(...)` | Planned; not implemented yet |
+| `inverse_kinematics_with_boundary(...)` | Planned; not implemented yet |
 | `forward_velocity_kinematics(q, qd, base, tool)` | End-effector spatial velocity |
-| `jacobian_dot(q, qd)` | Analytical time derivative of the Jacobian |
-| `jacobian_dot_times_velocity(q, qd)` | Direct-recursive convective acceleration `J_dot * qd` |
 | `forward_acceleration_kinematics(q, qd, qdd)` | Direct-recursive acceleration `J * qdd + J_dot * qd` |
-
-### Dynamics and joint utilities
-
-| Interface | Result |
-|---|---|
-| `gravity_torque(q, base, end_load)` | Joint gravity forces and base wrench |
+| `gravity(q, base, end_load)` | Joint gravity forces and base wrench |
 | `inverse_dynamics(...)` | Joint forces and base wrench from Newton-Euler recursion |
-| `joint_position_limits()` | Lower and upper joint-limit vectors |
-| `saturate_joint_position(lower, upper, q)` | Element-wise position clamping |
-| `PassiveJointMap` | Map active coordinates to all joints and forces back |
-| `RobotWithPassiveJoints` | Kinematics and dynamics adapter for passive joints |
 
 ```rust
 use dyno::{JointVector, RobotArm};
 
-let arm = RobotArm::from_urdf_file("test_arm.urdf")?;
+let arm = RobotArm::from_urdf("test_arm.urdf")?;
 let q = JointVector::<4>::zeros();
 let end = arm.forward_kinematics(&q)?;
 let jacobian = arm.jacobian(&q)?;

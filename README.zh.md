@@ -9,8 +9,8 @@
 
 ## 设计目标
 
-- **轻量运行时：** 计算路径使用固定尺寸、基于栈的向量、矩阵和工作数组。FK、
-  Jacobian、Jacobian 导数、重力及逆动力学计算期间不进行堆内存分配。
+- **轻量运行时：** 计算路径使用固定尺寸、基于栈的向量、矩阵和工作数组。运动学、
+  重力及逆动力学计算期间不进行堆内存分配。
 - **可靠行为：** 运行时库自身不包含 `unsafe` 代码；遇到无效模型会明确返回错误；
   解析运动学通过有限差分和数值回归用例共同验证。可选 Pinocchio benchmark 所需的
   C ABI 被隔离在 benchmark harness 内。
@@ -38,43 +38,30 @@ URDF 解析和名称查找只在模型构建阶段分配内存，不进入实时
 
 | 接口 | 结果 |
 |---|---|
-| `RobotArm::from_links(name, links)` | 从 `[RobotLink; N]` 构建模型 |
-| `RobotArm::from_urdf_str(source)` | 解析 URDF 字符串 |
-| `RobotArm::from_urdf_file(path)` | 解析 URDF 文件 |
-| `name()`、`links()`、`link_mut()` | 查看或修改模型数据 |
-| `replace_link(index, link)` | 替换连杆并刷新零位姿 |
+| `RobotArm::from_urdf(path)` | 从 URDF 文件路径构建模型 |
+| `name()`、`links()` | 查看模型数据 |
 | `joint_count()` | 返回从模型中解析出的关节数量 |
-| `home_end_frame()` | 返回关节零位时的末端位姿 |
 
-### 运动学
+### 计算接口
 
-| 接口 | 结果 |
+为保持库的定位专注、轻量，公开计算接口仅限下列操作。两个逆运动学接口用于明确后续
+范围，目前尚未实现。
+
+| 接口 | 状态与结果 |
 |---|---|
 | `forward_kinematics(q)` | 末端位姿 |
-| `forward_kinematics_and_jacobian(q)` | 单次遍历同时得到末端位姿和 Jacobian |
 | `jacobian(q)` | 基座坐标系几何 Jacobian |
-| `jacobian_with_base(q, base)` | 旋转到指定基座坐标系的 Jacobian |
-| `jacobian_with_tool(q, tool)` | 平移到工具点的 Jacobian |
+| `inverse_kinematics(...)` | 规划中，尚未实现 |
+| `inverse_kinematics_with_boundary(...)` | 规划中，尚未实现 |
 | `forward_velocity_kinematics(q, qd, base, tool)` | 末端空间速度 |
-| `jacobian_dot(q, qd)` | Jacobian 的解析时间导数 |
-| `jacobian_dot_times_velocity(q, qd)` | 直接递推对流加速度 `J_dot * qd` |
 | `forward_acceleration_kinematics(q, qd, qdd)` | 直接递推加速度 `J * qdd + J_dot * qd` |
-
-### 动力学与关节工具
-
-| 接口 | 结果 |
-|---|---|
-| `gravity_torque(q, base, end_load)` | 关节重力和基座 Wrench |
+| `gravity(q, base, end_load)` | 关节重力和基座 Wrench |
 | `inverse_dynamics(...)` | Newton–Euler 递推得到的关节力和基座 Wrench |
-| `joint_position_limits()` | 关节位置上下限向量 |
-| `saturate_joint_position(lower, upper, q)` | 逐元素限制关节位置 |
-| `PassiveJointMap` | 将主动坐标映射到全部关节，并把力映射回来 |
-| `RobotWithPassiveJoints` | 被动关节运动学和动力学适配器 |
 
 ```rust
 use dyno::{JointVector, RobotArm};
 
-let arm = RobotArm::from_urdf_file("test_arm.urdf")?;
+let arm = RobotArm::from_urdf("test_arm.urdf")?;
 let q = JointVector::<4>::zeros();
 let end = arm.forward_kinematics(&q)?;
 let jacobian = arm.jacobian(&q)?;

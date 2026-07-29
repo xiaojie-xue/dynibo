@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<robot name="mixed_arm">
+  <link name="base"/>
+  <link name="rotation_link">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.2 0 0"/>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+    </inertial>
+  </link>
+  <joint name="rotation" type="revolute">
+    <parent link="base"/>
+    <child link="rotation_link"/>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1000" lower="-10" upper="10" velocity="100"/>
+  </joint>
+  <link name="translation_link">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.1 0 0"/>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+    </inertial>
+  </link>
+  <joint name="translation" type="prismatic">
+    <parent link="rotation_link"/>
+    <child link="translation_link"/>
+    <origin rpy="0 0 0" xyz="1 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1000" lower="-10" upper="10" velocity="100"/>
+  </joint>
+</robot>

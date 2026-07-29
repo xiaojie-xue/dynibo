@@ -60,7 +60,7 @@ struct BenchmarkCase<const N: usize> {
 impl<const N: usize> BenchmarkCase<N> {
     fn new(relative_urdf_path: impl AsRef<Path>) -> Self {
         let urdf_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_urdf_path.as_ref());
-        let arm = RobotArm::from_urdf_file(&urdf_path).expect("dyno must load the benchmark URDF");
+        let arm = RobotArm::from_urdf(&urdf_path).expect("dyno must load the benchmark URDF");
         let pinocchio = PinocchioContext::new(&urdf_path);
         assert_eq!(
             pinocchio.dof(),
@@ -112,19 +112,6 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
     });
     jacobian.finish();
 
-    let mut convective = c.benchmark_group(format!("jacobian_dot_times_velocity/{size}"));
-    convective.throughput(Throughput::Elements(1));
-    convective.bench_function("dyno", |b| {
-        b.iter(|| {
-            black_box(
-                case.arm
-                    .jacobian_dot_times_velocity(black_box(&case.q), black_box(&case.qd))
-                    .unwrap(),
-            )
-        });
-    });
-    convective.finish();
-
     let mut acceleration = c.benchmark_group(format!("forward_acceleration/{size}"));
     acceleration.throughput(Throughput::Elements(1));
     acceleration.bench_function("dyno", |b| {
@@ -148,7 +135,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
         b.iter(|| {
             black_box(
                 case.arm
-                    .gravity_torque(black_box(q), &case.base, Wrench::zeros())
+                    .gravity(black_box(q), &case.base, Wrench::zeros())
                     .unwrap(),
             )
         });
