@@ -12,7 +12,7 @@ pub(crate) fn pose_to_frame(pose: &Pose) -> Isometry3<f64> {
     )
 }
 
-pub(crate) fn serial_links<const N: usize>(robot: &Robot) -> Result<[RobotLink; N]> {
+pub(crate) fn serial_links(robot: &Robot) -> Result<Vec<RobotLink>> {
     let children: HashSet<&str> = robot
         .joints
         .iter()
@@ -72,18 +72,7 @@ pub(crate) fn serial_links<const N: usize>(robot: &Robot) -> Result<[RobotLink; 
             "joint graph is disconnected or cyclic".to_owned(),
         ));
     }
-    if result.len() != N {
-        return Err(Error::WrongJointCount {
-            expected: N,
-            actual: result.len(),
-        });
-    }
-    result
-        .try_into()
-        .map_err(|links: Vec<RobotLink>| Error::WrongJointCount {
-            expected: N,
-            actual: links.len(),
-        })
+    Ok(result)
 }
 
 fn robot_link(joint: &urdf_rs::Joint, link: &urdf_rs::Link) -> Result<RobotLink> {

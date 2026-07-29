@@ -49,7 +49,7 @@ impl Drop for PinocchioContext {
 }
 
 struct BenchmarkCase<const N: usize> {
-    arm: RobotArm<N>,
+    arm: RobotArm,
     pinocchio: PinocchioContext,
     q: JointVector<N>,
     qd: JointVector<N>,
@@ -60,8 +60,7 @@ struct BenchmarkCase<const N: usize> {
 impl<const N: usize> BenchmarkCase<N> {
     fn new(relative_urdf_path: impl AsRef<Path>) -> Self {
         let urdf_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_urdf_path.as_ref());
-        let arm =
-            RobotArm::<N>::from_urdf_file(&urdf_path).expect("dyno must load the benchmark URDF");
+        let arm = RobotArm::from_urdf_file(&urdf_path).expect("dyno must load the benchmark URDF");
         let pinocchio = PinocchioContext::new(&urdf_path);
         assert_eq!(
             pinocchio.dof(),
@@ -86,7 +85,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
     let mut fk = c.benchmark_group(format!("forward_kinematics/{size}"));
     fk.throughput(Throughput::Elements(1));
     fk.bench_with_input(BenchmarkId::from_parameter("dyno"), &case.q, |b, q| {
-        b.iter(|| black_box(case.arm.forward_kinematics(black_box(q))));
+        b.iter(|| black_box(case.arm.forward_kinematics(black_box(q)).unwrap()));
     });
     fk.bench_with_input(BenchmarkId::from_parameter("pinocchio"), &case.q, |b, q| {
         b.iter(|| {
@@ -101,7 +100,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
     let mut jacobian = c.benchmark_group(format!("end_jacobian/{size}"));
     jacobian.throughput(Throughput::Elements(1));
     jacobian.bench_with_input(BenchmarkId::from_parameter("dyno"), &case.q, |b, q| {
-        b.iter(|| black_box(case.arm.jacobian(black_box(q))))
+        b.iter(|| black_box(case.arm.jacobian(black_box(q)).unwrap()))
     });
     jacobian.bench_with_input(BenchmarkId::from_parameter("pinocchio"), &case.q, |b, q| {
         b.iter(|| {
@@ -119,7 +118,8 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
         b.iter(|| {
             black_box(
                 case.arm
-                    .jacobian_dot_times_velocity(black_box(&case.q), black_box(&case.qd)),
+                    .jacobian_dot_times_velocity(black_box(&case.q), black_box(&case.qd))
+                    .unwrap(),
             )
         });
     });
@@ -129,11 +129,15 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
     acceleration.throughput(Throughput::Elements(1));
     acceleration.bench_function("dyno", |b| {
         b.iter(|| {
-            black_box(case.arm.forward_acceleration_kinematics(
-                black_box(&case.q),
-                black_box(&case.qd),
-                black_box(&case.qdd),
-            ))
+            black_box(
+                case.arm
+                    .forward_acceleration_kinematics(
+                        black_box(&case.q),
+                        black_box(&case.qd),
+                        black_box(&case.qdd),
+                    )
+                    .unwrap(),
+            )
         });
     });
     acceleration.finish();
@@ -144,7 +148,8 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
         b.iter(|| {
             black_box(
                 case.arm
-                    .gravity_torque(black_box(q), &case.base, Wrench::zeros()),
+                    .gravity_torque(black_box(q), &case.base, Wrench::zeros())
+                    .unwrap(),
             )
         });
     });
@@ -162,15 +167,19 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
     rnea.throughput(Throughput::Elements(1));
     rnea.bench_function("dyno", |b| {
         b.iter(|| {
-            black_box(case.arm.inverse_dynamics(
-                black_box(&case.q),
-                black_box(&case.qd),
-                black_box(&case.qdd),
-                &case.base,
-                Motion::zeros(),
-                Motion::zeros(),
-                Wrench::zeros(),
-            ))
+            black_box(
+                case.arm
+                    .inverse_dynamics(
+                        black_box(&case.q),
+                        black_box(&case.qd),
+                        black_box(&case.qdd),
+                        &case.base,
+                        Motion::zeros(),
+                        Motion::zeros(),
+                        Wrench::zeros(),
+                    )
+                    .unwrap(),
+            )
         });
     });
     rnea.bench_function("pinocchio", |b| {

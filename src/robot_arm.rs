@@ -1,52 +1,58 @@
 use std::path::Path;
 
-use nalgebra::{Isometry3, Translation3, UnitQuaternion, Vector3};
+use nalgebra::{DVector, Isometry3, Translation3, UnitQuaternion, Vector3};
 
 use crate::{
-    Frame, Jacobian, JointKind, JointVector, Motion, Result, RobotLink, Wrench, urdf::serial_links,
+    Error, Frame, Jacobian, JointKind, JointVector, Motion, Result, RobotLink, Wrench,
+    urdf::serial_links,
 };
 
 pub const GRAVITY: f64 = 9.80665;
 
-/// Fixed-size serial robot arm compatible with the algorithms in `RobotArm.h`.
+/// Runtime-sized serial robot model with fixed-size calculation inputs and outputs.
 #[derive(Clone, Debug)]
-pub struct RobotArm<const N: usize> {
+pub struct RobotArm {
     name: String,
-    links: [RobotLink; N],
-    home_offset: JointVector<N>,
+    links: Box<[RobotLink]>,
+    home_offset: Box<[f64]>,
     home_end_frame: Frame,
 }
 
-impl<const N: usize> RobotArm<N> {
-    pub fn from_links(name: impl Into<String>, links: [RobotLink; N]) -> Self {
+impl RobotArm {
+    pub fn from_links<const N: usize>(name: impl Into<String>, links: [RobotLink; N]) -> Self {
+        Self::from_link_vec(name.into(), Vec::from(links))
+    }
+
+    fn from_link_vec(name: String, links: Vec<RobotLink>) -> Self {
         let home_end_frame = links
             .iter()
             .fold(Frame::identity(), |frame, link| frame * link.frame(0.0));
+        let home_offset = vec![0.0; links.len()].into_boxed_slice();
         Self {
-            name: name.into(),
-            links,
-            home_offset: JointVector::zeros(),
+            name,
+            links: links.into_boxed_slice(),
+            home_offset,
             home_end_frame,
         }
     }
 
     pub fn from_urdf_str(source: &str) -> Result<Self> {
         let robot = urdf_rs::read_from_string(source)?;
-        let links = serial_links::<N>(&robot)?;
-        Ok(Self::from_links(robot.name, links))
+        let links = serial_links(&robot)?;
+        Ok(Self::from_link_vec(robot.name, links))
     }
 
     pub fn from_urdf_file(path: impl AsRef<Path>) -> Result<Self> {
         let robot = urdf_rs::read_file(path)?;
-        let links = serial_links::<N>(&robot)?;
-        Ok(Self::from_links(robot.name, links))
+        let links = serial_links(&robot)?;
+        Ok(Self::from_link_vec(robot.name, links))
     }
 
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    pub const fn links(&self) -> &[RobotLink; N] {
+    pub fn links(&self) -> &[RobotLink] {
         &self.links
     }
 
@@ -55,7 +61,7 @@ impl<const N: usize> RobotArm<N> {
     }
 
     pub fn replace_link(&mut self, index: usize, link: RobotLink) -> Option<RobotLink> {
-        if index >= N {
+        if index >= self.links.len() {
             return None;
         }
         let old = std::mem::replace(&mut self.links[index], link);
@@ -63,12 +69,27 @@ impl<const N: usize> RobotArm<N> {
         Some(old)
     }
 
-    pub const fn home_offset(&self) -> &JointVector<N> {
+    pub fn home_offset(&self) -> &[f64] {
         &self.home_offset
     }
 
     pub fn home_end_frame(&self) -> Frame {
         self.home_end_frame
+    }
+
+    pub fn joint_count(&self) -> usize {
+        self.links.len()
+    }
+
+    pub fn validate_joint_count<const N: usize>(&self) -> Result<()> {
+        if self.links.len() == N {
+            Ok(())
+        } else {
+            Err(Error::WrongJointCount {
+                expected: self.links.len(),
+                actual: N,
+            })
+        }
     }
 
     pub fn movable_joint_count(&self) -> usize {
@@ -78,17 +99,23 @@ impl<const N: usize> RobotArm<N> {
             .count()
     }
 
-    pub fn forward_kinematics(&self, q: &JointVector<N>) -> Frame {
-        self.links
+    pub fn forward_kinematics<const N: usize>(&self, q: &JointVector<N>) -> Result<Frame> {
+        self.validate_joint_count::<N>()?;
+        Ok(self
+            .links
             .iter()
             .zip(q.iter())
             .fold(Frame::identity(), |frame, (link, &position)| {
                 frame * link.frame(position)
-            })
+            }))
     }
 
     /// Computes the end frame and base-frame geometric Jacobian in one chain traversal.
-    pub fn forward_kinematics_and_jacobian(&self, q: &JointVector<N>) -> (Frame, Jacobian<N>) {
+    pub fn forward_kinematics_and_jacobian<const N: usize>(
+        &self,
+        q: &JointVector<N>,
+    ) -> Result<(Frame, Jacobian<N>)> {
+        self.validate_joint_count::<N>()?;
         let mut transform = Frame::identity();
         let mut origins: [Vector3<f64>; N] = std::array::from_fn(|_| Vector3::zeros());
         let mut jacobian: Jacobian<N> = Jacobian::zeros();
@@ -118,16 +145,20 @@ impl<const N: usize> RobotArm<N> {
             }
         }
 
-        (transform, jacobian)
+        Ok((transform, jacobian))
     }
 
     /// Geometric Jacobian in the base frame, angular rows first.
-    pub fn jacobian(&self, q: &JointVector<N>) -> Jacobian<N> {
-        self.forward_kinematics_and_jacobian(q).1
+    pub fn jacobian<const N: usize>(&self, q: &JointVector<N>) -> Result<Jacobian<N>> {
+        Ok(self.forward_kinematics_and_jacobian(q)?.1)
     }
 
-    pub fn jacobian_with_tool(&self, q: &JointVector<N>, tool: &Frame) -> Jacobian<N> {
-        let (end, mut jacobian) = self.forward_kinematics_and_jacobian(q);
+    pub fn jacobian_with_tool<const N: usize>(
+        &self,
+        q: &JointVector<N>,
+        tool: &Frame,
+    ) -> Result<Jacobian<N>> {
+        let (end, mut jacobian) = self.forward_kinematics_and_jacobian(q)?;
         let offset_world = end.rotation * tool.translation.vector;
         for i in 0..N {
             let angular = jacobian.fixed_view::<3, 1>(0, i).into_owned();
@@ -135,36 +166,45 @@ impl<const N: usize> RobotArm<N> {
                 jacobian.fixed_view::<3, 1>(3, i).into_owned() + angular.cross(&offset_world);
             jacobian.fixed_view_mut::<3, 1>(3, i).copy_from(&shifted);
         }
-        jacobian
+        Ok(jacobian)
     }
 
-    pub fn jacobian_with_base(&self, q: &JointVector<N>, base: &Frame) -> Jacobian<N> {
-        let mut jacobian = self.jacobian(q);
+    pub fn jacobian_with_base<const N: usize>(
+        &self,
+        q: &JointVector<N>,
+        base: &Frame,
+    ) -> Result<Jacobian<N>> {
+        let mut jacobian = self.jacobian(q)?;
         for i in 0..N {
             let angular = base.rotation * jacobian.fixed_view::<3, 1>(0, i).into_owned();
             let linear = base.rotation * jacobian.fixed_view::<3, 1>(3, i).into_owned();
             jacobian.fixed_view_mut::<3, 1>(0, i).copy_from(&angular);
             jacobian.fixed_view_mut::<3, 1>(3, i).copy_from(&linear);
         }
-        jacobian
+        Ok(jacobian)
     }
 
-    pub fn forward_velocity_kinematics(
+    pub fn forward_velocity_kinematics<const N: usize>(
         &self,
         q: &JointVector<N>,
         qd: &JointVector<N>,
         base: &Frame,
         tool: &Frame,
-    ) -> Motion {
-        let vector = self.jacobian_with_tool(q, tool) * qd;
-        Motion::new(
+    ) -> Result<Motion> {
+        let vector = self.jacobian_with_tool(q, tool)? * qd;
+        Ok(Motion::new(
             base.rotation * vector.fixed_rows::<3>(0).into_owned(),
             base.rotation * vector.fixed_rows::<3>(3).into_owned(),
-        )
+        ))
     }
 
     /// Time derivative of the base-frame geometric Jacobian, angular rows first.
-    pub fn jacobian_dot(&self, q: &JointVector<N>, qd: &JointVector<N>) -> Jacobian<N> {
+    pub fn jacobian_dot<const N: usize>(
+        &self,
+        q: &JointVector<N>,
+        qd: &JointVector<N>,
+    ) -> Result<Jacobian<N>> {
+        self.validate_joint_count::<N>()?;
         let mut transform = Frame::identity();
         let mut angular_velocity = Vector3::zeros();
         let mut origin_velocity = Vector3::zeros();
@@ -214,27 +254,33 @@ impl<const N: usize> RobotArm<N> {
                 JointKind::Fixed => {}
             }
         }
-        jacobian_dot
+        Ok(jacobian_dot)
     }
 
     /// Convective end-effector acceleration `J_dot(q, qd) * qd`.
-    pub fn jacobian_dot_times_velocity(&self, q: &JointVector<N>, qd: &JointVector<N>) -> Motion {
-        self.end_acceleration(q, qd, |_| 0.0)
+    pub fn jacobian_dot_times_velocity<const N: usize>(
+        &self,
+        q: &JointVector<N>,
+        qd: &JointVector<N>,
+    ) -> Result<Motion> {
+        self.validate_joint_count::<N>()?;
+        Ok(self.end_acceleration(q, qd, |_| 0.0))
     }
 
-    pub fn forward_acceleration_kinematics(
+    pub fn forward_acceleration_kinematics<const N: usize>(
         &self,
         q: &JointVector<N>,
         qd: &JointVector<N>,
         qdd: &JointVector<N>,
-    ) -> Motion {
-        self.end_acceleration(q, qd, |i| qdd[i])
+    ) -> Result<Motion> {
+        self.validate_joint_count::<N>()?;
+        Ok(self.end_acceleration(q, qd, |i| qdd[i]))
     }
 
     /// Newton-Euler inverse dynamics compatible with the original C++ code.
     /// Returns `(joint_force, wrench_at_base)`.
     #[allow(clippy::too_many_arguments)]
-    pub fn inverse_dynamics(
+    pub fn inverse_dynamics<const N: usize>(
         &self,
         q: &JointVector<N>,
         qd: &JointVector<N>,
@@ -243,7 +289,8 @@ impl<const N: usize> RobotArm<N> {
         base_velocity: Motion,
         base_acceleration: Motion,
         end_load: Wrench,
-    ) -> (JointVector<N>, Wrench) {
+    ) -> Result<(JointVector<N>, Wrench)> {
+        self.validate_joint_count::<N>()?;
         let mut transforms: [Frame; N] = std::array::from_fn(|_| Frame::identity());
         let mut angular_accelerations: [Vector3<f64>; N] =
             std::array::from_fn(|_| Vector3::zeros());
@@ -319,16 +366,17 @@ impl<const N: usize> RobotArm<N> {
             load = Wrench::new(torque, force);
             joint_force[i] = link.active_force(load);
         }
-        (joint_force, wrench_to_parent(&transforms[0], load))
+        Ok((joint_force, wrench_to_parent(&transforms[0], load)))
     }
 
     /// Gravity joint forces and the resulting base wrench.
-    pub fn gravity_torque(
+    pub fn gravity_torque<const N: usize>(
         &self,
         q: &JointVector<N>,
         base_frame: &Frame,
         end_load: Wrench,
-    ) -> (JointVector<N>, Wrench) {
+    ) -> Result<(JointVector<N>, Wrench)> {
+        self.validate_joint_count::<N>()?;
         let mut gravity = base_frame.rotation.inverse() * Vector3::new(0.0, 0.0, GRAVITY);
         let mut transforms: [Frame; N] = std::array::from_fn(|_| Frame::identity());
         let mut gravity_at_link: [Vector3<f64>; N] = std::array::from_fn(|_| Vector3::zeros());
@@ -350,16 +398,22 @@ impl<const N: usize> RobotArm<N> {
             }
             torque[i] = self.links[i].active_force(load);
         }
-        (torque, wrench_to_parent(&transforms[0], load))
+        Ok((torque, wrench_to_parent(&transforms[0], load)))
     }
 
-    pub fn joint_position_limits(&self) -> (JointVector<N>, JointVector<N>) {
-        let lower = JointVector::from_fn(|i, _| self.links[i].limit().lower);
-        let upper = JointVector::from_fn(|i, _| self.links[i].limit().upper);
+    pub fn joint_position_limits(&self) -> (DVector<f64>, DVector<f64>) {
+        let lower = DVector::from_iterator(
+            self.links.len(),
+            self.links.iter().map(|link| link.limit().lower),
+        );
+        let upper = DVector::from_iterator(
+            self.links.len(),
+            self.links.iter().map(|link| link.limit().upper),
+        );
         (lower, upper)
     }
 
-    pub fn saturate_joint_position(
+    pub fn saturate_joint_position<const N: usize>(
         lower: &JointVector<N>,
         upper: &JointVector<N>,
         position: &JointVector<N>,
@@ -374,7 +428,7 @@ impl<const N: usize> RobotArm<N> {
             .fold(Frame::identity(), |frame, link| frame * link.frame(0.0));
     }
 
-    fn end_acceleration(
+    fn end_acceleration<const N: usize>(
         &self,
         q: &JointVector<N>,
         qd: &JointVector<N>,

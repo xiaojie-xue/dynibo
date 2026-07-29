@@ -1,4 +1,4 @@
-//! Fixed-size robot-arm kinematics and inverse dynamics.
+//! Serial robot-arm kinematics and inverse dynamics with fixed-size calculation types.
 
 mod error;
 mod model;

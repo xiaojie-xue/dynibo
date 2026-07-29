@@ -2,7 +2,7 @@
 name = "dyno"
 version = "0.1.0"
 edition = "2024"
-description = "Fixed-size robot-arm kinematics and dynamics in Rust"
+description = "Serial robot-arm kinematics and dynamics with fixed-size calculation types"
 license = "Proprietary"
 
 [features]

@@ -1,4 +1,4 @@
-use crate::{Frame, JointVector, Motion, RobotArm, Wrench};
+use crate::{Error, Frame, JointVector, Motion, Result, RobotArm, Wrench};
 
 /// Mapping between actuator coordinates and a model containing passive joints.
 pub trait PassiveJointMap<const ACTIVE: usize, const ALL: usize> {
@@ -13,22 +13,28 @@ pub struct RobotWithPassiveJoints<
     const ALL: usize,
     M: PassiveJointMap<ACTIVE, ALL>,
 > {
-    arm: RobotArm<ALL>,
+    arm: RobotArm,
     mapping: M,
 }
 
 impl<const ACTIVE: usize, const ALL: usize, M: PassiveJointMap<ACTIVE, ALL>>
     RobotWithPassiveJoints<ACTIVE, ALL, M>
 {
-    pub const fn new(arm: RobotArm<ALL>, mapping: M) -> Self {
-        Self { arm, mapping }
+    pub fn new(arm: RobotArm, mapping: M) -> Result<Self> {
+        if arm.joint_count() != ALL {
+            return Err(Error::WrongJointCount {
+                expected: ALL,
+                actual: arm.joint_count(),
+            });
+        }
+        Ok(Self { arm, mapping })
     }
 
-    pub const fn arm(&self) -> &RobotArm<ALL> {
+    pub const fn arm(&self) -> &RobotArm {
         &self.arm
     }
 
-    pub fn forward_kinematics(&self, q: &JointVector<ACTIVE>) -> Frame {
+    pub fn forward_kinematics(&self, q: &JointVector<ACTIVE>) -> Result<Frame> {
         self.arm.forward_kinematics(&self.mapping.expand(q))
     }
 
@@ -38,7 +44,7 @@ impl<const ACTIVE: usize, const ALL: usize, M: PassiveJointMap<ACTIVE, ALL>>
         qd: &JointVector<ACTIVE>,
         base: &Frame,
         tool: &Frame,
-    ) -> Motion {
+    ) -> Result<Motion> {
         self.arm.forward_velocity_kinematics(
             &self.mapping.expand(q),
             &self.mapping.expand(qd),
@@ -52,7 +58,7 @@ impl<const ACTIVE: usize, const ALL: usize, M: PassiveJointMap<ACTIVE, ALL>>
         q: &JointVector<ACTIVE>,
         qd: &JointVector<ACTIVE>,
         qdd: &JointVector<ACTIVE>,
-    ) -> Motion {
+    ) -> Result<Motion> {
         self.arm.forward_acceleration_kinematics(
             &self.mapping.expand(q),
             &self.mapping.expand(qd),
@@ -65,11 +71,11 @@ impl<const ACTIVE: usize, const ALL: usize, M: PassiveJointMap<ACTIVE, ALL>>
         q: &JointVector<ACTIVE>,
         base: &Frame,
         end_load: Wrench,
-    ) -> (JointVector<ACTIVE>, Wrench) {
-        let (force, base_load) = self
-            .arm
-            .gravity_torque(&self.mapping.expand(q), base, end_load);
-        (self.mapping.reduce_force(&force), base_load)
+    ) -> Result<(JointVector<ACTIVE>, Wrench)> {
+        let (force, base_load) =
+            self.arm
+                .gravity_torque(&self.mapping.expand(q), base, end_load)?;
+        Ok((self.mapping.reduce_force(&force), base_load))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -82,7 +88,7 @@ impl<const ACTIVE: usize, const ALL: usize, M: PassiveJointMap<ACTIVE, ALL>>
         base_velocity: Motion,
         base_acceleration: Motion,
         end_load: Wrench,
-    ) -> (JointVector<ACTIVE>, Wrench) {
+    ) -> Result<(JointVector<ACTIVE>, Wrench)> {
         let (force, base_load) = self.arm.inverse_dynamics(
             &self.mapping.expand(q),
             &self.mapping.expand(qd),
@@ -91,7 +97,7 @@ impl<const ACTIVE: usize, const ALL: usize, M: PassiveJointMap<ACTIVE, ALL>>
             base_velocity,
             base_acceleration,
             end_load,
-        );
-        (self.mapping.reduce_force(&force), base_load)
+        )?;
+        Ok((self.mapping.reduce_force(&force), base_load))
     }
 }

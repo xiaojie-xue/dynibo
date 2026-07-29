@@ -2,8 +2,9 @@
 
 [English](README.md) | 简体中文
 
-`dyno` 是一个轻量、可靠、基于 Rust 的固定尺寸串联机器人运动学与动力学库。数值
-计算基于 [`nalgebra`](https://nalgebra.rs/)，URDF 解析基于
+`dyno` 是一个轻量、可靠、基于 Rust 的串联机器人运动学与动力学库。模型构建时自动
+确定关节数量，计算输入和输出仍保持固定尺寸。数值计算基于
+[`nalgebra`](https://nalgebra.rs/)，URDF 解析基于
 [`urdf-rs`](https://github.com/openrr/urdf-rs)。
 
 ## 设计目标
@@ -13,8 +14,8 @@
 - **可靠行为：** 运行时库自身不包含 `unsafe` 代码；遇到无效模型会明确返回错误；
   解析运动学通过有限差分和数值回归用例共同验证。可选 Pinocchio benchmark 所需的
   C ABI 被隔离在 benchmark harness 内。
-- **基于 Rust：** 使用 const generics 将关节数量编码进类型，并通过所有权和借用
-  明确区分模型数据与计算输入。
+- **基于 Rust：** 使用 const generics 保持计算输入和输出为固定尺寸，模型的关节
+  数量则在构造时自动确定。
 
 URDF 解析和名称查找只在模型构建阶段分配内存，不进入实时计算路径。这里的“可靠”
 是指经过测试的安全 Rust 实现，不代表已获得功能安全认证。
@@ -25,7 +26,7 @@ URDF 解析和名称查找只在模型构建阶段分配内存，不进入实时
 
 | 类型 | 用途 |
 |---|---|
-| `RobotArm<const N: usize>` | 固定自由度串联机器人模型和算法 |
+| `RobotArm` | 运行时确定自由度、使用固定尺寸计算接口的串联模型 |
 | `RobotLink` | 关节变换、轴、限位、质量、质心和惯量 |
 | `JointVector<N>` | 固定尺寸关节向量 |
 | `Jacobian<N>` | 角运动分量在前的 `6 x N` 几何 Jacobian |
@@ -42,6 +43,7 @@ URDF 解析和名称查找只在模型构建阶段分配内存，不进入实时
 | `RobotArm::from_urdf_file(path)` | 解析 URDF 文件 |
 | `name()`、`links()`、`link_mut()` | 查看或修改模型数据 |
 | `replace_link(index, link)` | 替换连杆并刷新零位姿 |
+| `joint_count()` | 返回从模型中解析出的关节数量 |
 | `home_end_frame()` | 返回关节零位时的末端位姿 |
 
 ### 运动学
@@ -72,18 +74,21 @@ URDF 解析和名称查找只在模型构建阶段分配内存，不进入实时
 ```rust
 use dyno::{JointVector, RobotArm};
 
-let arm = RobotArm::<4>::from_urdf_file("test_arm.urdf")?;
+let arm = RobotArm::from_urdf_file("test_arm.urdf")?;
 let q = JointVector::<4>::zeros();
-let end = arm.forward_kinematics(&q);
-let jacobian = arm.jacobian(&q);
+let end = arm.forward_kinematics(&q)?;
+let jacobian = arm.jacobian(&q)?;
 # Ok::<(), dyno::Error>(())
 ```
 
+计算尺寸 `N` 会从每次传入的 `JointVector<N>` 自动推导，不再属于 `RobotArm` 类型的
+一部分。若模型与输入尺寸不一致，会在开始计算前返回 `Error::WrongJointCount`。
+
 ## 兼容范围
 
-当前 `RobotArm` 面向固定自由度串联机构。构建模型时会明确拒绝多分叉 URDF，而不会
-静默地将其展平成串联链。支持多分叉机器人需要使用基于父节点索引的树形模型，适合
-作为后续独立扩展。
+当前 `RobotArm` 面向串联机构。构建模型时会明确拒绝多分叉 URDF，而不会静默地将其
+展平成串联链。支持多分叉机器人需要使用基于父节点索引的树形模型，适合作为后续
+独立扩展。
 
 兼容动力学内核有意保留已有的数值约定，包括正 Z 方向重力和既有的惯量积符号，使
 C++ 数值回归结果可以复现。因此，下述重力和 RNEA benchmark 比较的是执行开销，
@@ -93,8 +98,8 @@ C++ 数值回归结果可以复现。因此，下述重力和 RNEA benchmark 比
 
 可选的 Criterion benchmark 分别在 `N=4` 和 `N=40` 下，使用两边完全相同的 URDF
 和关节输入，对比 Dyno 与 Pinocchio 的正运动学、末端关节 Jacobian、重力和 RNEA。
-模型构建及 URDF 解析均在计时区间之外；两边都会复用模型和计算工作区。此外还会
-单独测量一次空操作，用来报告 Rust 到 C ABI 的固定调用开销。
+模型构建及 URDF 解析均在计时区间之外；两边都会复用已解析的模型，Pinocchio 还会
+复用其 `Data` 对象。另行测得的空操作用于修正 Rust 到 C ABI 的固定调用开销。
 
 以下冒烟结果使用 `--quick` 在 Intel Core i9-14900K 上测得，工具链为 rustc 1.97.1、
 Pinocchio 3.9.0；数值越小越好。它们用于展示当前机器上的性能趋势，不应视为跨平台
@@ -102,17 +107,17 @@ Pinocchio 3.9.0；数值越小越好。它们用于展示当前机器上的性�
 
 | 操作 | 自由度 | Dyno | Pinocchio | Dyno 加速比 |
 |---|---:|---:|---:|---:|
-| 正运动学 | 4 | 65.4 ns | 83.6 ns | 1.28x |
-| 末端 Jacobian | 4 | 81.3 ns | 143.5 ns | 1.77x |
-| 重力 | 4 | 88.5 ns | 195.8 ns | 2.21x |
-| RNEA | 4 | 147.0 ns | 306.9 ns | 2.09x |
-| 正运动学 | 40 | 647.4 ns | 813.8 ns | 1.26x |
-| 末端 Jacobian | 40 | 792.8 ns | 1.344 µs | 1.69x |
-| 重力 | 40 | 928.7 ns | 1.839 µs | 1.98x |
-| RNEA | 40 | 1.408 µs | 3.147 µs | 2.23x |
+| 正运动学 | 4 | 65.5 ns | 79.0 ns | 1.21x |
+| 末端 Jacobian | 4 | 81.4 ns | 135.6 ns | 1.67x |
+| 重力 | 4 | 91.5 ns | 187.6 ns | 2.05x |
+| RNEA | 4 | 148.4 ns | 298.8 ns | 2.01x |
+| 正运动学 | 40 | 646.4 ns | 819.2 ns | 1.27x |
+| 末端 Jacobian | 40 | 786.1 ns | 1.351 µs | 1.72x |
+| 重力 | 40 | 950.0 ns | 1.850 µs | 1.95x |
+| RNEA | 40 | 1.462 µs | 3.209 µs | 2.19x |
 
-测得的 C ABI 空操作开销约为 0.704 ns。如前所述，由于兼容内核与 Pinocchio 使用
-不同的数值约定，重力和 RNEA 两组数据只比较执行时间。
+上述 Pinocchio 数据已考虑并扣除测得的 C ABI 开销。如前所述，由于兼容内核与
+Pinocchio 使用不同的数值约定，重力和 RNEA 两组数据只比较执行时间。
 
 只有启用 `pinocchio-bench` feature 时才需要安装 Pinocchio。C++ 桥接、`cc`、
 `pkg-config` 和 Criterion 都不会成为 Dyno 常规构建的运行时依赖。例如，在 x86-64

@@ -2,10 +2,11 @@
 
 English | [简体中文](README.zh.md)
 
-`dyno` is a lightweight and reliable, Rust-based library for fixed-size serial
-robot kinematics and dynamics. It uses [`nalgebra`](https://nalgebra.rs/) for
-fixed-size numerical types and [`urdf-rs`](https://github.com/openrr/urdf-rs)
-for URDF parsing.
+`dyno` is a lightweight and reliable, Rust-based library for serial robot
+kinematics and dynamics. Robot size is discovered while parsing the model,
+while calculation inputs and outputs remain fixed-size. It uses
+[`nalgebra`](https://nalgebra.rs/) for numerical types and
+[`urdf-rs`](https://github.com/openrr/urdf-rs) for URDF parsing.
 
 ## Design goals
 
@@ -17,8 +18,8 @@ for URDF parsing.
   against finite differences as well as numerical regression cases. The
   optional Pinocchio benchmark isolates its required C ABI in the benchmark
   harness.
-- **Rust-based:** const generics make the joint count part of the type, while
-  ownership and borrowing keep model data and calculation inputs explicit.
+- **Rust-based:** const generics preserve fixed-size calculation inputs and
+  outputs, while the model's joint count is discovered at construction.
 
 URDF parsing and name lookup allocate memory only while constructing a model;
 they do not enter the real-time compute path. "Reliable" describes the tested,
@@ -30,7 +31,7 @@ safe-Rust implementation and is not a functional-safety certification.
 
 | Type | Purpose |
 |---|---|
-| `RobotArm<const N: usize>` | Fixed-size serial robot model and algorithms |
+| `RobotArm` | Runtime-sized serial model with fixed-size calculation APIs |
 | `RobotLink` | Joint transform, axis, limits, mass, center of mass, and inertia |
 | `JointVector<N>` | Fixed-size joint vector |
 | `Jacobian<N>` | Angular-first `6 x N` geometric Jacobian |
@@ -47,6 +48,7 @@ safe-Rust implementation and is not a functional-safety certification.
 | `RobotArm::from_urdf_file(path)` | Parse a URDF file |
 | `name()`, `links()`, `link_mut()` | Inspect or update model data |
 | `replace_link(index, link)` | Replace one link and refresh the home pose |
+| `joint_count()` | Return the number of joints parsed from the model |
 | `home_end_frame()` | Return the zero-position end frame |
 
 ### Kinematics
@@ -77,19 +79,22 @@ safe-Rust implementation and is not a functional-safety certification.
 ```rust
 use dyno::{JointVector, RobotArm};
 
-let arm = RobotArm::<4>::from_urdf_file("test_arm.urdf")?;
+let arm = RobotArm::from_urdf_file("test_arm.urdf")?;
 let q = JointVector::<4>::zeros();
-let end = arm.forward_kinematics(&q);
-let jacobian = arm.jacobian(&q);
+let end = arm.forward_kinematics(&q)?;
+let jacobian = arm.jacobian(&q)?;
 # Ok::<(), dyno::Error>(())
 ```
 
+The calculation size `N` is inferred from each `JointVector<N>` input; it is
+not part of the `RobotArm` type. A mismatch returns `Error::WrongJointCount`
+before calculation begins.
+
 ## Compatibility scope
 
-This crate currently mirrors the serial-chain scope of the original
-`RobotArm.h`. A branched URDF is rejected during construction instead of being
-silently flattened. Branched-tree support needs a parent-indexed model and is a
-separate extension.
+This crate currently supports serial chains. A branched URDF is rejected during
+construction instead of being silently flattened. Branched-tree support needs
+a parent-indexed model and is a separate extension.
 
 The compatibility dynamics intentionally preserve legacy numerical conventions,
 including positive-Z gravity and the original product-of-inertia signs, so the
@@ -103,8 +108,9 @@ The optional Criterion benchmark compares Dyno and Pinocchio at `N=4` and
 `N=40`, using the same URDF and joint inputs for each implementation. It covers
 forward kinematics, end-joint Jacobian, gravity, and RNEA. Model construction
 and URDF parsing are outside the timed region; both implementations reuse their
-model and calculation workspaces. A separate no-op measurement reports the
-fixed Rust-to-C ABI call overhead.
+parsed models, and Pinocchio reuses its `Data` object. A separate no-op
+measurement is used to correct Pinocchio timings for the fixed Rust-to-C ABI
+call overhead.
 
 The following smoke-test results were measured with `--quick` on an Intel Core
 i9-14900K, using rustc 1.97.1 and Pinocchio 3.9.0. Lower latency is better.
@@ -113,18 +119,18 @@ rigorous performance claim.
 
 | Operation | DoF | Dyno | Pinocchio | Dyno speedup |
 |---|---:|---:|---:|---:|
-| Forward kinematics | 4 | 65.4 ns | 83.6 ns | 1.28x |
-| End Jacobian | 4 | 81.3 ns | 143.5 ns | 1.77x |
-| Gravity | 4 | 88.5 ns | 195.8 ns | 2.21x |
-| RNEA | 4 | 147.0 ns | 306.9 ns | 2.09x |
-| Forward kinematics | 40 | 647.4 ns | 813.8 ns | 1.26x |
-| End Jacobian | 40 | 792.8 ns | 1.344 µs | 1.69x |
-| Gravity | 40 | 928.7 ns | 1.839 µs | 1.98x |
-| RNEA | 40 | 1.408 µs | 3.147 µs | 2.23x |
+| Forward kinematics | 4 | 65.5 ns | 79.0 ns | 1.21x |
+| End Jacobian | 4 | 81.4 ns | 135.6 ns | 1.67x |
+| Gravity | 4 | 91.5 ns | 187.6 ns | 2.05x |
+| RNEA | 4 | 148.4 ns | 298.8 ns | 2.01x |
+| Forward kinematics | 40 | 646.4 ns | 819.2 ns | 1.27x |
+| End Jacobian | 40 | 786.1 ns | 1.351 µs | 1.72x |
+| Gravity | 40 | 950.0 ns | 1.850 µs | 1.95x |
+| RNEA | 40 | 1.462 µs | 3.209 µs | 2.19x |
 
-The measured no-op C ABI overhead was approximately 0.704 ns. As noted above,
-the gravity and RNEA rows compare runtime only because the compatibility kernel
-and Pinocchio use different numerical conventions.
+The Pinocchio values above already account for the measured C ABI overhead. As
+noted above, the gravity and RNEA rows compare runtime only because the
+compatibility kernel and Pinocchio use different numerical conventions.
 
 Pinocchio is only needed when the `pinocchio-bench` feature is selected. The
 bridge, `cc`, `pkg-config`, and Criterion do not become runtime dependencies of

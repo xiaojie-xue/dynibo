@@ -17,7 +17,7 @@ impl fmt::Display for Error {
             Self::InvalidModel(message) => write!(f, "invalid robot model: {message}"),
             Self::UnsupportedJoint(joint) => write!(f, "unsupported joint type for {joint}"),
             Self::WrongJointCount { expected, actual } => {
-                write!(f, "expected {expected} movable joints, found {actual}")
+                write!(f, "expected {expected} joints, found {actual}")
             }
             Self::InvalidJointAxis { joint } => write!(f, "joint {joint} has an invalid axis"),
         }
