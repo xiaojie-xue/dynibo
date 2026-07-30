@@ -1,12 +1,12 @@
 use std::{hint::black_box, path::PathBuf};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use dyno::{ExternalWrench, Frame, JointVector, LinkId, Motion, RobotArm, Wrench};
+use dyno::{Frame, JointVector, Load, Robot, Twist, Wrench};
 use nalgebra::Vector3;
 
 struct BenchmarkCase<const N: usize> {
-    arm: RobotArm,
-    target: LinkId,
+    arm: Robot,
+    target: usize,
     q: JointVector<N>,
     qd: JointVector<N>,
     qdd: JointVector<N>,
@@ -15,8 +15,8 @@ struct BenchmarkCase<const N: usize> {
 
 struct TreeBenchmarkCase<const N: usize> {
     case: BenchmarkCase<N>,
-    target: LinkId,
-    external_wrenches: [ExternalWrench; 2],
+    target: usize,
+    other_leaf: usize,
 }
 
 impl<const N: usize> TreeBenchmarkCase<N> {
@@ -24,33 +24,22 @@ impl<const N: usize> TreeBenchmarkCase<N> {
         let case = BenchmarkCase::new(relative_urdf_path);
         let target = case
             .arm
-            .link_id(target_name)
+            .links()
+            .iter()
+            .position(|link| link.name() == target_name)
             .expect("target link must exist");
         let other_leaf = case
             .arm
-            .link_id(other_leaf_name)
+            .links()
+            .iter()
+            .position(|link| link.name() == other_leaf_name)
             .expect("other leaf link must exist");
         assert_eq!(case.arm.leaf_links().len(), 2);
 
         Self {
             case,
             target,
-            external_wrenches: [
-                ExternalWrench {
-                    link: target,
-                    wrench: Wrench::new(
-                        Vector3::new(0.1, -0.2, 0.3),
-                        Vector3::new(1.0, 0.5, -0.25),
-                    ),
-                },
-                ExternalWrench {
-                    link: other_leaf,
-                    wrench: Wrench::new(
-                        Vector3::new(-0.3, 0.2, 0.1),
-                        Vector3::new(-0.5, 0.75, 0.4),
-                    ),
-                },
-            ],
+            other_leaf,
         }
     }
 }
@@ -58,9 +47,17 @@ impl<const N: usize> TreeBenchmarkCase<N> {
 impl<const N: usize> BenchmarkCase<N> {
     fn new(relative_urdf_path: &str) -> Self {
         let urdf_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_urdf_path);
-        let arm = RobotArm::from_urdf(urdf_path).expect("Dyno must load the benchmark URDF");
+        let arm = Robot::from_urdf(urdf_path).expect("Dyno must load the benchmark URDF");
         assert_eq!(arm.joint_count(), N);
-        let target = arm.leaf_links()[0];
+        let leaf = arm
+            .leaf_links()
+            .next()
+            .expect("benchmark robot must have a leaf link");
+        let target = arm
+            .links()
+            .iter()
+            .position(|link| std::ptr::eq(link, leaf))
+            .expect("leaf link must belong to the benchmark robot");
 
         Self {
             arm,
@@ -75,24 +72,19 @@ impl<const N: usize> BenchmarkCase<N> {
 
 fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
     let size = format!("{N}dof");
+    let target = &case.arm.links()[case.target];
 
     let mut fk = c.benchmark_group(format!("forward_kinematics/{size}"));
     fk.throughput(Throughput::Elements(1));
     fk.bench_with_input(BenchmarkId::from_parameter("dyno"), &case.q, |b, q| {
-        b.iter(|| {
-            black_box(
-                case.arm
-                    .forward_kinematics(black_box(q), case.target)
-                    .unwrap(),
-            )
-        });
+        b.iter(|| black_box(case.arm.forward_kinematics(black_box(q), target).unwrap()));
     });
     fk.finish();
 
     let mut jacobian = c.benchmark_group(format!("end_jacobian/{size}"));
     jacobian.throughput(Throughput::Elements(1));
     jacobian.bench_with_input(BenchmarkId::from_parameter("dyno"), &case.q, |b, q| {
-        b.iter(|| black_box(case.arm.jacobian(black_box(q), case.target).unwrap()));
+        b.iter(|| black_box(case.arm.jacobian(black_box(q), target).unwrap()));
     });
     jacobian.finish();
 
@@ -106,7 +98,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
                         black_box(&case.q),
                         black_box(&case.qd),
                         black_box(&case.qdd),
-                        case.target,
+                        target,
                     )
                     .unwrap(),
             )
@@ -138,8 +130,8 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
                         black_box(&case.qd),
                         black_box(&case.qdd),
                         &case.base,
-                        Motion::zeros(),
-                        Motion::zeros(),
+                        Twist::zeros(),
+                        Twist::zeros(),
                         black_box(&[]),
                     )
                     .unwrap(),
@@ -152,6 +144,18 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
 fn benchmark_tree_case<const N: usize>(c: &mut Criterion, tree: &TreeBenchmarkCase<N>) {
     let case = &tree.case;
     let size = format!("{N}joint_2leaf");
+    let target = &case.arm.links()[tree.target];
+    let other_leaf = &case.arm.links()[tree.other_leaf];
+    let loads = [
+        Load {
+            link: target,
+            wrench: Wrench::new(Vector3::new(0.1, -0.2, 0.3), Vector3::new(1.0, 0.5, -0.25)),
+        },
+        Load {
+            link: other_leaf,
+            wrench: Wrench::new(Vector3::new(-0.3, 0.2, 0.1), Vector3::new(-0.5, 0.75, 0.4)),
+        },
+    ];
 
     let mut fk = c.benchmark_group(format!("tree_forward_kinematics/{size}"));
     fk.throughput(Throughput::Elements(1));
@@ -159,7 +163,7 @@ fn benchmark_tree_case<const N: usize>(c: &mut Criterion, tree: &TreeBenchmarkCa
         b.iter(|| {
             black_box(
                 case.arm
-                    .forward_kinematics(black_box(&case.q), tree.target)
+                    .forward_kinematics(black_box(&case.q), target)
                     .unwrap(),
             )
         });
@@ -169,7 +173,7 @@ fn benchmark_tree_case<const N: usize>(c: &mut Criterion, tree: &TreeBenchmarkCa
     let mut jacobian = c.benchmark_group(format!("tree_jacobian/{size}"));
     jacobian.throughput(Throughput::Elements(1));
     jacobian.bench_function("selected_leaf", |b| {
-        b.iter(|| black_box(case.arm.jacobian(black_box(&case.q), tree.target).unwrap()));
+        b.iter(|| black_box(case.arm.jacobian(black_box(&case.q), target).unwrap()));
     });
     jacobian.finish();
 
@@ -183,7 +187,7 @@ fn benchmark_tree_case<const N: usize>(c: &mut Criterion, tree: &TreeBenchmarkCa
                         black_box(&case.q),
                         black_box(&case.qd),
                         black_box(&case.qdd),
-                        tree.target,
+                        target,
                     )
                     .unwrap(),
             )
@@ -197,11 +201,7 @@ fn benchmark_tree_case<const N: usize>(c: &mut Criterion, tree: &TreeBenchmarkCa
         b.iter(|| {
             black_box(
                 case.arm
-                    .gravity(
-                        black_box(&case.q),
-                        &case.base,
-                        black_box(&tree.external_wrenches),
-                    )
+                    .gravity(black_box(&case.q), &case.base, black_box(&loads))
                     .unwrap(),
             )
         });
@@ -219,9 +219,9 @@ fn benchmark_tree_case<const N: usize>(c: &mut Criterion, tree: &TreeBenchmarkCa
                         black_box(&case.qd),
                         black_box(&case.qdd),
                         &case.base,
-                        Motion::zeros(),
-                        Motion::zeros(),
-                        black_box(&tree.external_wrenches),
+                        Twist::zeros(),
+                        Twist::zeros(),
+                        black_box(&loads),
                     )
                     .unwrap(),
             )

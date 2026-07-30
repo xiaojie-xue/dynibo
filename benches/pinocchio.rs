@@ -6,7 +6,7 @@ use std::{
 };
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use dyno::{Frame, JointVector, LinkId, Motion, RobotArm};
+use dyno::{Frame, JointVector, Robot, Twist};
 
 unsafe extern "C" {
     fn dyno_pinocchio_create(urdf_path: *const std::ffi::c_char) -> *mut std::ffi::c_void;
@@ -57,9 +57,9 @@ impl PinocchioContext {
 }
 
 struct TreeBenchmarkCase<const N: usize> {
-    arm: RobotArm,
+    arm: Robot,
     pinocchio: PinocchioContext,
-    target: LinkId,
+    target: usize,
     q: JointVector<N>,
     qd: JointVector<N>,
     qdd: JointVector<N>,
@@ -69,9 +69,11 @@ struct TreeBenchmarkCase<const N: usize> {
 impl<const N: usize> TreeBenchmarkCase<N> {
     fn new(relative_urdf_path: impl AsRef<Path>, target_link: &str, target_joint: &str) -> Self {
         let urdf_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_urdf_path.as_ref());
-        let arm = RobotArm::from_urdf(&urdf_path).expect("Dyno must load the tree benchmark URDF");
+        let arm = Robot::from_urdf(&urdf_path).expect("Dyno must load the tree benchmark URDF");
         let target = arm
-            .link_id(target_link)
+            .links()
+            .iter()
+            .position(|link| link.name() == target_link)
             .expect("target link must exist in the tree benchmark URDF");
         let pinocchio = PinocchioContext::new_for_joint(&urdf_path, target_joint);
         assert_eq!(pinocchio.dof(), N);
@@ -97,9 +99,9 @@ impl Drop for PinocchioContext {
 }
 
 struct BenchmarkCase<const N: usize> {
-    arm: RobotArm,
+    arm: Robot,
     pinocchio: PinocchioContext,
-    target: LinkId,
+    target: usize,
     q: JointVector<N>,
     qd: JointVector<N>,
     qdd: JointVector<N>,
@@ -109,14 +111,22 @@ struct BenchmarkCase<const N: usize> {
 impl<const N: usize> BenchmarkCase<N> {
     fn new(relative_urdf_path: impl AsRef<Path>) -> Self {
         let urdf_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_urdf_path.as_ref());
-        let arm = RobotArm::from_urdf(&urdf_path).expect("dyno must load the benchmark URDF");
+        let arm = Robot::from_urdf(&urdf_path).expect("dyno must load the benchmark URDF");
         let pinocchio = PinocchioContext::new(&urdf_path);
         assert_eq!(
             pinocchio.dof(),
             N,
             "Pinocchio and Dyno must load the same number of DoF"
         );
-        let target = arm.leaf_links()[0];
+        let leaf = arm
+            .leaf_links()
+            .next()
+            .expect("benchmark robot must have a leaf link");
+        let target = arm
+            .links()
+            .iter()
+            .position(|link| std::ptr::eq(link, leaf))
+            .expect("leaf link must belong to the benchmark robot");
 
         Self {
             arm,
@@ -132,17 +142,12 @@ impl<const N: usize> BenchmarkCase<N> {
 
 fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
     let size = format!("{N}dof");
+    let target = &case.arm.links()[case.target];
 
     let mut fk = c.benchmark_group(format!("forward_kinematics/{size}"));
     fk.throughput(Throughput::Elements(1));
     fk.bench_with_input(BenchmarkId::from_parameter("dyno"), &case.q, |b, q| {
-        b.iter(|| {
-            black_box(
-                case.arm
-                    .forward_kinematics(black_box(q), case.target)
-                    .unwrap(),
-            )
-        });
+        b.iter(|| black_box(case.arm.forward_kinematics(black_box(q), target).unwrap()));
     });
     fk.bench_with_input(BenchmarkId::from_parameter("pinocchio"), &case.q, |b, q| {
         b.iter(|| {
@@ -157,7 +162,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
     let mut jacobian = c.benchmark_group(format!("end_jacobian/{size}"));
     jacobian.throughput(Throughput::Elements(1));
     jacobian.bench_with_input(BenchmarkId::from_parameter("dyno"), &case.q, |b, q| {
-        b.iter(|| black_box(case.arm.jacobian(black_box(q), case.target).unwrap()))
+        b.iter(|| black_box(case.arm.jacobian(black_box(q), target).unwrap()))
     });
     jacobian.bench_with_input(BenchmarkId::from_parameter("pinocchio"), &case.q, |b, q| {
         b.iter(|| {
@@ -179,7 +184,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
                         black_box(&case.q),
                         black_box(&case.qd),
                         black_box(&case.qdd),
-                        case.target,
+                        target,
                     )
                     .unwrap(),
             )
@@ -219,8 +224,8 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
                         black_box(&case.qd),
                         black_box(&case.qdd),
                         &case.base,
-                        Motion::zeros(),
-                        Motion::zeros(),
+                        Twist::zeros(),
+                        Twist::zeros(),
                         black_box(&[]),
                     )
                     .unwrap(),
@@ -245,6 +250,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
 
 fn benchmark_tree_case<const N: usize>(c: &mut Criterion, case: &TreeBenchmarkCase<N>) {
     let size = format!("tree_{N}joint_2leaf");
+    let target = &case.arm.links()[case.target];
 
     let mut fk = c.benchmark_group(format!("tree_forward_kinematics/{size}"));
     fk.throughput(Throughput::Elements(1));
@@ -252,7 +258,7 @@ fn benchmark_tree_case<const N: usize>(c: &mut Criterion, case: &TreeBenchmarkCa
         b.iter(|| {
             black_box(
                 case.arm
-                    .forward_kinematics(black_box(&case.q), case.target)
+                    .forward_kinematics(black_box(&case.q), target)
                     .unwrap(),
             )
         });
@@ -273,7 +279,7 @@ fn benchmark_tree_case<const N: usize>(c: &mut Criterion, case: &TreeBenchmarkCa
     let mut jacobian = c.benchmark_group(format!("tree_jacobian/{size}"));
     jacobian.throughput(Throughput::Elements(1));
     jacobian.bench_function("dyno", |b| {
-        b.iter(|| black_box(case.arm.jacobian(black_box(&case.q), case.target).unwrap()));
+        b.iter(|| black_box(case.arm.jacobian(black_box(&case.q), target).unwrap()));
     });
     jacobian.bench_function("pinocchio", |b| {
         b.iter(|| {
@@ -317,8 +323,8 @@ fn benchmark_tree_case<const N: usize>(c: &mut Criterion, case: &TreeBenchmarkCa
                         black_box(&case.qd),
                         black_box(&case.qdd),
                         &case.base,
-                        Motion::zeros(),
-                        Motion::zeros(),
+                        Twist::zeros(),
+                        Twist::zeros(),
                         black_box(&[]),
                     )
                     .unwrap(),
