@@ -59,15 +59,14 @@ functional-safety certification.
 ### Calculation API
 
 To keep the library focused and lightweight, its calculation API is limited to
-the following operations. The two inverse-kinematics entries define the planned
-scope but are not implemented yet.
+the following operations.
 
 | Interface | Status and result |
 |---|---|
 | `forward_kinematics(q, target)` | Frame of a selected link |
 | `jacobian(q, target)` | Base-frame Jacobian of a selected link; non-ancestor columns are zero |
-| `inverse_kinematics(...)` | Planned; not implemented yet |
-| `inverse_kinematics_with_boundary(...)` | Planned; not implemented yet |
+| `inverse_kinematics(initial_q, target, desired)` | Damped-least-squares pose IK with default solver options |
+| `inverse_kinematics_with_options(...)` | Pose IK with configurable damping, tolerances, step limit, and iteration limit |
 | `forward_velocity_kinematics(q, qd, target, base, tool)` | Spatial velocity of a selected link/tool |
 | `forward_acceleration_kinematics(q, qd, qdd, target)` | Direct-recursive acceleration of a selected link |
 | `gravity(q, base, external_wrenches)` | Tree gravity recursion with loads on multiple links |
@@ -81,12 +80,29 @@ let q = JointVector::<4>::zeros();
 let target = arm.link_id("test_link_4").expect("target link must exist");
 let end = arm.forward_kinematics(&q, target)?;
 let jacobian = arm.jacobian(&q, target)?;
+let solved_q = arm.inverse_kinematics(&q, target, &end)?;
 # Ok::<(), dyno::Error>(())
 ```
 
 The calculation size `N` is inferred from each `JointVector<N>` input; it is
 not part of the `RobotArm` type. A mismatch returns `Error::WrongJointCount`
 before calculation begins.
+
+`inverse_kinematics` uses the damped inverse
+`J^T (J J^T + lambda^2 I)^-1`. Iterations are unconstrained, but a converged
+result is checked against the joint limits loaded from the URDF. Solver failures
+are exposed as `Error::InverseKinematics(InverseKinematicsError::...)`, which
+distinguishes invalid options, non-finite input, numerical factorization failure,
+a joint-limit violation, and non-convergence. The non-convergence error includes
+the final translation and rotation residuals. Use
+`inverse_kinematics_with_options` to tune the defaults.
+
+This built-in solver is intended only for simple pose inverse kinematics. Its
+final joint-limit check reports an invalid solution; it does not enforce limits
+during optimization. Applications requiring redundancy objectives, joint
+position or velocity constraints, collision constraints, or other task
+priorities should obtain the geometric Jacobian through `jacobian` and formulate
+their own constrained IK using a suitable QP solver.
 
 ## Tree-model conventions and compatibility scope
 

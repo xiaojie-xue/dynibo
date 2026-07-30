@@ -51,15 +51,14 @@ URDF 解析和拓扑构建只在模型构建阶段分配内存；运动学和动
 
 ### 计算接口
 
-为保持库的定位专注、轻量，公开计算接口仅限下列操作。两个逆运动学接口用于明确后续
-范围，目前尚未实现。
+为保持库的定位专注、轻量，公开计算接口仅限下列操作。
 
 | 接口 | 状态与结果 |
 |---|---|
 | `forward_kinematics(q, target)` | 指定 link 的位姿 |
 | `jacobian(q, target)` | 指定 link 的基座坐标系 Jacobian，非祖先关节列为零 |
-| `inverse_kinematics(...)` | 规划中，尚未实现 |
-| `inverse_kinematics_with_boundary(...)` | 规划中，尚未实现 |
+| `inverse_kinematics(initial_q, target, desired)` | 使用默认参数的阻尼最小二乘位姿逆运动学 |
+| `inverse_kinematics_with_options(...)` | 可配置阻尼、容差、步长和迭代上限的位姿逆运动学 |
 | `forward_velocity_kinematics(q, qd, target, base, tool)` | 指定 link/tool 的空间速度 |
 | `forward_acceleration_kinematics(q, qd, qdd, target)` | 指定 link 的直接递推加速度 |
 | `gravity(q, base, external_wrenches)` | 支持多 link 外载荷的树形重力递推 |
@@ -73,11 +72,23 @@ let q = JointVector::<4>::zeros();
 let target = arm.link_id("test_link_4").expect("target link must exist");
 let end = arm.forward_kinematics(&q, target)?;
 let jacobian = arm.jacobian(&q, target)?;
+let solved_q = arm.inverse_kinematics(&q, target, &end)?;
 # Ok::<(), dyno::Error>(())
 ```
 
 计算尺寸 `N` 会从每次传入的 `JointVector<N>` 自动推导，不再属于 `RobotArm` 类型的
 一部分。若模型与输入尺寸不一致，会在开始计算前返回 `Error::WrongJointCount`。
+
+`inverse_kinematics` 使用阻尼逆
+`J^T (J J^T + lambda^2 I)^-1`。迭代过程不施加约束，但收敛结果会使用 URDF 中的关节
+限位进行检查。求解错误通过 `Error::InverseKinematics(InverseKinematicsError::...)`
+明确区分非法配置、非有限输入、数值分解失败、关节限位越界和不收敛；不收敛错误还会
+给出最终的平移与旋转残差。需要调整默认参数时，可使用
+`inverse_kinematics_with_options`。
+
+内置求解器仅适用于简单的位姿逆解。最终关节限位检查只会报告无效结果，并不会在优化
+过程中施加约束。需要冗余控制、关节位置或速度约束、碰撞约束以及其他任务优先级时，
+建议通过 `jacobian` 获取几何 Jacobian，再结合合适的 QP solver 自行构建约束 IK。
 
 ## 树模型约定与兼容范围
 
