@@ -69,8 +69,8 @@ the following operations.
 | `inverse_kinematics_with_options(...)` | Pose IK with configurable damping, tolerances, step limit, and iteration limit |
 | `forward_velocity_kinematics(q, qd, target, base, tool)` | Spatial velocity of a selected link/tool |
 | `forward_acceleration_kinematics(q, qd, qdd, target)` | Direct-recursive acceleration of a selected link |
-| `gravity(q, base, loads)` | Tree gravity recursion with loads on multiple links |
-| `inverse_dynamics(..., loads)` | Tree RNEA with multi-link loads and branch accumulation |
+| `gravity(q, base, loads)` | Joint-force vector from tree gravity recursion with multi-link loads |
+| `inverse_dynamics(..., loads)` | Joint-force vector from tree RNEA with multi-link loads |
 
 ```rust
 use dyno::{JointVector, Robot};
@@ -121,8 +121,8 @@ no external load. `JointVector<N>` currently contains every URDF joint; fixed
 joints occupy an element but contribute no motion or active joint force.
 
 The root is retained in `links()`, but fixed-base compatibility dynamics do not
-include the root link's own inertia in joint forces or the base wrench. A
-`Load` acts at a link origin and is expressed in that link's frame.
+include the root link's own inertia in joint forces. A `Load` acts at a link
+origin and is expressed in that link's frame.
 
 The compatibility dynamics intentionally preserve legacy numerical conventions,
 including positive-Z gravity and the original product-of-inertia signs, so the

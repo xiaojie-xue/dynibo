@@ -455,7 +455,7 @@ fn forward_acceleration_matches_finite_difference() {
 fn gravity_matches_original_two_link_cases() {
     let arm = Robot::from_urdf(urdf_path("gravity_arm.urdf")).unwrap();
     let q = JointVector::<2>::new(FRAC_PI_2, FRAC_PI_2);
-    let (tau, _) = arm.gravity(&q, &Frame::identity(), &[]).unwrap();
+    let tau = arm.gravity(&q, &Frame::identity(), &[]).unwrap();
     assert_abs_diff_eq!(tau[0], 0.0, epsilon = 0.1);
     assert_abs_diff_eq!(tau[1], -4.903325, epsilon = 0.1);
 
@@ -463,7 +463,7 @@ fn gravity_matches_original_two_link_cases() {
         Translation3::identity(),
         UnitQuaternion::from_euler_angles(FRAC_PI_2, 0.0, 0.0),
     );
-    let (tau, _) = arm
+    let tau = arm
         .gravity(&JointVector::<2>::zeros(), &vertical_base, &[])
         .unwrap();
     assert_abs_diff_eq!(tau[0], 9.80665, epsilon = 0.1);
@@ -521,7 +521,7 @@ fn inverse_dynamics_matches_test_arm_numeric_reference() {
         ),
     ];
     for (q, qd, qdd, expected, epsilon) in cases {
-        let (tau, _) = arm
+        let tau = arm
             .inverse_dynamics(
                 &q,
                 &qd,
@@ -582,10 +582,10 @@ fn tree_external_loads_are_isolated_and_add_linearly() {
         wrench: Wrench::new(Vector3::new(-0.4, 0.1, 0.2), Vector3::new(-0.6, 0.8, 0.3)),
     };
 
-    let (baseline, baseline_base) = arm.gravity(&q, &Frame::identity(), &[]).unwrap();
-    let (left_only, left_base) = arm.gravity(&q, &Frame::identity(), &[left]).unwrap();
-    let (right_only, right_base) = arm.gravity(&q, &Frame::identity(), &[right]).unwrap();
-    let (both, both_base) = arm.gravity(&q, &Frame::identity(), &[left, right]).unwrap();
+    let baseline = arm.gravity(&q, &Frame::identity(), &[]).unwrap();
+    let left_only = arm.gravity(&q, &Frame::identity(), &[left]).unwrap();
+    let right_only = arm.gravity(&q, &Frame::identity(), &[right]).unwrap();
+    let both = arm.gravity(&q, &Frame::identity(), &[left, right]).unwrap();
 
     for right_joint in [2, 4, 6] {
         assert_abs_diff_eq!(
@@ -613,16 +613,6 @@ fn tree_external_loads_are_isolated_and_add_linearly() {
         assert_relative_eq!(with_load - baseline, expected, epsilon = 2.0e-12);
     }
     assert_relative_eq!(both, left_only + right_only - baseline, epsilon = 2.0e-12);
-    assert_relative_eq!(
-        both_base.torque,
-        left_base.torque + right_base.torque - baseline_base.torque,
-        epsilon = 2.0e-12
-    );
-    assert_relative_eq!(
-        both_base.force,
-        left_base.force + right_base.force - baseline_base.force,
-        epsilon = 2.0e-12
-    );
 }
 
 #[test]
@@ -630,8 +620,8 @@ fn tree_gravity_equals_zero_motion_inverse_dynamics() {
     let arm = tree_arm();
     let q = JointVector::<7>::from_row_slice(&[-0.45, 0.12, -0.28, 0.63, -0.31, 0.22, -0.51]);
     let zero = JointVector::<7>::zeros();
-    let (gravity, gravity_base) = arm.gravity(&q, &Frame::identity(), &[]).unwrap();
-    let (inverse, inverse_base) = arm
+    let gravity = arm.gravity(&q, &Frame::identity(), &[]).unwrap();
+    let inverse = arm
         .inverse_dynamics(
             &q,
             &zero,
@@ -643,6 +633,4 @@ fn tree_gravity_equals_zero_motion_inverse_dynamics() {
         )
         .unwrap();
     assert_relative_eq!(inverse, gravity, epsilon = 2.0e-12);
-    assert_relative_eq!(inverse_base.torque, gravity_base.torque, epsilon = 2.0e-12);
-    assert_relative_eq!(inverse_base.force, gravity_base.force, epsilon = 2.0e-12);
 }

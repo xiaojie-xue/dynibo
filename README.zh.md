@@ -61,8 +61,8 @@ URDF 解析和拓扑构建只在模型构建阶段分配内存；运动学和动
 | `inverse_kinematics_with_options(...)` | 可配置阻尼、容差、步长和迭代上限的位姿逆运动学 |
 | `forward_velocity_kinematics(q, qd, target, base, tool)` | 指定 link/tool 的空间速度 |
 | `forward_acceleration_kinematics(q, qd, qdd, target)` | 指定 link 的直接递推加速度 |
-| `gravity(q, base, loads)` | 支持多 link 外载荷的树形重力递推 |
-| `inverse_dynamics(..., loads)` | 支持多 link 外载荷和分支汇聚的树形 RNEA |
+| `gravity(q, base, loads)` | 支持多 link 外载荷的树形重力递推关节力向量 |
+| `inverse_dynamics(..., loads)` | 支持多 link 外载荷的树形 RNEA 关节力向量 |
 
 ```rust
 use dyno::{JointVector, Robot};
@@ -104,7 +104,7 @@ link 只有一个父 joint。构建时会生成父先于子的拓扑顺序，并
 关节力为零。
 
 父 link 会保存在 `links()` 中，但固定基座兼容动力学不把父 link 自身的惯性计入
-关节力或基座 Wrench。`Load` 作用在 link 原点，并以该 link 坐标系表达。
+关节力。`Load` 作用在 link 原点，并以该 link 坐标系表达。
 
 兼容动力学内核保留已有的正 Z 方向重力和惯量积符号。Pinocchio 桥接层会转换相应
 约定，正确性测试逐元素比较转换后的数值，性能基准只统计执行开销。

@@ -180,7 +180,7 @@ fn branched_gravity_and_rnea_match_pinocchio() {
                 pin_gravity.as_mut_ptr(),
             )
         };
-        let (gravity, _) = arm.gravity(&q, &Frame::identity(), &[]).unwrap();
+        let gravity = arm.gravity(&q, &Frame::identity(), &[]).unwrap();
         assert_relative_eq!(
             gravity,
             dyno_order(&pin_gravity, &mapping),
@@ -202,7 +202,7 @@ fn branched_gravity_and_rnea_match_pinocchio() {
                 pin_torque.as_mut_ptr(),
             )
         };
-        let (torque, _) = arm
+        let torque = arm
             .inverse_dynamics(
                 &q,
                 &qd,

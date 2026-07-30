@@ -442,10 +442,9 @@ impl Robot {
         Ok(self.link_acceleration(q, qd, qdd, target_index))
     }
 
-    /// Computes joint forces and the root reaction wrench using Newton-Euler dynamics.
+    /// Computes and returns joint forces using Newton-Euler dynamics.
     ///
-    /// The returned tuple is `(joint_force, wrench_at_base)`. Wrenches in
-    /// `loads` must be expressed in their selected link frames.
+    /// Wrenches in `loads` must be expressed in their selected link frames.
     /// Gravity is included along the negative world Z direction through the
     /// equivalent upward inertial acceleration.
     ///
@@ -463,7 +462,7 @@ impl Robot {
         base_velocity: Twist,
         base_acceleration: Twist,
         loads: &[Load<'_>],
-    ) -> Result<(JointVector<N>, Wrench)> {
+    ) -> Result<JointVector<N>> {
         self.validate_joint_count::<N>()?;
         let mut transforms: [Frame; N] = std::array::from_fn(|_| Frame::identity());
         let mut angular_velocities: [Vector3<f64>; N] = std::array::from_fn(|_| Vector3::zeros());
@@ -537,12 +536,9 @@ impl Robot {
 
         let mut joint_force = JointVector::zeros();
         let mut link_loads: [Wrench; N] = std::array::from_fn(|_| Wrench::zeros());
-        let mut base_load = Wrench::zeros();
         for load in loads {
             let link_index = self.validate_link(load.link)?;
-            if link_index == 0 {
-                base_load = add_wrench(base_load, load.wrench);
-            } else {
+            if link_index != 0 {
                 let index = link_index - 1;
                 link_loads[index] = add_wrench(link_loads[index], load.wrench);
             }
@@ -562,21 +558,18 @@ impl Robot {
             link_loads[i] = add_wrench(link_loads[i], inertial_load);
             joint_force[i] = joint.active_force(link_loads[i]);
 
-            let parent_load = wrench_to_parent(&transforms[i], link_loads[i]);
             let parent = self.joint_parents[i];
-            if parent == 0 {
-                base_load = add_wrench(base_load, parent_load);
-            } else {
+            if parent != 0 {
+                let parent_load = wrench_to_parent(&transforms[i], link_loads[i]);
                 link_loads[parent - 1] = add_wrench(link_loads[parent - 1], parent_load);
             }
         }
-        Ok((joint_force, base_load))
+        Ok(joint_force)
     }
 
-    /// Computes gravity joint forces and the resulting root reaction wrench.
+    /// Computes and returns gravity joint forces.
     ///
-    /// The returned tuple is `(joint_force, wrench_at_base)`. Wrenches in
-    /// `loads` must be expressed in their selected link frames.
+    /// Wrenches in `loads` must be expressed in their selected link frames.
     ///
     /// # Errors
     ///
@@ -587,7 +580,7 @@ impl Robot {
         q: &JointVector<N>,
         base_frame: &Frame,
         loads: &[Load<'_>],
-    ) -> Result<(JointVector<N>, Wrench)> {
+    ) -> Result<JointVector<N>> {
         self.validate_joint_count::<N>()?;
         let base_gravity = base_frame.rotation.inverse() * Vector3::new(0.0, 0.0, GRAVITY);
         let mut transforms: [Frame; N] = std::array::from_fn(|_| Frame::identity());
@@ -605,12 +598,9 @@ impl Robot {
 
         let mut torque = JointVector::zeros();
         let mut link_loads: [Wrench; N] = std::array::from_fn(|_| Wrench::zeros());
-        let mut base_load = Wrench::zeros();
         for load in loads {
             let link_index = self.validate_link(load.link)?;
-            if link_index == 0 {
-                base_load = add_wrench(base_load, load.wrench);
-            } else {
+            if link_index != 0 {
                 let index = link_index - 1;
                 link_loads[index] = add_wrench(link_loads[index], load.wrench);
             }
@@ -624,15 +614,13 @@ impl Robot {
             link_loads[i] = add_wrench(link_loads[i], gravity_load);
             torque[i] = joint.active_force(link_loads[i]);
 
-            let parent_load = wrench_to_parent(&transforms[i], link_loads[i]);
             let parent = self.joint_parents[i];
-            if parent == 0 {
-                base_load = add_wrench(base_load, parent_load);
-            } else {
+            if parent != 0 {
+                let parent_load = wrench_to_parent(&transforms[i], link_loads[i]);
                 link_loads[parent - 1] = add_wrench(link_loads[parent - 1], parent_load);
             }
         }
-        Ok((torque, base_load))
+        Ok(torque)
     }
 
     /// Propagates joint motion to the spatial acceleration of one link origin.
