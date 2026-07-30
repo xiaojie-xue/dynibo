@@ -3,7 +3,12 @@ use std::collections::{HashMap, HashSet};
 use nalgebra::{Isometry3, Matrix3, Translation3, UnitQuaternion, Vector3};
 use urdf_rs::{JointType, Pose, Robot};
 
-use crate::{Error, JointKind, JointLimit, Result, RobotLink};
+use crate::{Error, JointKind, JointLimit, Result, RobotJoint, RobotLink};
+
+pub(crate) struct SerialModel {
+    pub joints: Vec<RobotJoint>,
+    pub links: Vec<RobotLink>,
+}
 
 pub(crate) fn pose_to_frame(pose: &Pose) -> Isometry3<f64> {
     Isometry3::from_parts(
@@ -12,7 +17,7 @@ pub(crate) fn pose_to_frame(pose: &Pose) -> Isometry3<f64> {
     )
 }
 
-pub(crate) fn serial_links(robot: &Robot) -> Result<Vec<RobotLink>> {
+pub(crate) fn serial_model(robot: &Robot) -> Result<SerialModel> {
     let children: HashSet<&str> = robot
         .joints
         .iter()
@@ -51,10 +56,12 @@ pub(crate) fn serial_links(robot: &Robot) -> Result<Vec<RobotLink>> {
         .map(|link| (link.name.as_str(), link))
         .collect();
 
-    let mut result = Vec::with_capacity(robot.joints.len());
+    let mut joints = Vec::with_capacity(robot.joints.len());
+    let mut links = Vec::with_capacity(robot.links.len());
     let mut current = roots[0];
-    while let Some(joints) = joints_by_parent.get(current) {
-        let joint = joints[0];
+    links.push(robot_link(links_by_name[current]));
+    while let Some(child_joints) = joints_by_parent.get(current) {
+        let joint = child_joints[0];
         let child = links_by_name
             .get(joint.child.link.as_str())
             .ok_or_else(|| {
@@ -63,19 +70,20 @@ pub(crate) fn serial_links(robot: &Robot) -> Result<Vec<RobotLink>> {
                     joint.name
                 ))
             })?;
-        result.push(robot_link(joint, child)?);
+        joints.push(robot_joint(joint)?);
+        links.push(robot_link(child));
         current = child.name.as_str();
     }
 
-    if result.len() != robot.joints.len() {
+    if joints.len() != robot.joints.len() {
         return Err(Error::InvalidModel(
             "joint graph is disconnected or cyclic".to_owned(),
         ));
     }
-    Ok(result)
+    Ok(SerialModel { joints, links })
 }
 
-fn robot_link(joint: &urdf_rs::Joint, link: &urdf_rs::Link) -> Result<RobotLink> {
+fn robot_joint(joint: &urdf_rs::Joint) -> Result<RobotJoint> {
     let kind = match joint.joint_type {
         JointType::Revolute | JointType::Continuous => JointKind::Revolute,
         JointType::Prismatic => JointKind::Prismatic,
@@ -95,6 +103,16 @@ fn robot_link(joint: &urdf_rs::Joint, link: &urdf_rs::Link) -> Result<RobotLink>
             velocity: joint.limit.velocity,
         }
     };
+    RobotJoint::new_named(
+        joint.name.clone(),
+        kind,
+        pose_to_frame(&joint.origin),
+        Vector3::new(joint.axis.xyz[0], joint.axis.xyz[1], joint.axis.xyz[2]),
+        limit,
+    )
+}
+
+fn robot_link(link: &urdf_rs::Link) -> RobotLink {
     let inertial = &link.inertial;
     // Preserve the compatibility convention: URDF products of inertia are
     // stored with a negative sign in RobotLink.
@@ -109,12 +127,8 @@ fn robot_link(joint: &urdf_rs::Joint, link: &urdf_rs::Link) -> Result<RobotLink>
         -inertial.inertia.iyz,
         inertial.inertia.izz,
     );
-    RobotLink::new_named(
+    RobotLink::new(
         link.name.clone(),
-        kind,
-        pose_to_frame(&joint.origin),
-        Vector3::new(joint.axis.xyz[0], joint.axis.xyz[1], joint.axis.xyz[2]),
-        limit,
         inertial.mass.value,
         Vector3::new(
             inertial.origin.xyz[0],

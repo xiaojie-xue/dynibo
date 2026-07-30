@@ -8,7 +8,10 @@ use std::{
 };
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
-use dyno::{Error, Frame, JointKind, JointLimit, JointVector, Motion, RobotArm, RobotLink, Wrench};
+use dyno::{
+    Error, Frame, JointKind, JointLimit, JointVector, Motion, RobotArm, RobotJoint, RobotLink,
+    Wrench,
+};
 use nalgebra::{Isometry3, Matrix3, Translation3, UnitQuaternion, Vector3};
 
 fn test_arm() -> RobotArm {
@@ -22,16 +25,8 @@ fn urdf_path(file_name: &str) -> PathBuf {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn link(
-    name: &str,
-    kind: JointKind,
-    xyz: [f64; 3],
-    rpy: [f64; 3],
-    axis: [f64; 3],
-    mass: f64,
-    com: [f64; 3],
-) -> RobotLink {
-    RobotLink::new(
+fn joint(name: &str, kind: JointKind, xyz: [f64; 3], rpy: [f64; 3], axis: [f64; 3]) -> RobotJoint {
+    RobotJoint::new(
         name,
         kind,
         Isometry3::from_parts(
@@ -44,17 +39,14 @@ fn link(
             upper: 10.0,
             velocity: 100.0,
         },
-        mass,
-        Vector3::new(com[0], com[1], com[2]),
-        Matrix3::identity() * 0.01,
     )
     .unwrap()
 }
 
 #[test]
-fn robot_link_preserves_parameters_and_clamps_state() {
-    let mut link = RobotLink::new(
-        "link_1",
+fn robot_joint_and_link_preserve_their_own_parameters() {
+    let mut joint = RobotJoint::new(
+        "joint_1",
         JointKind::Revolute,
         Isometry3::from_parts(
             Translation3::new(2.0, 3.0, 4.0),
@@ -66,48 +58,50 @@ fn robot_link_preserves_parameters_and_clamps_state() {
             upper: 3.14,
             velocity: 100.0,
         },
+    )
+    .unwrap();
+    let mut link = RobotLink::new(
+        "link_1",
         4.5,
         Vector3::new(1.1, 1.2, 1.3),
         Matrix3::new(0.1, -0.4, -0.5, -0.4, 0.2, -0.6, -0.5, -0.6, 0.3),
-    )
-    .unwrap();
+    );
 
+    assert_eq!(joint.name(), "joint_1");
     assert_eq!(link.name(), "link_1");
-    assert_eq!(link.kind(), JointKind::Revolute);
+    assert_eq!(joint.kind(), JointKind::Revolute);
     assert_eq!(link.mass(), 4.5);
-    assert_abs_diff_eq!(link.origin().translation.vector.x, 2.0);
+    assert_abs_diff_eq!(joint.origin().translation.vector.x, 2.0);
     assert_abs_diff_eq!(link.center_of_mass().z, 1.3);
-    assert!(link.is_over_limit(4.0));
-    assert!(!link.is_over_limit(0.0));
-    assert_abs_diff_eq!(link.set_position(10.0), 3.14);
-    assert_abs_diff_eq!(link.set_velocity(-200.0), -100.0);
-    assert_abs_diff_eq!(link.set_acceleration(12.0), 12.0);
+    assert!(joint.is_over_limit(4.0));
+    assert!(!joint.is_over_limit(0.0));
+    assert_abs_diff_eq!(joint.set_position(10.0), 3.14);
+    assert_abs_diff_eq!(joint.set_velocity(-200.0), -100.0);
+    assert_abs_diff_eq!(joint.set_acceleration(12.0), 12.0);
+    link.set_mass(5.0);
+    assert_abs_diff_eq!(link.mass(), 5.0);
 }
 
 #[test]
 fn revolute_and_prismatic_joint_frames_match_urdf_semantics() {
-    let revolute = link(
+    let revolute = joint(
         "revolute",
         JointKind::Revolute,
         [0.0, 0.0, 0.226],
         [0.0, 0.0, FRAC_PI_2],
         [0.0, 0.0, 1.0],
-        0.0,
-        [0.0; 3],
     );
     let frame = revolute.frame(0.3 * PI);
     let expected = UnitQuaternion::from_euler_angles(0.0, 0.0, 0.8 * PI);
     assert_relative_eq!(frame.rotation, expected, epsilon = 1.0e-12);
     assert_abs_diff_eq!(frame.translation.vector.z, 0.226);
 
-    let prismatic = link(
+    let prismatic = joint(
         "slide",
         JointKind::Prismatic,
         [1.0, 0.0, 0.0],
         [0.0; 3],
         [0.0, 1.0, 0.0],
-        0.0,
-        [0.0; 3],
     );
     assert_relative_eq!(
         prismatic.frame(0.25).translation.vector,
@@ -120,11 +114,15 @@ fn revolute_and_prismatic_joint_frames_match_urdf_semantics() {
 fn urdf_rs_loads_test_arm_and_checks_calculation_size() {
     let arm = test_arm();
     assert_eq!(arm.name(), "test_arm");
-    assert_eq!(arm.links().len(), 4);
-    assert_eq!(arm.links()[0].name(), "test_link_1");
+    assert_eq!(arm.links().len(), 5);
+    assert_eq!(arm.links()[0].name(), "test_base_link");
+    assert_eq!(arm.links()[1].name(), "test_link_1");
+    assert_eq!(arm.joints().len(), 4);
+    assert_eq!(arm.joints()[0].name(), "test_joint_1");
+    assert_eq!(arm.link_count(), 5);
     assert_eq!(arm.joint_count(), 4);
-    assert_abs_diff_eq!(arm.links()[1].mass(), 7.016);
-    assert_abs_diff_eq!(arm.links()[1].origin().translation.vector.z, 0.108);
+    assert_abs_diff_eq!(arm.links()[2].mass(), 7.016);
+    assert_abs_diff_eq!(arm.joints()[1].origin().translation.vector.z, 0.108);
 
     let wrong_size = arm
         .forward_kinematics(&JointVector::<3>::zeros())

@@ -2,7 +2,7 @@ use nalgebra::{Isometry3, Matrix3, Translation3, Unit, UnitQuaternion, Vector3};
 
 use crate::{Error, Frame, Result, Wrench};
 
-/// Joint motion supported by the original `RobotArm` implementation.
+/// Joint motion supported by `RobotArm`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JointKind {
     Revolute,
@@ -27,87 +27,32 @@ impl Default for JointLimit {
     }
 }
 
-/// One URDF joint together with the inertial properties of its child link.
+/// Inertial properties of one URDF link.
 #[derive(Clone, Debug)]
 pub struct RobotLink {
     name: String,
-    kind: JointKind,
-    origin: Frame,
-    axis: Unit<Vector3<f64>>,
-    limit: JointLimit,
     mass: f64,
     center_of_mass: Vector3<f64>,
     inertia: Matrix3<f64>,
-    position: f64,
-    velocity: f64,
-    acceleration: f64,
-    home_offset: f64,
 }
 
 impl RobotLink {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: impl Into<String>,
-        kind: JointKind,
-        origin: Frame,
-        axis: Vector3<f64>,
-        limit: JointLimit,
         mass: f64,
         center_of_mass: Vector3<f64>,
         inertia: Matrix3<f64>,
-    ) -> Result<Self> {
-        Self::new_named(
-            name.into(),
-            kind,
-            origin,
-            axis,
-            limit,
+    ) -> Self {
+        Self {
+            name: name.into(),
             mass,
             center_of_mass,
             inertia,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new_named(
-        name: String,
-        kind: JointKind,
-        origin: Frame,
-        axis: Vector3<f64>,
-        limit: JointLimit,
-        mass: f64,
-        center_of_mass: Vector3<f64>,
-        inertia: Matrix3<f64>,
-    ) -> Result<Self> {
-        let axis = Unit::try_new(axis, 1.0e-12).ok_or_else(|| Error::InvalidJointAxis {
-            joint: name.clone(),
-        })?;
-        Ok(Self {
-            name,
-            kind,
-            origin,
-            axis,
-            limit,
-            mass,
-            center_of_mass,
-            inertia,
-            position: 0.0,
-            velocity: 0.0,
-            acceleration: 0.0,
-            home_offset: 0.0,
-        })
+        }
     }
 
     pub fn name(&self) -> &str {
         &self.name
-    }
-
-    pub const fn kind(&self) -> JointKind {
-        self.kind
-    }
-
-    pub const fn limit(&self) -> JointLimit {
-        self.limit
     }
 
     pub const fn mass(&self) -> f64 {
@@ -128,6 +73,67 @@ impl RobotLink {
 
     pub const fn inertia(&self) -> &Matrix3<f64> {
         &self.inertia
+    }
+}
+
+/// Kinematic and state properties of one URDF joint.
+#[derive(Clone, Debug)]
+pub struct RobotJoint {
+    name: String,
+    kind: JointKind,
+    origin: Frame,
+    axis: Unit<Vector3<f64>>,
+    limit: JointLimit,
+    position: f64,
+    velocity: f64,
+    acceleration: f64,
+    home_offset: f64,
+}
+
+impl RobotJoint {
+    pub fn new(
+        name: impl Into<String>,
+        kind: JointKind,
+        origin: Frame,
+        axis: Vector3<f64>,
+        limit: JointLimit,
+    ) -> Result<Self> {
+        Self::new_named(name.into(), kind, origin, axis, limit)
+    }
+
+    pub(crate) fn new_named(
+        name: String,
+        kind: JointKind,
+        origin: Frame,
+        axis: Vector3<f64>,
+        limit: JointLimit,
+    ) -> Result<Self> {
+        let axis = Unit::try_new(axis, 1.0e-12).ok_or_else(|| Error::InvalidJointAxis {
+            joint: name.clone(),
+        })?;
+        Ok(Self {
+            name,
+            kind,
+            origin,
+            axis,
+            limit,
+            position: 0.0,
+            velocity: 0.0,
+            acceleration: 0.0,
+            home_offset: 0.0,
+        })
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub const fn kind(&self) -> JointKind {
+        self.kind
+    }
+
+    pub const fn limit(&self) -> JointLimit {
+        self.limit
     }
 
     pub const fn origin(&self) -> &Frame {

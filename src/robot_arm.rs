@@ -3,8 +3,8 @@ use std::path::Path;
 use nalgebra::{UnitQuaternion, Vector3};
 
 use crate::{
-    Error, Frame, Jacobian, JointKind, JointVector, Motion, Result, RobotLink, Wrench,
-    urdf::serial_links,
+    Error, Frame, Jacobian, JointKind, JointVector, Motion, Result, RobotJoint, RobotLink, Wrench,
+    urdf::serial_model,
 };
 
 const GRAVITY: f64 = 9.80665;
@@ -13,16 +13,18 @@ const GRAVITY: f64 = 9.80665;
 #[derive(Clone, Debug)]
 pub struct RobotArm {
     name: String,
+    joints: Box<[RobotJoint]>,
     links: Box<[RobotLink]>,
 }
 
 impl RobotArm {
     pub fn from_urdf(path: impl AsRef<Path>) -> Result<Self> {
         let robot = urdf_rs::read_file(path)?;
-        let links = serial_links(&robot)?;
+        let model = serial_model(&robot)?;
         Ok(Self {
             name: robot.name,
-            links: links.into_boxed_slice(),
+            joints: model.joints.into_boxed_slice(),
+            links: model.links.into_boxed_slice(),
         })
     }
 
@@ -34,16 +36,24 @@ impl RobotArm {
         &self.links
     }
 
-    pub fn joint_count(&self) -> usize {
+    pub fn joints(&self) -> &[RobotJoint] {
+        &self.joints
+    }
+
+    pub fn link_count(&self) -> usize {
         self.links.len()
     }
 
+    pub fn joint_count(&self) -> usize {
+        self.joints.len()
+    }
+
     fn validate_joint_count<const N: usize>(&self) -> Result<()> {
-        if self.links.len() == N {
+        if self.joints.len() == N {
             Ok(())
         } else {
             Err(Error::WrongJointCount {
-                expected: self.links.len(),
+                expected: self.joints.len(),
                 actual: N,
             })
         }
@@ -52,11 +62,11 @@ impl RobotArm {
     pub fn forward_kinematics<const N: usize>(&self, q: &JointVector<N>) -> Result<Frame> {
         self.validate_joint_count::<N>()?;
         Ok(self
-            .links
+            .joints
             .iter()
             .zip(q.iter())
-            .fold(Frame::identity(), |frame, (link, &position)| {
-                frame * link.frame(position)
+            .fold(Frame::identity(), |frame, (joint, &position)| {
+                frame * joint.frame(position)
             }))
     }
 
@@ -71,10 +81,10 @@ impl RobotArm {
         let mut jacobian: Jacobian<N> = Jacobian::zeros();
 
         for i in 0..N {
-            transform *= self.links[i].frame(q[i]);
-            let axis = transform.rotation * self.links[i].axis().as_ref();
+            transform *= self.joints[i].frame(q[i]);
+            let axis = transform.rotation * self.joints[i].axis().as_ref();
 
-            match self.links[i].kind() {
+            match self.joints[i].kind() {
                 JointKind::Revolute => {
                     origins[i] = transform.translation.vector;
                     jacobian.fixed_view_mut::<3, 1>(0, i).copy_from(&axis);
@@ -88,7 +98,7 @@ impl RobotArm {
 
         let end_origin = transform.translation.vector;
         for (i, origin) in origins.iter().enumerate() {
-            if self.links[i].kind() == JointKind::Revolute {
+            if self.joints[i].kind() == JointKind::Revolute {
                 let axis = jacobian.fixed_view::<3, 1>(0, i).into_owned();
                 let linear = axis.cross(&(end_origin - origin));
                 jacobian.fixed_view_mut::<3, 1>(3, i).copy_from(&linear);
@@ -161,18 +171,19 @@ impl RobotArm {
             base_rotation_inverse * (Vector3::new(0.0, 0.0, GRAVITY) + base_acceleration.linear);
 
         for i in 0..N {
-            let link = &self.links[i];
-            let transform = link.frame(q[i]);
+            let joint = &self.joints[i];
+            let link = &self.links[i + 1];
+            let transform = joint.frame(q[i]);
             let rotation_inverse = transform.rotation.inverse();
             let translation = transform.translation.vector;
-            let axis = link.axis().as_ref();
+            let axis = joint.axis().as_ref();
             let rotated_omega = rotation_inverse * omega;
             let rotated_angular_acceleration = rotation_inverse * angular_acceleration;
             let translated_acceleration = rotation_inverse
                 * (acceleration
                     + angular_acceleration.cross(&translation)
                     + omega.cross(&omega.cross(&translation)));
-            match link.kind() {
+            match joint.kind() {
                 JointKind::Revolute => {
                     acceleration = translated_acceleration;
                     angular_acceleration = rotated_angular_acceleration
@@ -204,7 +215,8 @@ impl RobotArm {
         let mut joint_force = JointVector::zeros();
         let mut load = end_load;
         for i in (0..N).rev() {
-            let link = &self.links[i];
+            let joint = &self.joints[i];
+            let link = &self.links[i + 1];
             let (next_rotation, next_translation) = if i + 1 < N {
                 (
                     transforms[i + 1].rotation,
@@ -222,7 +234,7 @@ impl RobotArm {
                     .cross(&(link.mass() * link_accelerations[i]))
                 + link.inertia() * angular_accelerations[i];
             load = Wrench::new(torque, force);
-            joint_force[i] = link.active_force(load);
+            joint_force[i] = joint.active_force(load);
         }
         Ok((joint_force, wrench_to_parent(&transforms[0], load)))
     }
@@ -239,7 +251,7 @@ impl RobotArm {
         let mut transforms: [Frame; N] = std::array::from_fn(|_| Frame::identity());
         let mut gravity_at_link: [Vector3<f64>; N] = std::array::from_fn(|_| Vector3::zeros());
         for i in 0..N {
-            transforms[i] = self.links[i].frame(q[i]);
+            transforms[i] = self.joints[i].frame(q[i]);
             gravity = transforms[i].rotation.inverse() * gravity;
             gravity_at_link[i] = gravity;
         }
@@ -247,14 +259,16 @@ impl RobotArm {
         let mut torque = JointVector::zeros();
         let mut load = end_load;
         for i in (0..N).rev() {
-            let force = self.links[i].mass() * gravity_at_link[i];
-            let gravity_load = Wrench::new(self.links[i].center_of_mass().cross(&force), force);
+            let joint = &self.joints[i];
+            let link = &self.links[i + 1];
+            let force = link.mass() * gravity_at_link[i];
+            let gravity_load = Wrench::new(link.center_of_mass().cross(&force), force);
             if i + 1 < N {
                 load = add_wrench(wrench_to_parent(&transforms[i + 1], load), gravity_load);
             } else {
                 load = add_wrench(load, gravity_load);
             }
-            torque[i] = self.links[i].active_force(load);
+            torque[i] = joint.active_force(load);
         }
         Ok((torque, wrench_to_parent(&transforms[0], load)))
     }
@@ -272,15 +286,15 @@ impl RobotArm {
 
         for i in 0..N {
             let parent_origin = transform.translation.vector;
-            transform *= self.links[i].frame(q[i]);
+            transform *= self.joints[i].frame(q[i]);
             let offset = transform.translation.vector - parent_origin;
-            let axis = transform.rotation * self.links[i].axis().as_ref();
+            let axis = transform.rotation * self.joints[i].axis().as_ref();
             let joint_acceleration = joint_acceleration_at(i);
 
             linear_acceleration += angular_acceleration.cross(&offset)
                 + angular_velocity.cross(&angular_velocity.cross(&offset));
 
-            match self.links[i].kind() {
+            match self.joints[i].kind() {
                 JointKind::Revolute => {
                     angular_acceleration +=
                         axis * joint_acceleration + angular_velocity.cross(&axis) * qd[i];

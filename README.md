@@ -32,7 +32,8 @@ safe-Rust implementation and is not a functional-safety certification.
 | Type | Purpose |
 |---|---|
 | `RobotArm` | Runtime-sized serial model with fixed-size calculation APIs |
-| `RobotLink` | Joint transform, axis, limits, mass, center of mass, and inertia |
+| `RobotJoint` | Joint transform, axis, limits, and stored joint state |
+| `RobotLink` | Link mass, center of mass, and inertia |
 | `JointVector<N>` | Fixed-size joint vector |
 | `Jacobian<N>` | Angular-first `6 x N` geometric Jacobian |
 | `Frame` | Rigid transform backed by `nalgebra::Isometry3<f64>` |
@@ -44,7 +45,8 @@ safe-Rust implementation and is not a functional-safety certification.
 | Interface | Result |
 |---|---|
 | `RobotArm::from_urdf(path)` | Construct a model from a URDF file path |
-| `name()`, `links()` | Inspect model data |
+| `name()`, `joints()`, `links()` | Inspect the model, with the root included in `links()` |
+| `link_count()` | Return the number of URDF links, including the root link |
 | `joint_count()` | Return the number of joints parsed from the model |
 
 ### Calculation API
@@ -128,6 +130,12 @@ normal Dyno builds. For a ROS installation such as Humble on x86-64 Linux:
 export PKG_CONFIG_PATH=/opt/ros/humble/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH
 export LD_LIBRARY_PATH=/opt/ros/humble/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
 cargo bench --features pinocchio-bench --bench pinocchio
+```
+
+The Dyno-only benchmark does not require Pinocchio:
+
+```bash
+cargo bench --features core-bench --bench core
 ```
 
 Adjust the ROS distribution and architecture paths for the local installation.

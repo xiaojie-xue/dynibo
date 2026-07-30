@@ -27,7 +27,8 @@ URDF 解析和名称查找只在模型构建阶段分配内存，不进入实时
 | 类型 | 用途 |
 |---|---|
 | `RobotArm` | 运行时确定自由度、使用固定尺寸计算接口的串联模型 |
-| `RobotLink` | 关节变换、轴、限位、质量、质心和惯量 |
+| `RobotJoint` | 关节变换、轴、限位和关节状态 |
+| `RobotLink` | Link 的质量、质心和惯量 |
 | `JointVector<N>` | 固定尺寸关节向量 |
 | `Jacobian<N>` | 角运动分量在前的 `6 x N` 几何 Jacobian |
 | `Frame` | 基于 `nalgebra::Isometry3<f64>` 的刚体变换 |
@@ -39,7 +40,8 @@ URDF 解析和名称查找只在模型构建阶段分配内存，不进入实时
 | 接口 | 结果 |
 |---|---|
 | `RobotArm::from_urdf(path)` | 从 URDF 文件路径构建模型 |
-| `name()`、`links()` | 查看模型数据 |
+| `name()`、`joints()`、`links()` | 查看模型数据，`links()` 包含 root link |
+| `link_count()` | 返回包含 root link 的 URDF link 数量 |
 | `joint_count()` | 返回从模型中解析出的关节数量 |
 
 ### 计算接口
@@ -114,6 +116,12 @@ Linux 的 ROS Humble 环境中执行：
 export PKG_CONFIG_PATH=/opt/ros/humble/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH
 export LD_LIBRARY_PATH=/opt/ros/humble/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
 cargo bench --features pinocchio-bench --bench pinocchio
+```
+
+仅测试 Dyno 的基准不依赖 Pinocchio：
+
+```bash
+cargo bench --features core-bench --bench core
 ```
 
 其他 ROS 发行版或 CPU 架构需要相应调整路径。可添加 `-- --quick` 做快速冒烟验证；

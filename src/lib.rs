@@ -7,6 +7,6 @@ mod spatial;
 mod urdf;
 
 pub use error::{Error, Result};
-pub use model::{JointKind, JointLimit, RobotLink};
+pub use model::{JointKind, JointLimit, RobotJoint, RobotLink};
 pub use robot_arm::RobotArm;
 pub use spatial::{Frame, Jacobian, JointVector, Motion, Wrench};
