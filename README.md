@@ -34,25 +34,25 @@ functional-safety certification.
 
 | Type | Purpose |
 |---|---|
-| `RobotArm` | Runtime-topology tree model with fixed-size calculation APIs |
-| `RobotJoint` | Joint transform, axis, limits, and stored joint state |
-| `RobotLink` | Link mass, center of mass, and inertia |
-| `LinkId` | Stable numeric link identifier used to select calculation targets |
-| `ExternalWrench` | Wrench applied at a link origin and expressed in that link frame |
+| `Robot` | Runtime-topology tree model with fixed-size calculation APIs |
+| `Joint` | Joint transform, axis, limits, and stored joint state |
+| `JointType` | Revolute, prismatic, or fixed joint motion type |
+| `Link` | Link mass, center of mass, and inertia |
+| `Load` | Wrench applied at a link origin and expressed in that link frame |
 | `JointVector<N>` | Fixed-size joint vector |
 | `Jacobian<N>` | Angular-first `6 x N` geometric Jacobian |
 | `Frame` | Rigid transform backed by `nalgebra::Isometry3<f64>` |
-| `Motion` | Angular-first spatial velocity or acceleration |
+| `Twist` | Angular-first spatial velocity or acceleration |
 | `Wrench` | Torque-first spatial force |
 
 ### Model construction and access
 
 | Interface | Result |
 |---|---|
-| `RobotArm::from_urdf(path)` | Construct a model from a URDF file path |
+| `Robot::from_urdf(path)` | Construct a model from a URDF file path |
 | `name()`, `joints()`, `links()` | Inspect the model, with the root included in `links()` |
 | `root_link()`, `leaf_links()` | Inspect the root and all leaf links |
-| `link_id(name)` | Resolve a reusable `LinkId` by name |
+| `link(name)` | Borrow a link by name or return `Error::UnknownLink` |
 | `link_count()` | Return the number of URDF links, including the root link |
 | `joint_count()` | Return the number of joints parsed from the model |
 
@@ -69,15 +69,15 @@ the following operations.
 | `inverse_kinematics_with_options(...)` | Pose IK with configurable damping, tolerances, step limit, and iteration limit |
 | `forward_velocity_kinematics(q, qd, target, base, tool)` | Spatial velocity of a selected link/tool |
 | `forward_acceleration_kinematics(q, qd, qdd, target)` | Direct-recursive acceleration of a selected link |
-| `gravity(q, base, external_wrenches)` | Tree gravity recursion with loads on multiple links |
-| `inverse_dynamics(..., external_wrenches)` | Tree RNEA with multi-link loads and branch accumulation |
+| `gravity(q, base, loads)` | Tree gravity recursion with loads on multiple links |
+| `inverse_dynamics(..., loads)` | Tree RNEA with multi-link loads and branch accumulation |
 
 ```rust
-use dyno::{JointVector, RobotArm};
+use dyno::{JointVector, Robot};
 
-let arm = RobotArm::from_urdf("test_arm.urdf")?;
+let arm = Robot::from_urdf("test_arm.urdf")?;
 let q = JointVector::<4>::zeros();
-let target = arm.link_id("test_link_4").expect("target link must exist");
+let target = arm.link("test_link_4")?;
 let end = arm.forward_kinematics(&q, target)?;
 let jacobian = arm.jacobian(&q, target)?;
 let solved_q = arm.inverse_kinematics(&q, target, &end)?;
@@ -85,13 +85,13 @@ let solved_q = arm.inverse_kinematics(&q, target, &end)?;
 ```
 
 The calculation size `N` is inferred from each `JointVector<N>` input; it is
-not part of the `RobotArm` type. A mismatch returns `Error::WrongJointCount`
+not part of the `Robot` type. A mismatch returns `Error::WrongJointCount`
 before calculation begins.
 
 `inverse_kinematics` uses the damped inverse
 `J^T (J J^T + lambda^2 I)^-1`. Iterations are unconstrained, but a converged
 result is checked against the joint limits loaded from the URDF. Solver failures
-are exposed as `Error::InverseKinematics(InverseKinematicsError::...)`, which
+are exposed directly as `Error` variants, which
 distinguishes invalid options, non-finite input, numerical factorization failure,
 a joint-limit violation, and non-convergence. The non-convergence error includes
 the final translation and rotation residuals. Use
@@ -106,7 +106,7 @@ their own constrained IK using a suitable QP solver.
 
 ## Tree-model conventions and compatibility scope
 
-`RobotArm` supports valid tree URDFs with arbitrary branch count and depth. A
+`Robot` supports valid tree URDFs with arbitrary branch count and depth. A
 model has one root and exactly one parent joint for every non-root link.
 Construction creates a parent-before-child topological order and rejects
 multiple roots, duplicate names, cycles, disconnected components, missing
@@ -114,15 +114,15 @@ links, and links reached by multiple joints. Revolute, continuous, prismatic,
 and fixed joints are supported; other URDF joint types still return
 `UnsupportedJoint`.
 
-Kinematics functions accept a target `LinkId` directly, so one model can
+Kinematics functions accept a target `&Link` directly, so one model can
 evaluate any branched endpoint. Gravity and inverse dynamics accept an
-`&[ExternalWrench]`, allowing loads on any number of links; an empty slice means
+`&[Load]`, allowing loads on any number of links; an empty slice means
 no external load. `JointVector<N>` currently contains every URDF joint; fixed
 joints occupy an element but contribute no motion or active joint force.
 
 The root is retained in `links()`, but fixed-base compatibility dynamics do not
-include the root link's own inertia in joint forces or the base wrench. An
-`ExternalWrench` acts at a link origin and is expressed in that link's frame.
+include the root link's own inertia in joint forces or the base wrench. A
+`Load` acts at a link origin and is expressed in that link's frame.
 
 The compatibility dynamics intentionally preserve legacy numerical conventions,
 including positive-Z gravity and the original product-of-inertia signs, so the

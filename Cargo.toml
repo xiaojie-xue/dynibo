@@ -2,7 +2,7 @@
 name = "dyno"
 version = "0.1.0"
 edition = "2024"
-description = "Tree robot kinematics and dynamics with fixed-size calculation types"
+description = "Tree-structured robot kinematics and dynamics with fixed-size joint-space calculation types"
 license = "MIT"
 
 [features]

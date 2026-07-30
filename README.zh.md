@@ -27,25 +27,25 @@ URDF 解析和拓扑构建只在模型构建阶段分配内存；运动学和动
 
 | 类型 | 用途 |
 |---|---|
-| `RobotArm` | 运行时确定拓扑、使用固定尺寸计算接口的树模型 |
-| `RobotJoint` | 关节变换、轴、限位和关节状态 |
-| `RobotLink` | Link 的质量、质心和惯量 |
-| `LinkId` | 模型内稳定的 link 数字标识，用于选择计算目标 |
-| `ExternalWrench` | 施加在指定 link 原点、以该 link 坐标系表达的 Wrench |
+| `Robot` | 运行时确定拓扑、使用固定尺寸计算接口的树模型 |
+| `Joint` | 关节变换、轴、限位和关节状态 |
+| `JointType` | Revolute、prismatic 或 fixed 关节运动类型 |
+| `Link` | Link 的质量、质心和惯量 |
+| `Load` | 施加在指定 link 原点、以该 link 坐标系表达的 Wrench |
 | `JointVector<N>` | 固定尺寸关节向量 |
 | `Jacobian<N>` | 角运动分量在前的 `6 x N` 几何 Jacobian |
 | `Frame` | 基于 `nalgebra::Isometry3<f64>` 的刚体变换 |
-| `Motion` | 角运动分量在前的空间速度或加速度 |
+| `Twist` | 角运动分量在前的空间速度或加速度 |
 | `Wrench` | 力矩分量在前的空间力 |
 
 ### 模型构建与访问
 
 | 接口 | 结果 |
 |---|---|
-| `RobotArm::from_urdf(path)` | 从 URDF 文件路径构建模型 |
+| `Robot::from_urdf(path)` | 从 URDF 文件路径构建模型 |
 | `name()`、`joints()`、`links()` | 查看模型数据，`links()` 包含父 link |
 | `root_link()`、`leaf_links()` | 查看父 link 和所有子 link |
-| `link_id(name)` | 按名称解析可复用的 `LinkId` |
+| `link(name)` | 按名称借用 `Link`，不存在时返回 `Error::UnknownLink` |
 | `link_count()` | 返回包含父 link 的 URDF link 数量 |
 | `joint_count()` | 返回从模型中解析出的关节数量 |
 
@@ -61,27 +61,27 @@ URDF 解析和拓扑构建只在模型构建阶段分配内存；运动学和动
 | `inverse_kinematics_with_options(...)` | 可配置阻尼、容差、步长和迭代上限的位姿逆运动学 |
 | `forward_velocity_kinematics(q, qd, target, base, tool)` | 指定 link/tool 的空间速度 |
 | `forward_acceleration_kinematics(q, qd, qdd, target)` | 指定 link 的直接递推加速度 |
-| `gravity(q, base, external_wrenches)` | 支持多 link 外载荷的树形重力递推 |
-| `inverse_dynamics(..., external_wrenches)` | 支持多 link 外载荷和分支汇聚的树形 RNEA |
+| `gravity(q, base, loads)` | 支持多 link 外载荷的树形重力递推 |
+| `inverse_dynamics(..., loads)` | 支持多 link 外载荷和分支汇聚的树形 RNEA |
 
 ```rust
-use dyno::{JointVector, RobotArm};
+use dyno::{JointVector, Robot};
 
-let arm = RobotArm::from_urdf("test_arm.urdf")?;
+let arm = Robot::from_urdf("test_arm.urdf")?;
 let q = JointVector::<4>::zeros();
-let target = arm.link_id("test_link_4").expect("target link must exist");
+let target = arm.link("test_link_4")?;
 let end = arm.forward_kinematics(&q, target)?;
 let jacobian = arm.jacobian(&q, target)?;
 let solved_q = arm.inverse_kinematics(&q, target, &end)?;
 # Ok::<(), dyno::Error>(())
 ```
 
-计算尺寸 `N` 会从每次传入的 `JointVector<N>` 自动推导，不再属于 `RobotArm` 类型的
+计算尺寸 `N` 会从每次传入的 `JointVector<N>` 自动推导，不再属于 `Robot` 类型的
 一部分。若模型与输入尺寸不一致，会在开始计算前返回 `Error::WrongJointCount`。
 
 `inverse_kinematics` 使用阻尼逆
 `J^T (J J^T + lambda^2 I)^-1`。迭代过程不施加约束，但收敛结果会使用 URDF 中的关节
-限位进行检查。求解错误通过 `Error::InverseKinematics(InverseKinematicsError::...)`
+限位进行检查。求解错误直接通过 `Error` 的变体
 明确区分非法配置、非有限输入、数值分解失败、关节限位越界和不收敛；不收敛错误还会
 给出最终的平移与旋转残差。需要调整默认参数时，可使用
 `inverse_kinematics_with_options`。
@@ -92,19 +92,19 @@ let solved_q = arm.inverse_kinematics(&q, target, &end)?;
 
 ## 树模型约定与兼容范围
 
-`RobotArm` 支持任意分支数量和深度的合法树状 URDF：模型具有唯一父 link，每个非父
+`Robot` 支持任意分支数量和深度的合法树状 URDF：模型具有唯一父 link，每个非父
 link 只有一个父 joint。构建时会生成父先于子的拓扑顺序，并拒绝多父、重复名称、环、
 断连、缺失 link 和一个 link 被多个 joint 重复连接的模型。当前
 支持 revolute、continuous、prismatic 和 fixed joint；其他 URDF joint 类型仍会返回
 `UnsupportedJoint`。
 
-运动学接口直接接收目标 `LinkId`，因此同一个模型可以计算任意分叉末端。重力和逆动力学
-接口接收 `&[ExternalWrench]`，可同时在任意多个 link 上施加载荷；空切片表示没有外载荷。
+运动学接口直接接收目标 `&Link`，因此同一个模型可以计算任意分叉末端。重力和逆动力学
+接口接收 `&[Load]`，可同时在任意多个 link 上施加载荷；空切片表示没有外载荷。
 `JointVector<N>` 当前按全部 URDF joint 排列，fixed joint 仍占一个元素但其运动和主动
 关节力为零。
 
 父 link 会保存在 `links()` 中，但固定基座兼容动力学不把父 link 自身的惯性计入
-关节力或基座 Wrench。`ExternalWrench` 作用在 link 原点，并以该 link 坐标系表达。
+关节力或基座 Wrench。`Load` 作用在 link 原点，并以该 link 坐标系表达。
 
 兼容动力学内核保留已有的正 Z 方向重力和惯量积符号。Pinocchio 桥接层会转换相应
 约定，正确性测试逐元素比较转换后的数值，性能基准只统计执行开销。
