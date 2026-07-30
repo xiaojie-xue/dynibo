@@ -8,6 +8,7 @@ pub enum Error {
     UnsupportedJoint(String),
     WrongJointCount { expected: usize, actual: usize },
     InvalidJointAxis { joint: String },
+    InvalidLinkId { index: usize, link_count: usize },
 }
 
 impl fmt::Display for Error {
@@ -20,6 +21,12 @@ impl fmt::Display for Error {
                 write!(f, "expected {expected} joints, found {actual}")
             }
             Self::InvalidJointAxis { joint } => write!(f, "joint {joint} has an invalid axis"),
+            Self::InvalidLinkId { index, link_count } => {
+                write!(
+                    f,
+                    "link index {index} is outside the {link_count}-link model"
+                )
+            }
         }
     }
 }
