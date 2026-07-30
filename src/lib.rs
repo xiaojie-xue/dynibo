@@ -6,7 +6,7 @@ mod robot_arm;
 mod spatial;
 mod urdf;
 
-pub use error::{Error, Result};
+pub use error::{Error, InverseKinematicsError, Result};
 pub use model::{JointKind, JointLimit, RobotJoint, RobotLink};
-pub use robot_arm::{ExternalWrench, LinkId, RobotArm};
+pub use robot_arm::{ExternalWrench, InverseKinematicsOptions, LinkId, RobotArm};
 pub use spatial::{Frame, Jacobian, JointVector, Motion, Wrench};

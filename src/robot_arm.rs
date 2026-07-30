@@ -1,13 +1,40 @@
 use std::path::Path;
 
-use nalgebra::Vector3;
+use nalgebra::{SMatrix, SVector, Vector3};
 
 use crate::{
-    Error, Frame, Jacobian, JointKind, JointVector, Motion, Result, RobotJoint, RobotLink, Wrench,
-    urdf::tree_model,
+    Error, Frame, InverseKinematicsError, Jacobian, JointKind, JointVector, Motion, Result,
+    RobotJoint, RobotLink, Wrench, urdf::tree_model,
 };
 
 const GRAVITY: f64 = 9.80665;
+
+/// Configuration for damped-least-squares inverse kinematics.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InverseKinematicsOptions {
+    /// Maximum number of joint updates.
+    pub max_iterations: usize,
+    /// Maximum accepted Euclidean position error, in metres.
+    pub translation_tolerance: f64,
+    /// Maximum accepted rotation-vector norm, in radians.
+    pub rotation_tolerance: f64,
+    /// Damping factor `lambda` in `J^T (J J^T + lambda^2 I)^-1`.
+    pub damping: f64,
+    /// Maximum Euclidean norm of one joint update.
+    pub max_step_norm: f64,
+}
+
+impl Default for InverseKinematicsOptions {
+    fn default() -> Self {
+        Self {
+            max_iterations: 100,
+            translation_tolerance: 1.0e-6,
+            rotation_tolerance: 1.0e-6,
+            damping: 1.0e-3,
+            max_step_norm: 0.5,
+        }
+    }
+}
 
 /// Stable numeric identifier for a link in one loaded robot model.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -199,6 +226,130 @@ impl RobotArm {
         target: LinkId,
     ) -> Result<Jacobian<N>> {
         Ok(self.forward_kinematics_and_jacobian(q, target)?.1)
+    }
+
+    /// Solves for a joint vector that reaches `desired` at `target`.
+    ///
+    /// This uses damped least squares with [`InverseKinematicsOptions::default`].
+    /// The iteration is unconstrained, but a converged result outside a URDF
+    /// joint limit is returned as an error.
+    pub fn inverse_kinematics<const N: usize>(
+        &self,
+        initial_q: &JointVector<N>,
+        target: LinkId,
+        desired: &Frame,
+    ) -> Result<JointVector<N>> {
+        self.inverse_kinematics_with_options(
+            initial_q,
+            target,
+            desired,
+            InverseKinematicsOptions::default(),
+        )
+    }
+
+    /// Configurable damped-least-squares inverse kinematics.
+    pub fn inverse_kinematics_with_options<const N: usize>(
+        &self,
+        initial_q: &JointVector<N>,
+        target: LinkId,
+        desired: &Frame,
+        options: InverseKinematicsOptions,
+    ) -> Result<JointVector<N>> {
+        self.validate_joint_count::<N>()?;
+        self.validate_link(target)?;
+        validate_inverse_kinematics_options(options)?;
+        if !initial_q.iter().all(|value| value.is_finite()) {
+            return Err(InverseKinematicsError::NonFiniteInput {
+                input: "initial joint vector",
+            }
+            .into());
+        }
+        if !desired
+            .translation
+            .vector
+            .iter()
+            .chain(desired.rotation.coords.iter())
+            .all(|value| value.is_finite())
+        {
+            return Err(InverseKinematicsError::NonFiniteInput {
+                input: "target frame",
+            }
+            .into());
+        }
+
+        let mut q = *initial_q;
+        let damping_squared = options.damping * options.damping;
+        for iteration in 0..=options.max_iterations {
+            let (current, jacobian) = self.forward_kinematics_and_jacobian(&q, target)?;
+            let translation_error = desired.translation.vector - current.translation.vector;
+            let rotation_error = (desired.rotation * current.rotation.inverse()).scaled_axis();
+            let translation_error_norm = translation_error.norm();
+            let rotation_error_norm = rotation_error.norm();
+            if translation_error_norm <= options.translation_tolerance
+                && rotation_error_norm <= options.rotation_tolerance
+            {
+                self.validate_inverse_kinematics_solution(&q)?;
+                return Ok(q);
+            }
+            if iteration == options.max_iterations {
+                return Err(InverseKinematicsError::NotConverged {
+                    iterations: options.max_iterations,
+                    translation_error: translation_error_norm,
+                    rotation_error: rotation_error_norm,
+                }
+                .into());
+            }
+
+            let error = SVector::<f64, 6>::from_iterator(
+                rotation_error
+                    .iter()
+                    .chain(translation_error.iter())
+                    .copied(),
+            );
+            let regularized = jacobian * jacobian.transpose()
+                + SMatrix::<f64, 6, 6>::identity() * damping_squared;
+            let Some(weighted_error) = regularized.cholesky().map(|factor| factor.solve(&error))
+            else {
+                return Err(InverseKinematicsError::NumericalFailure {
+                    iteration: iteration + 1,
+                }
+                .into());
+            };
+            let mut step = jacobian.transpose() * weighted_error;
+            let step_norm = step.norm();
+            if !step_norm.is_finite() {
+                return Err(InverseKinematicsError::NumericalFailure {
+                    iteration: iteration + 1,
+                }
+                .into());
+            }
+            if step_norm > options.max_step_norm {
+                step *= options.max_step_norm / step_norm;
+            }
+            q += step;
+        }
+
+        unreachable!("inverse-kinematics loop always returns")
+    }
+
+    fn validate_inverse_kinematics_solution<const N: usize>(
+        &self,
+        q: &JointVector<N>,
+    ) -> Result<()> {
+        for (joint_index, (joint, &position)) in self.joints.iter().zip(q.iter()).enumerate() {
+            if joint.is_over_limit(position) {
+                let limit = joint.limit();
+                return Err(InverseKinematicsError::JointLimitViolation {
+                    joint_index,
+                    joint: joint.name().to_owned(),
+                    position,
+                    lower: limit.lower,
+                    upper: limit.upper,
+                }
+                .into());
+            }
+        }
+        Ok(())
     }
 
     pub fn forward_velocity_kinematics<const N: usize>(
@@ -477,6 +628,34 @@ impl RobotArm {
         let index = target.0 - 1;
         Motion::new(angular_accelerations[index], linear_accelerations[index])
     }
+}
+
+fn validate_inverse_kinematics_options(options: InverseKinematicsOptions) -> Result<()> {
+    if options.max_iterations == 0 {
+        return Err(InverseKinematicsError::InvalidOptions(
+            "max_iterations must be greater than zero",
+        )
+        .into());
+    }
+    for (name, value) in [
+        ("translation_tolerance", options.translation_tolerance),
+        ("rotation_tolerance", options.rotation_tolerance),
+        ("damping", options.damping),
+        ("max_step_norm", options.max_step_norm),
+    ] {
+        if !value.is_finite() || value <= 0.0 {
+            return Err(InverseKinematicsError::InvalidOptions(match name {
+                "translation_tolerance" => {
+                    "translation_tolerance must be finite and greater than zero"
+                }
+                "rotation_tolerance" => "rotation_tolerance must be finite and greater than zero",
+                "damping" => "damping must be finite and greater than zero",
+                _ => "max_step_norm must be finite and greater than zero",
+            })
+            .into());
+        }
+    }
+    Ok(())
 }
 
 fn wrench_to_parent(transform: &Frame, wrench: Wrench) -> Wrench {

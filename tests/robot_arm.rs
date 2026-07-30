@@ -9,8 +9,8 @@ use std::{
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
 use dyno::{
-    Error, ExternalWrench, Frame, JointKind, JointLimit, JointVector, Motion, RobotArm, RobotJoint,
-    RobotLink, Wrench,
+    Error, ExternalWrench, Frame, InverseKinematicsError, InverseKinematicsOptions, JointKind,
+    JointLimit, JointVector, Motion, RobotArm, RobotJoint, RobotLink, Wrench,
 };
 use nalgebra::{Isometry3, Matrix3, SVector, Translation3, UnitQuaternion, Vector3};
 
@@ -202,6 +202,103 @@ fn test_arm_jacobian_matches_numeric_reference() {
         expected,
         epsilon = 5.0e-4
     );
+}
+
+#[test]
+fn damped_inverse_kinematics_reaches_a_known_pose() {
+    let arm = test_arm();
+    let target = end_link(&arm);
+    let expected_q = JointVector::<4>::new(0.2, 1.0, -1.2, 0.45);
+    let desired = arm.forward_kinematics(&expected_q, target).unwrap();
+    let initial_q = JointVector::<4>::zeros();
+
+    let solved_q = arm
+        .inverse_kinematics(&initial_q, target, &desired)
+        .unwrap();
+    let solved = arm.forward_kinematics(&solved_q, target).unwrap();
+
+    assert!(
+        (solved.translation.vector - desired.translation.vector).norm() <= 1.0e-6,
+        "position did not converge: solved_q={solved_q:?}"
+    );
+    assert!(
+        (desired.rotation * solved.rotation.inverse())
+            .scaled_axis()
+            .norm()
+            <= 1.0e-6,
+        "orientation did not converge: solved_q={solved_q:?}"
+    );
+}
+
+#[test]
+fn inverse_kinematics_reports_specific_solver_errors() {
+    let arm = test_arm();
+    let initial_q = JointVector::<4>::zeros();
+    let unreachable =
+        Frame::from_parts(Translation3::new(1.0, 0.0, 0.0), UnitQuaternion::identity());
+    let options = InverseKinematicsOptions {
+        max_iterations: 2,
+        ..InverseKinematicsOptions::default()
+    };
+    let error = arm
+        .inverse_kinematics_with_options(&initial_q, arm.root_link(), &unreachable, options)
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        Error::InverseKinematics(InverseKinematicsError::NotConverged {
+            iterations: 2,
+            translation_error,
+            rotation_error,
+        }) if (translation_error - 1.0).abs() <= 1.0e-12 && rotation_error <= 1.0e-12
+    ));
+
+    let invalid_options = InverseKinematicsOptions {
+        damping: 0.0,
+        ..InverseKinematicsOptions::default()
+    };
+    let error = arm
+        .inverse_kinematics_with_options(
+            &initial_q,
+            end_link(&arm),
+            &Frame::identity(),
+            invalid_options,
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        Error::InverseKinematics(InverseKinematicsError::InvalidOptions(_))
+    ));
+
+    let mut non_finite_q = initial_q;
+    non_finite_q[0] = f64::NAN;
+    let error = arm
+        .inverse_kinematics(&non_finite_q, end_link(&arm), &Frame::identity())
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        Error::InverseKinematics(InverseKinematicsError::NonFiniteInput {
+            input: "initial joint vector"
+        })
+    ));
+
+    let outside_q = JointVector::<4>::new(0.8, 0.0, 0.0, 0.0);
+    let outside_target = arm.forward_kinematics(&outside_q, end_link(&arm)).unwrap();
+    let error = arm
+        .inverse_kinematics(&outside_q, end_link(&arm), &outside_target)
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        Error::InverseKinematics(InverseKinematicsError::JointLimitViolation {
+            joint_index: 0,
+            ref joint,
+            position,
+            lower,
+            upper,
+        }) if joint == "test_joint_1"
+            && (position - 0.8).abs() <= 1.0e-12
+            && (lower + 0.610865238198015).abs() <= 1.0e-12
+            && (upper - 0.610865238198015).abs() <= 1.0e-12
+    ));
 }
 
 #[test]
