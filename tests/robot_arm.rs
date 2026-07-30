@@ -89,6 +89,38 @@ fn joint_and_loaded_link_preserve_their_parameters() {
 }
 
 #[test]
+fn fixed_joint_ignores_its_axis_but_moving_joints_validate_theirs() {
+    let fixed = Joint::new(
+        "fixed",
+        JointType::Fixed,
+        Frame::identity(),
+        Vector3::zeros(),
+        0.0,
+        0.0,
+        0.0,
+    )
+    .expect("a fixed joint does not need a motion axis");
+    assert_eq!(fixed.joint_type(), JointType::Fixed);
+
+    for joint_type in [JointType::Revolute, JointType::Prismatic] {
+        let error = Joint::new(
+            "moving",
+            joint_type,
+            Frame::identity(),
+            Vector3::zeros(),
+            -1.0,
+            1.0,
+            1.0,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            Error::InvalidJointAxis { ref joint } if joint == "moving"
+        ));
+    }
+}
+
+#[test]
 fn revolute_and_prismatic_joint_frames_match_urdf_semantics() {
     let revolute = joint(
         "revolute",

@@ -96,11 +96,14 @@ pub struct Joint {
 }
 
 impl Joint {
-    /// Creates a joint after normalizing and validating its axis.
+    /// Creates a joint after normalizing and validating its motion axis.
+    ///
+    /// Fixed joints ignore `axis` because they have no degree of freedom.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidJointAxis`] when `axis` is too small to normalize.
+    /// Returns [`Error::InvalidJointAxis`] when a revolute or prismatic joint's
+    /// `axis` is too small to normalize.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: impl Into<String>,
@@ -133,9 +136,14 @@ impl Joint {
         upper_limit: f64,
         velocity_limit: f64,
     ) -> Result<Self> {
-        let axis = Unit::try_new(axis, 1.0e-12).ok_or_else(|| Error::InvalidJointAxis {
-            joint: name.clone(),
-        })?;
+        let axis = match joint_type {
+            JointType::Revolute | JointType::Prismatic => {
+                Unit::try_new(axis, 1.0e-12).ok_or_else(|| Error::InvalidJointAxis {
+                    joint: name.clone(),
+                })?
+            }
+            JointType::Fixed => Vector3::x_axis(),
+        };
         Ok(Self {
             name,
             joint_type,
@@ -182,6 +190,8 @@ impl Joint {
     }
 
     /// Returns the normalized motion axis expressed in the joint frame.
+    ///
+    /// Fixed joints have no motion axis and return an internal placeholder.
     pub const fn axis(&self) -> &Unit<Vector3<f64>> {
         &self.axis
     }
