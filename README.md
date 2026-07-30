@@ -88,6 +88,39 @@ The calculation size `N` is inferred from each `JointVector<N>` input; it is
 not part of the `Robot` type. A mismatch returns `Error::WrongJointCount`
 before calculation begins.
 
+## Example
+
+The repository includes a standalone Franka FER URDF and an example that
+computes the flange pose, Jacobian, and gravity torque:
+
+```rust
+use std::path::PathBuf;
+
+use dyno::{Frame, JointVector, Robot};
+
+let urdf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    .join("examples/data/franka_fer.urdf");
+let robot = Robot::from_urdf(urdf)?;
+let flange = robot.link("fer_link8")?;
+let q = JointVector::from([0.0, -0.3, 0.0, -1.8, 0.0, 1.5, 0.7, 0.0]);
+
+let flange_frame = robot.forward_kinematics(&q, flange)?;
+let jacobian = robot.jacobian(&q, flange)?;
+let gravity_torque = robot.gravity(&q, &Frame::identity(), &[])?;
+# Ok::<(), dyno::Error>(())
+```
+
+Run the complete example with:
+
+```bash
+cargo run --example franka
+```
+
+The URDF keeps the seven arm joints plus the fixed flange joint. Because fixed
+joints currently occupy an entry in `JointVector`, the eight-element array is
+inferred as `JointVector<8>` and its final entry remains zero. Visual and
+collision meshes are omitted so the example does not require ROS or xacro.
+
 `inverse_kinematics` uses the damped inverse
 `J^T (J J^T + lambda^2 I)^-1`. Iterations are unconstrained, but a converged
 result is checked against the joint limits loaded from the URDF. Solver failures

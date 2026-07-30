@@ -1,0 +1,130 @@
+<?xml version="1.0"?>
+<!--
+  Standalone dynamics example derived from the FER model in Franka Robotics'
+  official franka_description package (Apache-2.0):
+  https://github.com/frankarobotics/franka_description
+
+  Visual, collision, transmission, and ros2_control elements are intentionally
+  omitted because dyno only consumes kinematic and inertial data.
+-->
+<robot name="franka_fer">
+  <link name="fer_link0">
+    <inertial>
+      <origin xyz="-0.0172 0.0004 0.0745" rpy="0 0 0"/>
+      <mass value="2.3966"/>
+      <inertia ixx="0.0090" ixy="0.0000" ixz="0.0020" iyy="0.0115" iyz="0.0000" izz="0.0085"/>
+    </inertial>
+  </link>
+
+  <link name="fer_link1">
+    <inertial>
+      <origin xyz="0.00033 -0.02204 -0.04762" rpy="0 0 0"/>
+      <mass value="2.7907"/>
+      <inertia ixx="0.01564782655" ixy="0.00000531236" ixz="-0.00003676721" iyy="0.01439883526" iyz="-0.00248480843" izz="0.00500443991"/>
+    </inertial>
+  </link>
+  <joint name="fer_joint1" type="revolute">
+    <origin xyz="0 0 0.333" rpy="0 0 0"/>
+    <parent link="fer_link0"/>
+    <child link="fer_link1"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="87.0" lower="-2.8973" upper="2.8973" velocity="2.1750"/>
+  </joint>
+
+  <link name="fer_link2">
+    <inertial>
+      <origin xyz="0.00038 -0.09211 0.01908" rpy="0 0 0"/>
+      <mass value="2.5420"/>
+      <inertia ixx="0.01662427728" ixy="0.00003086077" ixz="0.00000835940" iyy="0.00462501261" iyz="0.00355899830" izz="0.01545124526"/>
+    </inertial>
+  </link>
+  <joint name="fer_joint2" type="revolute">
+    <origin xyz="0 0 0" rpy="-1.570796326794897 0 0"/>
+    <parent link="fer_link1"/>
+    <child link="fer_link2"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="87.0" lower="-1.7628" upper="1.7628" velocity="2.1750"/>
+  </joint>
+
+  <link name="fer_link3">
+    <inertial>
+      <origin xyz="0.05152 0.01696 -0.02971" rpy="0 0 0"/>
+      <mass value="2.2513"/>
+      <inertia ixx="0.00631741992" ixy="0.00097309955" ixz="0.00292525834" iyy="0.00866285493" iyz="0.00093469224" izz="0.00657804051"/>
+    </inertial>
+  </link>
+  <joint name="fer_joint3" type="revolute">
+    <origin xyz="0 -0.316 0" rpy="1.570796326794897 0 0"/>
+    <parent link="fer_link2"/>
+    <child link="fer_link3"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="87.0" lower="-2.8973" upper="2.8973" velocity="2.1750"/>
+  </joint>
+
+  <link name="fer_link4">
+    <inertial>
+      <origin xyz="-0.05113 0.05825 0.01698" rpy="0 0 0"/>
+      <mass value="2.2037"/>
+      <inertia ixx="0.00784585566" ixy="-0.00339591957" ixz="0.00158704074" iyy="0.00649543136" iyz="-0.00181477884" izz="0.01003079917"/>
+    </inertial>
+  </link>
+  <joint name="fer_joint4" type="revolute">
+    <origin xyz="0.0825 0 0" rpy="1.570796326794897 0 0"/>
+    <parent link="fer_link3"/>
+    <child link="fer_link4"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="87.0" lower="-3.0718" upper="-0.0698" velocity="2.1750"/>
+  </joint>
+
+  <link name="fer_link5">
+    <inertial>
+      <origin xyz="-0.00005 0.03730 -0.09280" rpy="0 0 0"/>
+      <mass value="2.2855"/>
+      <inertia ixx="0.02297014781" ixy="-0.00000949345" ixz="-0.00002063156" iyy="0.02095060919" iyz="0.00382345782" izz="0.00430606551"/>
+    </inertial>
+  </link>
+  <joint name="fer_joint5" type="revolute">
+    <origin xyz="-0.0825 0.384 0" rpy="-1.570796326794897 0 0"/>
+    <parent link="fer_link4"/>
+    <child link="fer_link5"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="12.0" lower="-2.8973" upper="2.8973" velocity="2.6100"/>
+  </joint>
+
+  <link name="fer_link6">
+    <inertial>
+      <origin xyz="0.06572 -0.00371 0.00153" rpy="0 0 0"/>
+      <mass value="1.353"/>
+      <inertia ixx="0.00087964522" ixy="-0.00021487814" ixz="-0.00011911662" iyy="0.00277796968" iyz="0.00001274322" izz="0.00286701969"/>
+    </inertial>
+  </link>
+  <joint name="fer_joint6" type="revolute">
+    <origin xyz="0 0 0" rpy="1.570796326794897 0 0"/>
+    <parent link="fer_link5"/>
+    <child link="fer_link6"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="12.0" lower="-0.0175" upper="3.7525" velocity="2.6100"/>
+  </joint>
+
+  <link name="fer_link7">
+    <inertial>
+      <origin xyz="0.00089 -0.00044 0.05491" rpy="0 0 0"/>
+      <mass value="0.35973"/>
+      <inertia ixx="0.00019541063" ixy="0.00000165231" ixz="0.00000148826" iyy="0.00019210361" iyz="-0.00000131132" izz="0.00017936256"/>
+    </inertial>
+  </link>
+  <joint name="fer_joint7" type="revolute">
+    <origin xyz="0.088 0 0" rpy="1.570796326794897 0 0"/>
+    <parent link="fer_link6"/>
+    <child link="fer_link7"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="12.0" lower="-2.8973" upper="2.8973" velocity="2.6100"/>
+  </joint>
+
+  <link name="fer_link8"/>
+  <joint name="fer_joint8" type="fixed">
+    <origin xyz="0 0 0.107" rpy="0 0 0"/>
+    <parent link="fer_link7"/>
+    <child link="fer_link8"/>
+  </joint>
+</robot>

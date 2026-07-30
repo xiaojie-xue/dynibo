@@ -79,6 +79,38 @@ let solved_q = arm.inverse_kinematics(&q, target, &end)?;
 计算尺寸 `N` 会从每次传入的 `JointVector<N>` 自动推导，不再属于 `Robot` 类型的
 一部分。若模型与输入尺寸不一致，会在开始计算前返回 `Error::WrongJointCount`。
 
+## 示例
+
+仓库内包含一份可独立加载的 Franka FER URDF，以及计算法兰位姿、Jacobian 和重力关节
+力矩的示例：
+
+```rust
+use std::path::PathBuf;
+
+use dyno::{Frame, JointVector, Robot};
+
+let urdf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    .join("examples/data/franka_fer.urdf");
+let robot = Robot::from_urdf(urdf)?;
+let flange = robot.link("fer_link8")?;
+let q = JointVector::from([0.0, -0.3, 0.0, -1.8, 0.0, 1.5, 0.7, 0.0]);
+
+let flange_frame = robot.forward_kinematics(&q, flange)?;
+let jacobian = robot.jacobian(&q, flange)?;
+let gravity_torque = robot.gravity(&q, &Frame::identity(), &[])?;
+# Ok::<(), dyno::Error>(())
+```
+
+完整示例的运行方式为：
+
+```bash
+cargo run --example franka
+```
+
+该 URDF 保留 7 个机械臂关节和 1 个 fixed 法兰关节。由于 fixed joint 当前也占用
+`JointVector` 的一个元素，包含 8 个元素的数组会自动推导为 `JointVector<8>`，最后一个
+元素保持为零。为避免依赖 ROS 或 xacro，示例 URDF 省略了显示和碰撞 mesh。
+
 `inverse_kinematics` 使用阻尼逆
 `J^T (J J^T + lambda^2 I)^-1`。迭代过程不施加约束，但收敛结果会使用 URDF 中的关节
 限位进行检查。求解错误直接通过 `Error` 的变体
