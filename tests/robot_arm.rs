@@ -9,17 +9,19 @@ use std::{
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
 use dyno::{
-    Error, ExternalWrench, Frame, InverseKinematicsError, InverseKinematicsOptions, JointKind,
-    JointLimit, JointVector, Motion, RobotArm, RobotJoint, RobotLink, Wrench,
+    Error, Frame, InverseKinematicsOptions, Joint, JointType, JointVector, Link, Load, Robot,
+    Twist, Wrench,
 };
-use nalgebra::{Isometry3, Matrix3, SVector, Translation3, UnitQuaternion, Vector3};
+use nalgebra::{Isometry3, SVector, Translation3, UnitQuaternion, Vector3};
 
-fn test_arm() -> RobotArm {
-    RobotArm::from_urdf(urdf_path("test_arm.urdf")).expect("test URDF must load")
+fn test_arm() -> Robot {
+    Robot::from_urdf(urdf_path("test_arm.urdf")).expect("test URDF must load")
 }
 
-fn end_link(arm: &RobotArm) -> dyno::LinkId {
-    arm.leaf_links()[0]
+fn end_link(arm: &Robot) -> &Link {
+    arm.leaf_links()
+        .next()
+        .expect("robot must have a leaf link")
 }
 
 fn urdf_path(file_name: &str) -> PathBuf {
@@ -28,76 +30,69 @@ fn urdf_path(file_name: &str) -> PathBuf {
         .join(file_name)
 }
 
-fn tree_arm() -> RobotArm {
-    RobotArm::from_urdf(
+fn tree_arm() -> Robot {
+    Robot::from_urdf(
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/data/test_tree_7.urdf"),
     )
     .expect("tree URDF must load")
 }
 
 #[allow(clippy::too_many_arguments)]
-fn joint(name: &str, kind: JointKind, xyz: [f64; 3], rpy: [f64; 3], axis: [f64; 3]) -> RobotJoint {
-    RobotJoint::new(
+fn joint(name: &str, joint_type: JointType, xyz: [f64; 3], rpy: [f64; 3], axis: [f64; 3]) -> Joint {
+    Joint::new(
         name,
-        kind,
+        joint_type,
         Isometry3::from_parts(
             Translation3::new(xyz[0], xyz[1], xyz[2]),
             UnitQuaternion::from_euler_angles(rpy[0], rpy[1], rpy[2]),
         ),
         Vector3::new(axis[0], axis[1], axis[2]),
-        JointLimit {
-            lower: -10.0,
-            upper: 10.0,
-            velocity: 100.0,
-        },
+        -10.0,
+        10.0,
+        100.0,
     )
     .unwrap()
 }
 
 #[test]
-fn robot_joint_and_link_preserve_their_own_parameters() {
-    let mut joint = RobotJoint::new(
+fn joint_and_loaded_link_preserve_their_parameters() {
+    let mut joint = Joint::new(
         "joint_1",
-        JointKind::Revolute,
+        JointType::Revolute,
         Isometry3::from_parts(
             Translation3::new(2.0, 3.0, 4.0),
             UnitQuaternion::from_euler_angles(0.0, 2.0, 1.0),
         ),
         Vector3::z(),
-        JointLimit {
-            lower: -3.14,
-            upper: 3.14,
-            velocity: 100.0,
-        },
+        -3.14,
+        3.14,
+        100.0,
     )
     .unwrap();
-    let mut link = RobotLink::new(
-        "link_1",
-        4.5,
-        Vector3::new(1.1, 1.2, 1.3),
-        Matrix3::new(0.1, -0.4, -0.5, -0.4, 0.2, -0.6, -0.5, -0.6, 0.3),
-    );
+    let arm = test_arm();
+    let link = arm.link("test_link_2").unwrap();
 
     assert_eq!(joint.name(), "joint_1");
-    assert_eq!(link.name(), "link_1");
-    assert_eq!(joint.kind(), JointKind::Revolute);
-    assert_eq!(link.mass(), 4.5);
+    assert_eq!(link.name(), "test_link_2");
+    assert_eq!(joint.joint_type(), JointType::Revolute);
+    assert_abs_diff_eq!(joint.lower_limit(), -3.14);
+    assert_abs_diff_eq!(joint.upper_limit(), 3.14);
+    assert_abs_diff_eq!(joint.velocity_limit(), 100.0);
+    assert_eq!(link.mass(), 7.016);
     assert_abs_diff_eq!(joint.origin().translation.vector.x, 2.0);
-    assert_abs_diff_eq!(link.center_of_mass().z, 1.3);
+    assert_abs_diff_eq!(link.center_of_mass().z, 0.129994);
     assert!(joint.is_over_limit(4.0));
     assert!(!joint.is_over_limit(0.0));
     assert_abs_diff_eq!(joint.set_position(10.0), 3.14);
     assert_abs_diff_eq!(joint.set_velocity(-200.0), -100.0);
     assert_abs_diff_eq!(joint.set_acceleration(12.0), 12.0);
-    link.set_mass(5.0);
-    assert_abs_diff_eq!(link.mass(), 5.0);
 }
 
 #[test]
 fn revolute_and_prismatic_joint_frames_match_urdf_semantics() {
     let revolute = joint(
         "revolute",
-        JointKind::Revolute,
+        JointType::Revolute,
         [0.0, 0.0, 0.226],
         [0.0, 0.0, FRAC_PI_2],
         [0.0, 0.0, 1.0],
@@ -109,7 +104,7 @@ fn revolute_and_prismatic_joint_frames_match_urdf_semantics() {
 
     let prismatic = joint(
         "slide",
-        JointKind::Prismatic,
+        JointType::Prismatic,
         [1.0, 0.0, 0.0],
         [0.0; 3],
         [0.0, 1.0, 0.0],
@@ -132,6 +127,19 @@ fn urdf_rs_loads_test_arm_and_checks_calculation_size() {
     assert_eq!(arm.joints()[0].name(), "test_joint_1");
     assert_eq!(arm.link_count(), 5);
     assert_eq!(arm.joint_count(), 4);
+    assert_eq!(arm.link("test_link_1").unwrap().name(), "test_link_1");
+    assert!(matches!(
+        arm.link("missing_link"),
+        Err(Error::UnknownLink { name }) if name == "missing_link"
+    ));
+    let owned_link = arm.link("test_link_1").unwrap().clone();
+    arm.forward_kinematics(&JointVector::<4>::zeros(), &owned_link)
+        .expect("a cloned link remains valid for its model");
+    let other_arm = test_arm();
+    assert!(matches!(
+        other_arm.forward_kinematics(&JointVector::<4>::zeros(), &owned_link),
+        Err(Error::InvalidLink { name }) if name == "test_link_1"
+    ));
     assert_abs_diff_eq!(arm.links()[2].mass(), 7.016);
     assert_abs_diff_eq!(arm.joints()[1].origin().translation.vector.z, 0.108);
 
@@ -245,11 +253,11 @@ fn inverse_kinematics_reports_specific_solver_errors() {
         .unwrap_err();
     assert!(matches!(
         error,
-        Error::InverseKinematics(InverseKinematicsError::NotConverged {
+        Error::NotConverged {
             iterations: 2,
             translation_error,
             rotation_error,
-        }) if (translation_error - 1.0).abs() <= 1.0e-12 && rotation_error <= 1.0e-12
+        } if (translation_error - 1.0).abs() <= 1.0e-12 && rotation_error <= 1.0e-12
     ));
 
     let invalid_options = InverseKinematicsOptions {
@@ -264,10 +272,7 @@ fn inverse_kinematics_reports_specific_solver_errors() {
             invalid_options,
         )
         .unwrap_err();
-    assert!(matches!(
-        error,
-        Error::InverseKinematics(InverseKinematicsError::InvalidOptions(_))
-    ));
+    assert!(matches!(error, Error::InvalidOptions(_)));
 
     let mut non_finite_q = initial_q;
     non_finite_q[0] = f64::NAN;
@@ -276,9 +281,9 @@ fn inverse_kinematics_reports_specific_solver_errors() {
         .unwrap_err();
     assert!(matches!(
         error,
-        Error::InverseKinematics(InverseKinematicsError::NonFiniteInput {
+        Error::NonFiniteInput {
             input: "initial joint vector"
-        })
+        }
     ));
 
     let outside_q = JointVector::<4>::new(0.8, 0.0, 0.0, 0.0);
@@ -288,13 +293,13 @@ fn inverse_kinematics_reports_specific_solver_errors() {
         .unwrap_err();
     assert!(matches!(
         error,
-        Error::InverseKinematics(InverseKinematicsError::JointLimitViolation {
+        Error::JointLimitViolation {
             joint_index: 0,
             ref joint,
             position,
             lower,
             upper,
-        }) if joint == "test_joint_1"
+        } if joint == "test_joint_1"
             && (position - 0.8).abs() <= 1.0e-12
             && (lower + 0.610865238198015).abs() <= 1.0e-12
             && (upper - 0.610865238198015).abs() <= 1.0e-12
@@ -347,7 +352,7 @@ fn velocity_is_jacobian_times_joint_velocity() {
             .copy_from(&shifted);
     }
     let tool_jacobian_velocity = tool_jacobian * qd;
-    let expected_with_frames = Motion::new(
+    let expected_with_frames = Twist::new(
         base.rotation * tool_jacobian_velocity.fixed_rows::<3>(0).into_owned(),
         base.rotation * tool_jacobian_velocity.fixed_rows::<3>(3).into_owned(),
     );
@@ -378,7 +383,7 @@ fn forward_acceleration_matches_finite_difference() {
         epsilon = 2.0e-8
     );
 
-    let mixed_arm = RobotArm::from_urdf(urdf_path("mixed_arm.urdf")).unwrap();
+    let mixed_arm = Robot::from_urdf(urdf_path("mixed_arm.urdf")).unwrap();
     let mixed_q = JointVector::<2>::new(0.4, 0.2);
     let mixed_qd = JointVector::<2>::new(-0.3, 0.5);
     let mixed_numerical = (mixed_arm
@@ -416,7 +421,7 @@ fn forward_acceleration_matches_finite_difference() {
 
 #[test]
 fn gravity_matches_original_two_link_cases() {
-    let arm = RobotArm::from_urdf(urdf_path("gravity_arm.urdf")).unwrap();
+    let arm = Robot::from_urdf(urdf_path("gravity_arm.urdf")).unwrap();
     let q = JointVector::<2>::new(FRAC_PI_2, FRAC_PI_2);
     let (tau, _) = arm.gravity(&q, &Frame::identity(), &[]).unwrap();
     assert_abs_diff_eq!(tau[0], 0.0, epsilon = 0.1);
@@ -490,8 +495,8 @@ fn inverse_dynamics_matches_test_arm_numeric_reference() {
                 &qd,
                 &qdd,
                 &Frame::identity(),
-                Motion::zeros(),
-                Motion::zeros(),
+                Twist::zeros(),
+                Twist::zeros(),
                 &[],
             )
             .unwrap();
@@ -506,7 +511,7 @@ fn tree_jacobians_match_finite_difference_on_both_branches() {
     let epsilon = 1.0e-7;
 
     for target_name in ["left_tool", "right_tool"] {
-        let target = arm.link_id(target_name).unwrap();
+        let target = arm.link(target_name).unwrap();
         let jacobian = arm.jacobian(&q, target).unwrap();
         for joint in 0..7 {
             let mut q_plus = q;
@@ -536,12 +541,12 @@ fn tree_jacobians_match_finite_difference_on_both_branches() {
 fn tree_external_loads_are_isolated_and_add_linearly() {
     let arm = tree_arm();
     let q = JointVector::<7>::from_row_slice(&[0.2, -0.3, 0.4, -0.5, 0.6, -0.7, 0.8]);
-    let left = ExternalWrench {
-        link: arm.link_id("left_tool").unwrap(),
+    let left = Load {
+        link: arm.link("left_tool").unwrap(),
         wrench: Wrench::new(Vector3::new(0.3, -0.2, 0.4), Vector3::new(1.0, 0.5, -0.7)),
     };
-    let right = ExternalWrench {
-        link: arm.link_id("right_tool").unwrap(),
+    let right = Load {
+        link: arm.link("right_tool").unwrap(),
         wrench: Wrench::new(Vector3::new(-0.4, 0.1, 0.2), Vector3::new(-0.6, 0.8, 0.3)),
     };
 
@@ -600,8 +605,8 @@ fn tree_gravity_equals_zero_motion_inverse_dynamics() {
             &zero,
             &zero,
             &Frame::identity(),
-            Motion::zeros(),
-            Motion::zeros(),
+            Twist::zeros(),
+            Twist::zeros(),
             &[],
         )
         .unwrap();

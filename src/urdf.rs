@@ -1,19 +1,24 @@
 use std::collections::{HashMap, HashSet};
 
 use nalgebra::{Isometry3, Matrix3, Translation3, UnitQuaternion, Vector3};
-use urdf_rs::{JointType, Pose, Robot};
+use urdf_rs::{JointType as UrdfJointType, Pose, Robot};
 
-use crate::{Error, JointKind, JointLimit, Result, RobotJoint, RobotLink};
+use crate::{Error, Joint, JointType, Link, Result};
 
+/// Topologically ordered representation produced while importing a URDF tree.
 pub(crate) struct TreeModel {
-    pub joints: Vec<RobotJoint>,
-    pub links: Vec<RobotLink>,
+    /// Joints ordered immediately before their corresponding child links.
+    pub joints: Vec<Joint>,
+    /// Links in root-first topological order.
+    pub links: Vec<Link>,
     /// Parent link index for each joint. Joint `i` always connects this parent
     /// to child link `i + 1` in the topologically ordered arrays.
     pub joint_parents: Vec<usize>,
+    /// Indices of links that have no child joints.
     pub leaf_links: Vec<usize>,
 }
 
+/// Converts a URDF translation and roll-pitch-yaw pose to an isometry.
 pub(crate) fn pose_to_frame(pose: &Pose) -> Isometry3<f64> {
     Isometry3::from_parts(
         Translation3::new(pose.xyz[0], pose.xyz[1], pose.xyz[2]),
@@ -21,6 +26,7 @@ pub(crate) fn pose_to_frame(pose: &Pose) -> Isometry3<f64> {
     )
 }
 
+/// Validates a parsed URDF and converts it to a topologically ordered tree.
 pub(crate) fn tree_model(robot: &Robot) -> Result<TreeModel> {
     let link_names: HashSet<&str> = robot.links.iter().map(|link| link.name.as_str()).collect();
     if link_names.len() != robot.links.len() {
@@ -74,7 +80,7 @@ pub(crate) fn tree_model(robot: &Robot) -> Result<TreeModel> {
     let mut has_children = Vec::with_capacity(robot.links.len());
 
     let root = roots[0];
-    links.push(robot_link(links_by_name[root]));
+    links.push(robot_link(links_by_name[root], 0));
     topological_names.push(root);
     discovered.insert(root, 0);
     has_children.push(false);
@@ -101,7 +107,7 @@ pub(crate) fn tree_model(robot: &Robot) -> Result<TreeModel> {
                 let child_index = links.len();
                 discovered.insert(child_name, child_index);
                 topological_names.push(child_name);
-                links.push(robot_link(child));
+                links.push(robot_link(child, child_index));
                 has_children.push(false);
                 joints.push(robot_joint(joint)?);
                 joint_parents.push(parent_index);
@@ -128,39 +134,35 @@ pub(crate) fn tree_model(robot: &Robot) -> Result<TreeModel> {
     })
 }
 
-fn robot_joint(joint: &urdf_rs::Joint) -> Result<RobotJoint> {
-    let kind = match joint.joint_type {
-        JointType::Revolute | JointType::Continuous => JointKind::Revolute,
-        JointType::Prismatic => JointKind::Prismatic,
-        JointType::Fixed => JointKind::Fixed,
+/// Converts one supported URDF joint into the crate's joint representation.
+fn robot_joint(joint: &urdf_rs::Joint) -> Result<Joint> {
+    let joint_type = match joint.joint_type {
+        UrdfJointType::Revolute | UrdfJointType::Continuous => JointType::Revolute,
+        UrdfJointType::Prismatic => JointType::Prismatic,
+        UrdfJointType::Fixed => JointType::Fixed,
         _ => return Err(Error::UnsupportedJoint(joint.name.clone())),
     };
-    let limit = if joint.joint_type == JointType::Continuous {
-        JointLimit {
-            lower: f64::NEG_INFINITY,
-            upper: f64::INFINITY,
-            velocity: joint.limit.velocity,
-        }
+    let (lower_limit, upper_limit) = if joint.joint_type == UrdfJointType::Continuous {
+        (f64::NEG_INFINITY, f64::INFINITY)
     } else {
-        JointLimit {
-            lower: joint.limit.lower,
-            upper: joint.limit.upper,
-            velocity: joint.limit.velocity,
-        }
+        (joint.limit.lower, joint.limit.upper)
     };
-    RobotJoint::new_named(
+    Joint::new_named(
         joint.name.clone(),
-        kind,
+        joint_type,
         pose_to_frame(&joint.origin),
         Vector3::new(joint.axis.xyz[0], joint.axis.xyz[1], joint.axis.xyz[2]),
-        limit,
+        lower_limit,
+        upper_limit,
+        joint.limit.velocity,
     )
 }
 
-fn robot_link(link: &urdf_rs::Link) -> RobotLink {
+/// Converts one URDF link and its inertial block into a [`Link`].
+fn robot_link(link: &urdf_rs::Link, index: usize) -> Link {
     let inertial = &link.inertial;
     // Preserve the compatibility convention: URDF products of inertia are
-    // stored with a negative sign in RobotLink.
+    // stored with a negative sign in Link.
     let inertia = Matrix3::new(
         inertial.inertia.ixx,
         -inertial.inertia.ixy,
@@ -172,7 +174,8 @@ fn robot_link(link: &urdf_rs::Link) -> RobotLink {
         -inertial.inertia.iyz,
         inertial.inertia.izz,
     );
-    RobotLink::new(
+    Link::new(
+        index,
         link.name.clone(),
         inertial.mass.value,
         Vector3::new(

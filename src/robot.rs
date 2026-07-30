@@ -1,13 +1,18 @@
-use std::path::Path;
+use std::{
+    path::Path,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use nalgebra::{SMatrix, SVector, Vector3};
 
 use crate::{
-    Error, Frame, InverseKinematicsError, Jacobian, JointKind, JointVector, Motion, Result,
-    RobotJoint, RobotLink, Wrench, urdf::tree_model,
+    Error, Frame, Jacobian, Joint, JointType, JointVector, Link, Result, Twist, Wrench,
+    urdf::tree_model,
 };
 
 const GRAVITY: f64 = 9.80665;
+const UNOWNED_MODEL_ID: u64 = 0;
+static NEXT_MODEL_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Configuration for damped-least-squares inverse kinematics.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -25,6 +30,7 @@ pub struct InverseKinematicsOptions {
 }
 
 impl Default for InverseKinematicsOptions {
+    /// Returns conservative tolerances and damping suitable for general use.
     fn default() -> Self {
         Self {
             max_iterations: 100,
@@ -36,95 +42,107 @@ impl Default for InverseKinematicsOptions {
     }
 }
 
-/// Stable numeric identifier for a link in one loaded robot model.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct LinkId(usize);
-
-impl LinkId {
-    pub const fn from_index(index: usize) -> Self {
-        Self(index)
-    }
-
-    pub const fn index(self) -> usize {
-        self.0
-    }
-}
-
 /// Wrench applied at a link origin and expressed in that link's frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ExternalWrench {
-    pub link: LinkId,
+pub struct Load<'a> {
+    /// Link at whose origin the wrench is applied.
+    pub link: &'a Link,
+    /// Wrench expressed in the selected link's coordinate frame.
     pub wrench: Wrench,
 }
 
-/// Runtime-sized serial robot model with fixed-size calculation inputs and outputs.
+/// Runtime-topology tree robot with fixed-size joint-space calculation inputs and outputs.
 #[derive(Clone, Debug)]
-pub struct RobotArm {
+pub struct Robot {
+    model_id: u64,
     name: String,
-    joints: Box<[RobotJoint]>,
-    links: Box<[RobotLink]>,
-    joint_parents: Box<[LinkId]>,
-    leaf_links: Box<[LinkId]>,
+    joints: Box<[Joint]>,
+    links: Box<[Link]>,
+    joint_parents: Box<[usize]>,
+    leaf_links: Box<[usize]>,
 }
 
-impl RobotArm {
+impl Robot {
+    /// Loads and validates a tree robot model from a URDF file.
+    ///
+    /// Links and joints are stored in topological order, with the root link at
+    /// index zero.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be parsed or its kinematic graph is
+    /// invalid or contains an unsupported joint type.
     pub fn from_urdf(path: impl AsRef<Path>) -> Result<Self> {
         let robot = urdf_rs::read_file(path)?;
-        let model = tree_model(&robot)?;
+        let mut model = tree_model(&robot)?;
+        let model_id = NEXT_MODEL_ID.fetch_add(1, Ordering::Relaxed);
+        assert_ne!(
+            model_id, UNOWNED_MODEL_ID,
+            "robot model identifier overflow"
+        );
+        for link in &mut model.links {
+            link.set_model_id(model_id);
+        }
         Ok(Self {
+            model_id,
             name: robot.name,
             joints: model.joints.into_boxed_slice(),
             links: model.links.into_boxed_slice(),
-            joint_parents: model
-                .joint_parents
-                .into_iter()
-                .map(LinkId)
-                .collect::<Vec<_>>()
-                .into_boxed_slice(),
-            leaf_links: model
-                .leaf_links
-                .into_iter()
-                .map(LinkId)
-                .collect::<Vec<_>>()
-                .into_boxed_slice(),
+            joint_parents: model.joint_parents.into_boxed_slice(),
+            leaf_links: model.leaf_links.into_boxed_slice(),
         })
     }
 
+    /// Returns the robot name declared in the URDF.
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    pub fn links(&self) -> &[RobotLink] {
+    /// Returns all links in topological order, starting with the root link.
+    pub fn links(&self) -> &[Link] {
         &self.links
     }
 
-    pub fn joints(&self) -> &[RobotJoint] {
+    /// Returns all joints in the same topological order as their child links.
+    pub fn joints(&self) -> &[Joint] {
         &self.joints
     }
 
-    pub const fn root_link(&self) -> LinkId {
-        LinkId(0)
+    /// Returns the model's root link.
+    pub fn root_link(&self) -> &Link {
+        &self.links[0]
     }
 
-    pub fn leaf_links(&self) -> &[LinkId] {
-        &self.leaf_links
+    /// Iterates over links that have no children.
+    pub fn leaf_links(&self) -> impl ExactSizeIterator<Item = &Link> {
+        self.leaf_links.iter().map(|&index| &self.links[index])
     }
 
-    pub fn link_id(&self, name: &str) -> Option<LinkId> {
+    /// Finds a link by its URDF name.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownLink`] if the model has no link named `name`.
+    pub fn link(&self, name: &str) -> Result<&Link> {
         self.links
             .iter()
-            .position(|link| link.name() == name)
-            .map(LinkId)
+            .find(|link| link.name() == name)
+            .ok_or_else(|| Error::UnknownLink {
+                name: name.to_owned(),
+            })
     }
 
+    /// Returns the number of links, including the root link.
     pub fn link_count(&self) -> usize {
         self.links.len()
     }
 
+    /// Returns the number of joints in the model.
     pub fn joint_count(&self) -> usize {
         self.joints.len()
     }
 
+    /// Checks that a fixed-size joint vector matches the loaded model.
     fn validate_joint_count<const N: usize>(&self) -> Result<()> {
         if self.joints.len() == N {
             Ok(())
@@ -136,34 +154,42 @@ impl RobotArm {
         }
     }
 
-    fn validate_link(&self, link: LinkId) -> Result<()> {
-        if link.0 < self.links.len() {
-            Ok(())
+    /// Returns a link's index after checking that it belongs to this model.
+    fn validate_link(&self, link: &Link) -> Result<usize> {
+        let index = link.index();
+        if link.model_id() == self.model_id && index < self.links.len() {
+            Ok(index)
         } else {
-            Err(Error::InvalidLinkId {
-                index: link.0,
-                link_count: self.links.len(),
+            Err(Error::InvalidLink {
+                name: link.name().to_owned(),
             })
         }
     }
 
+    /// Computes the target link frame relative to the root frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `N` differs from [`Self::joint_count`] or `target`
+    /// is not a link in this model.
     pub fn forward_kinematics<const N: usize>(
         &self,
         q: &JointVector<N>,
-        target: LinkId,
+        target: &Link,
     ) -> Result<Frame> {
         self.validate_joint_count::<N>()?;
-        self.validate_link(target)?;
-        if target == self.root_link() {
+        let target_index = self.validate_link(target)?;
+        if target_index == 0 {
             return Ok(Frame::identity());
         }
-        Ok(self.link_frames(q)[target.0 - 1])
+        Ok(self.link_frames(q)[target_index - 1])
     }
 
+    /// Computes each non-root link frame in topological order.
     fn link_frames<const N: usize>(&self, q: &JointVector<N>) -> [Frame; N] {
         let mut frames: [Frame; N] = std::array::from_fn(|_| Frame::identity());
         for i in 0..N {
-            let parent = self.joint_parents[i].0;
+            let parent = self.joint_parents[i];
             let parent_frame = if parent == 0 {
                 Frame::identity()
             } else {
@@ -174,29 +200,29 @@ impl RobotArm {
         frames
     }
 
-    /// Computes one link frame and its base-frame geometric Jacobian.
+    /// Computes one link frame and its root-frame geometric Jacobian.
     fn forward_kinematics_and_jacobian<const N: usize>(
         &self,
         q: &JointVector<N>,
-        target: LinkId,
+        target: &Link,
     ) -> Result<(Frame, Jacobian<N>)> {
         self.validate_joint_count::<N>()?;
-        self.validate_link(target)?;
+        let target_index = self.validate_link(target)?;
         let frames = self.link_frames(q);
-        let target_frame = if target == self.root_link() {
+        let target_frame = if target_index == 0 {
             Frame::identity()
         } else {
-            frames[target.0 - 1]
+            frames[target_index - 1]
         };
         let mut jacobian: Jacobian<N> = Jacobian::zeros();
 
-        let mut current = target.0;
+        let mut current = target_index;
         while current != 0 {
             let joint_index = current - 1;
             let joint_frame = frames[joint_index];
             let axis = joint_frame.rotation * self.joints[joint_index].axis().as_ref();
-            match self.joints[joint_index].kind() {
-                JointKind::Revolute => {
+            match self.joints[joint_index].joint_type() {
+                JointType::Revolute => {
                     let linear = axis
                         .cross(&(target_frame.translation.vector - joint_frame.translation.vector));
                     jacobian
@@ -206,24 +232,32 @@ impl RobotArm {
                         .fixed_view_mut::<3, 1>(3, joint_index)
                         .copy_from(&linear);
                 }
-                JointKind::Prismatic => {
+                JointType::Prismatic => {
                     jacobian
                         .fixed_view_mut::<3, 1>(3, joint_index)
                         .copy_from(&axis);
                 }
-                JointKind::Fixed => {}
+                JointType::Fixed => {}
             }
-            current = self.joint_parents[joint_index].0;
+            current = self.joint_parents[joint_index];
         }
 
         Ok((target_frame, jacobian))
     }
 
-    /// Geometric Jacobian in the base frame, angular rows first.
+    /// Computes the target link's geometric Jacobian in the root frame.
+    ///
+    /// Rows 0 through 2 are angular velocity and rows 3 through 5 are linear
+    /// velocity at the target link origin.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `N` differs from [`Self::joint_count`] or `target`
+    /// is invalid.
     pub fn jacobian<const N: usize>(
         &self,
         q: &JointVector<N>,
-        target: LinkId,
+        target: &Link,
     ) -> Result<Jacobian<N>> {
         Ok(self.forward_kinematics_and_jacobian(q, target)?.1)
     }
@@ -233,10 +267,15 @@ impl RobotArm {
     /// This uses damped least squares with [`InverseKinematicsOptions::default`].
     /// The iteration is unconstrained, but a converged result outside a URDF
     /// joint limit is returned as an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid dimension or link, non-finite input,
+    /// numerical failure, limit violation, or failure to converge.
     pub fn inverse_kinematics<const N: usize>(
         &self,
         initial_q: &JointVector<N>,
-        target: LinkId,
+        target: &Link,
         desired: &Frame,
     ) -> Result<JointVector<N>> {
         self.inverse_kinematics_with_options(
@@ -247,11 +286,17 @@ impl RobotArm {
         )
     }
 
-    /// Configurable damped-least-squares inverse kinematics.
+    /// Solves inverse kinematics using configurable damped least squares.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid solver options, an invalid dimension or
+    /// link, non-finite input, numerical failure, limit violation, or failure
+    /// to converge.
     pub fn inverse_kinematics_with_options<const N: usize>(
         &self,
         initial_q: &JointVector<N>,
-        target: LinkId,
+        target: &Link,
         desired: &Frame,
         options: InverseKinematicsOptions,
     ) -> Result<JointVector<N>> {
@@ -259,10 +304,9 @@ impl RobotArm {
         self.validate_link(target)?;
         validate_inverse_kinematics_options(options)?;
         if !initial_q.iter().all(|value| value.is_finite()) {
-            return Err(InverseKinematicsError::NonFiniteInput {
+            return Err(Error::NonFiniteInput {
                 input: "initial joint vector",
-            }
-            .into());
+            });
         }
         if !desired
             .translation
@@ -271,10 +315,9 @@ impl RobotArm {
             .chain(desired.rotation.coords.iter())
             .all(|value| value.is_finite())
         {
-            return Err(InverseKinematicsError::NonFiniteInput {
+            return Err(Error::NonFiniteInput {
                 input: "target frame",
-            }
-            .into());
+            });
         }
 
         let mut q = *initial_q;
@@ -292,12 +335,11 @@ impl RobotArm {
                 return Ok(q);
             }
             if iteration == options.max_iterations {
-                return Err(InverseKinematicsError::NotConverged {
+                return Err(Error::NotConverged {
                     iterations: options.max_iterations,
                     translation_error: translation_error_norm,
                     rotation_error: rotation_error_norm,
-                }
-                .into());
+                });
             }
 
             let error = SVector::<f64, 6>::from_iterator(
@@ -310,18 +352,16 @@ impl RobotArm {
                 + SMatrix::<f64, 6, 6>::identity() * damping_squared;
             let Some(weighted_error) = regularized.cholesky().map(|factor| factor.solve(&error))
             else {
-                return Err(InverseKinematicsError::NumericalFailure {
+                return Err(Error::NumericalFailure {
                     iteration: iteration + 1,
-                }
-                .into());
+                });
             };
             let mut step = jacobian.transpose() * weighted_error;
             let step_norm = step.norm();
             if !step_norm.is_finite() {
-                return Err(InverseKinematicsError::NumericalFailure {
+                return Err(Error::NumericalFailure {
                     iteration: iteration + 1,
-                }
-                .into());
+                });
             }
             if step_norm > options.max_step_norm {
                 step *= options.max_step_norm / step_norm;
@@ -332,34 +372,43 @@ impl RobotArm {
         unreachable!("inverse-kinematics loop always returns")
     }
 
+    /// Checks a converged inverse-kinematics result against all joint limits.
     fn validate_inverse_kinematics_solution<const N: usize>(
         &self,
         q: &JointVector<N>,
     ) -> Result<()> {
         for (joint_index, (joint, &position)) in self.joints.iter().zip(q.iter()).enumerate() {
             if joint.is_over_limit(position) {
-                let limit = joint.limit();
-                return Err(InverseKinematicsError::JointLimitViolation {
+                return Err(Error::JointLimitViolation {
                     joint_index,
                     joint: joint.name().to_owned(),
                     position,
-                    lower: limit.lower,
-                    upper: limit.upper,
-                }
-                .into());
+                    lower: joint.lower_limit(),
+                    upper: joint.upper_limit(),
+                });
             }
         }
         Ok(())
     }
 
+    /// Computes spatial velocity at a point fixed to a target link.
+    ///
+    /// `tool` defines the point relative to the target link. The resulting
+    /// angular and linear velocity are rotated by `base` and expressed in that
+    /// frame's orientation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `N` differs from [`Self::joint_count`] or `target`
+    /// is invalid.
     pub fn forward_velocity_kinematics<const N: usize>(
         &self,
         q: &JointVector<N>,
         qd: &JointVector<N>,
-        target: LinkId,
+        target: &Link,
         base: &Frame,
         tool: &Frame,
-    ) -> Result<Motion> {
+    ) -> Result<Twist> {
         let (end, mut jacobian) = self.forward_kinematics_and_jacobian(q, target)?;
         let offset_world = end.rotation * tool.translation.vector;
         for i in 0..N {
@@ -369,26 +418,41 @@ impl RobotArm {
             jacobian.fixed_view_mut::<3, 1>(3, i).copy_from(&shifted);
         }
         let vector = jacobian * qd;
-        Ok(Motion::new(
+        Ok(Twist::new(
             base.rotation * vector.fixed_rows::<3>(0).into_owned(),
             base.rotation * vector.fixed_rows::<3>(3).into_owned(),
         ))
     }
 
+    /// Computes spatial acceleration of a target link origin in the root frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `N` differs from [`Self::joint_count`] or `target`
+    /// is invalid.
     pub fn forward_acceleration_kinematics<const N: usize>(
         &self,
         q: &JointVector<N>,
         qd: &JointVector<N>,
         qdd: &JointVector<N>,
-        target: LinkId,
-    ) -> Result<Motion> {
+        target: &Link,
+    ) -> Result<Twist> {
         self.validate_joint_count::<N>()?;
-        self.validate_link(target)?;
-        Ok(self.link_acceleration(q, qd, qdd, target))
+        let target_index = self.validate_link(target)?;
+        Ok(self.link_acceleration(q, qd, qdd, target_index))
     }
 
-    /// Newton-Euler inverse dynamics.
-    /// Returns `(joint_force, wrench_at_base)`.
+    /// Computes joint forces and the root reaction wrench using Newton-Euler dynamics.
+    ///
+    /// The returned tuple is `(joint_force, wrench_at_base)`. Wrenches in
+    /// `loads` must be expressed in their selected link frames.
+    /// Gravity is included along the negative world Z direction through the
+    /// equivalent upward inertial acceleration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `N` differs from [`Self::joint_count`] or an external
+    /// load references a link from another model.
     #[allow(clippy::too_many_arguments)]
     pub fn inverse_dynamics<const N: usize>(
         &self,
@@ -396,9 +460,9 @@ impl RobotArm {
         qd: &JointVector<N>,
         qdd: &JointVector<N>,
         base_frame: &Frame,
-        base_velocity: Motion,
-        base_acceleration: Motion,
-        external_wrenches: &[ExternalWrench],
+        base_velocity: Twist,
+        base_acceleration: Twist,
+        loads: &[Load<'_>],
     ) -> Result<(JointVector<N>, Wrench)> {
         self.validate_joint_count::<N>()?;
         let mut transforms: [Frame; N] = std::array::from_fn(|_| Frame::identity());
@@ -417,7 +481,7 @@ impl RobotArm {
         for i in 0..N {
             let joint = &self.joints[i];
             let link = &self.links[i + 1];
-            let parent = self.joint_parents[i].0;
+            let parent = self.joint_parents[i];
             let (parent_omega, parent_angular_acceleration, parent_acceleration) = if parent == 0 {
                 (base_omega, base_angular_acceleration, base_acceleration)
             } else {
@@ -437,8 +501,8 @@ impl RobotArm {
                 * (parent_acceleration
                     + parent_angular_acceleration.cross(&translation)
                     + parent_omega.cross(&parent_omega.cross(&translation)));
-            let (omega, angular_acceleration, acceleration) = match joint.kind() {
-                JointKind::Revolute => {
+            let (omega, angular_acceleration, acceleration) = match joint.joint_type() {
+                JointType::Revolute => {
                     let angular_acceleration = rotated_angular_acceleration
                         + qdd[i] * axis
                         + rotated_omega.cross(&(qd[i] * axis));
@@ -448,14 +512,14 @@ impl RobotArm {
                         translated_acceleration,
                     )
                 }
-                JointKind::Prismatic => (
+                JointType::Prismatic => (
                     rotated_omega,
                     rotated_angular_acceleration,
                     translated_acceleration
                         + qdd[i] * axis
                         + 2.0 * qd[i] * parent_omega.cross(&(transform.rotation * axis)),
                 ),
-                JointKind::Fixed => (
+                JointType::Fixed => (
                     rotated_omega,
                     rotated_angular_acceleration,
                     translated_acceleration,
@@ -472,15 +536,15 @@ impl RobotArm {
         }
 
         let mut joint_force = JointVector::zeros();
-        let mut loads: [Wrench; N] = std::array::from_fn(|_| Wrench::zeros());
+        let mut link_loads: [Wrench; N] = std::array::from_fn(|_| Wrench::zeros());
         let mut base_load = Wrench::zeros();
-        for external in external_wrenches {
-            self.validate_link(external.link)?;
-            if external.link == self.root_link() {
-                base_load = add_wrench(base_load, external.wrench);
+        for load in loads {
+            let link_index = self.validate_link(load.link)?;
+            if link_index == 0 {
+                base_load = add_wrench(base_load, load.wrench);
             } else {
-                let index = external.link.0 - 1;
-                loads[index] = add_wrench(loads[index], external.wrench);
+                let index = link_index - 1;
+                link_loads[index] = add_wrench(link_loads[index], load.wrench);
             }
         }
 
@@ -495,26 +559,34 @@ impl RobotArm {
                     + angular_velocities[i].cross(&angular_momentum),
                 inertial_force,
             );
-            loads[i] = add_wrench(loads[i], inertial_load);
-            joint_force[i] = joint.active_force(loads[i]);
+            link_loads[i] = add_wrench(link_loads[i], inertial_load);
+            joint_force[i] = joint.active_force(link_loads[i]);
 
-            let parent_load = wrench_to_parent(&transforms[i], loads[i]);
-            let parent = self.joint_parents[i].0;
+            let parent_load = wrench_to_parent(&transforms[i], link_loads[i]);
+            let parent = self.joint_parents[i];
             if parent == 0 {
                 base_load = add_wrench(base_load, parent_load);
             } else {
-                loads[parent - 1] = add_wrench(loads[parent - 1], parent_load);
+                link_loads[parent - 1] = add_wrench(link_loads[parent - 1], parent_load);
             }
         }
         Ok((joint_force, base_load))
     }
 
-    /// Gravity joint forces and the resulting base wrench.
+    /// Computes gravity joint forces and the resulting root reaction wrench.
+    ///
+    /// The returned tuple is `(joint_force, wrench_at_base)`. Wrenches in
+    /// `loads` must be expressed in their selected link frames.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `N` differs from [`Self::joint_count`] or an external
+    /// load references a link from another model.
     pub fn gravity<const N: usize>(
         &self,
         q: &JointVector<N>,
         base_frame: &Frame,
-        external_wrenches: &[ExternalWrench],
+        loads: &[Load<'_>],
     ) -> Result<(JointVector<N>, Wrench)> {
         self.validate_joint_count::<N>()?;
         let base_gravity = base_frame.rotation.inverse() * Vector3::new(0.0, 0.0, GRAVITY);
@@ -522,7 +594,7 @@ impl RobotArm {
         let mut gravity_at_link: [Vector3<f64>; N] = std::array::from_fn(|_| Vector3::zeros());
         for i in 0..N {
             transforms[i] = self.joints[i].frame(q[i]);
-            let parent = self.joint_parents[i].0;
+            let parent = self.joint_parents[i];
             let parent_gravity = if parent == 0 {
                 base_gravity
             } else {
@@ -532,15 +604,15 @@ impl RobotArm {
         }
 
         let mut torque = JointVector::zeros();
-        let mut loads: [Wrench; N] = std::array::from_fn(|_| Wrench::zeros());
+        let mut link_loads: [Wrench; N] = std::array::from_fn(|_| Wrench::zeros());
         let mut base_load = Wrench::zeros();
-        for external in external_wrenches {
-            self.validate_link(external.link)?;
-            if external.link == self.root_link() {
-                base_load = add_wrench(base_load, external.wrench);
+        for load in loads {
+            let link_index = self.validate_link(load.link)?;
+            if link_index == 0 {
+                base_load = add_wrench(base_load, load.wrench);
             } else {
-                let index = external.link.0 - 1;
-                loads[index] = add_wrench(loads[index], external.wrench);
+                let index = link_index - 1;
+                link_loads[index] = add_wrench(link_loads[index], load.wrench);
             }
         }
 
@@ -549,29 +621,30 @@ impl RobotArm {
             let link = &self.links[i + 1];
             let force = link.mass() * gravity_at_link[i];
             let gravity_load = Wrench::new(link.center_of_mass().cross(&force), force);
-            loads[i] = add_wrench(loads[i], gravity_load);
-            torque[i] = joint.active_force(loads[i]);
+            link_loads[i] = add_wrench(link_loads[i], gravity_load);
+            torque[i] = joint.active_force(link_loads[i]);
 
-            let parent_load = wrench_to_parent(&transforms[i], loads[i]);
-            let parent = self.joint_parents[i].0;
+            let parent_load = wrench_to_parent(&transforms[i], link_loads[i]);
+            let parent = self.joint_parents[i];
             if parent == 0 {
                 base_load = add_wrench(base_load, parent_load);
             } else {
-                loads[parent - 1] = add_wrench(loads[parent - 1], parent_load);
+                link_loads[parent - 1] = add_wrench(link_loads[parent - 1], parent_load);
             }
         }
         Ok((torque, base_load))
     }
 
+    /// Propagates joint motion to the spatial acceleration of one link origin.
     fn link_acceleration<const N: usize>(
         &self,
         q: &JointVector<N>,
         qd: &JointVector<N>,
         qdd: &JointVector<N>,
-        target: LinkId,
-    ) -> Motion {
-        if target == self.root_link() {
-            return Motion::zeros();
+        target_index: usize,
+    ) -> Twist {
+        if target_index == 0 {
+            return Twist::zeros();
         }
         let mut frames: [Frame; N] = std::array::from_fn(|_| Frame::identity());
         let mut angular_velocities: [Vector3<f64>; N] = std::array::from_fn(|_| Vector3::zeros());
@@ -580,7 +653,7 @@ impl RobotArm {
         let mut linear_accelerations: [Vector3<f64>; N] = std::array::from_fn(|_| Vector3::zeros());
 
         for i in 0..N {
-            let parent = self.joint_parents[i].0;
+            let parent = self.joint_parents[i];
             let (parent_frame, angular_velocity, angular_acceleration, linear_acceleration) =
                 if parent == 0 {
                     (
@@ -606,17 +679,17 @@ impl RobotArm {
                 + angular_acceleration.cross(&offset)
                 + angular_velocity.cross(&angular_velocity.cross(&offset));
 
-            match self.joints[i].kind() {
-                JointKind::Revolute => {
+            match self.joints[i].joint_type() {
+                JointType::Revolute => {
                     child_angular_acceleration +=
                         axis * qdd[i] + angular_velocity.cross(&axis) * qd[i];
                     child_angular_velocity += axis * qd[i];
                 }
-                JointKind::Prismatic => {
+                JointType::Prismatic => {
                     child_linear_acceleration +=
                         axis * qdd[i] + 2.0 * qd[i] * angular_velocity.cross(&axis);
                 }
-                JointKind::Fixed => {}
+                JointType::Fixed => {}
             }
 
             frames[i] = frame;
@@ -625,17 +698,17 @@ impl RobotArm {
             linear_accelerations[i] = child_linear_acceleration;
         }
 
-        let index = target.0 - 1;
-        Motion::new(angular_accelerations[index], linear_accelerations[index])
+        let index = target_index - 1;
+        Twist::new(angular_accelerations[index], linear_accelerations[index])
     }
 }
 
+/// Checks that all inverse-kinematics options are finite and strictly positive.
 fn validate_inverse_kinematics_options(options: InverseKinematicsOptions) -> Result<()> {
     if options.max_iterations == 0 {
-        return Err(InverseKinematicsError::InvalidOptions(
+        return Err(Error::InvalidOptions(
             "max_iterations must be greater than zero",
-        )
-        .into());
+        ));
     }
     for (name, value) in [
         ("translation_tolerance", options.translation_tolerance),
@@ -644,20 +717,20 @@ fn validate_inverse_kinematics_options(options: InverseKinematicsOptions) -> Res
         ("max_step_norm", options.max_step_norm),
     ] {
         if !value.is_finite() || value <= 0.0 {
-            return Err(InverseKinematicsError::InvalidOptions(match name {
+            return Err(Error::InvalidOptions(match name {
                 "translation_tolerance" => {
                     "translation_tolerance must be finite and greater than zero"
                 }
                 "rotation_tolerance" => "rotation_tolerance must be finite and greater than zero",
                 "damping" => "damping must be finite and greater than zero",
                 _ => "max_step_norm must be finite and greater than zero",
-            })
-            .into());
+            }));
         }
     }
     Ok(())
 }
 
+/// Transforms a child-frame wrench to its parent frame.
 fn wrench_to_parent(transform: &Frame, wrench: Wrench) -> Wrench {
     let force = transform.rotation * wrench.force;
     Wrench::new(
@@ -666,6 +739,7 @@ fn wrench_to_parent(transform: &Frame, wrench: Wrench) -> Wrench {
     )
 }
 
+/// Adds two wrenches expressed at the same point and in the same frame.
 fn add_wrench(lhs: Wrench, rhs: Wrench) -> Wrench {
     Wrench::new(lhs.torque + rhs.torque, lhs.force + rhs.force)
 }

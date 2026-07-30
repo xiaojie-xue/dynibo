@@ -3,7 +3,7 @@
 use std::{ffi::CString, path::PathBuf, ptr::NonNull};
 
 use approx::assert_relative_eq;
-use dyno::{Frame, JointVector, Motion, RobotArm};
+use dyno::{Frame, JointVector, Robot, Twist};
 use nalgebra::{Matrix3, SMatrix, Vector3};
 
 unsafe extern "C" {
@@ -77,7 +77,7 @@ fn tree_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/data/test_tree_7.urdf")
 }
 
-fn joint_mapping(arm: &RobotArm, pinocchio: &PinocchioContext) -> [usize; 7] {
+fn joint_mapping(arm: &Robot, pinocchio: &PinocchioContext) -> [usize; 7] {
     assert_eq!(arm.joint_count(), 7);
     assert_eq!(pinocchio.dof(), 7);
     std::array::from_fn(|index| pinocchio.joint_index(arm.joints()[index].name()))
@@ -105,9 +105,9 @@ fn deterministic_state(sample: usize, phase: f64, amplitude: f64) -> JointVector
 #[test]
 fn branched_fk_and_jacobian_match_pinocchio() {
     let path = tree_path();
-    let arm = RobotArm::from_urdf(&path).unwrap();
+    let arm = Robot::from_urdf(&path).unwrap();
     for (link_name, joint_name) in [("left_tool", "left_wrist"), ("right_tool", "right_wrist")] {
-        let target = arm.link_id(link_name).unwrap();
+        let target = arm.link(link_name).unwrap();
         let pinocchio = PinocchioContext::new(&path, joint_name);
         let mapping = joint_mapping(&arm, &pinocchio);
 
@@ -164,7 +164,7 @@ fn branched_fk_and_jacobian_match_pinocchio() {
 #[test]
 fn branched_gravity_and_rnea_match_pinocchio() {
     let path = tree_path();
-    let arm = RobotArm::from_urdf(&path).unwrap();
+    let arm = Robot::from_urdf(&path).unwrap();
     let pinocchio = PinocchioContext::new(&path, "right_wrist");
     let mapping = joint_mapping(&arm, &pinocchio);
 
@@ -208,8 +208,8 @@ fn branched_gravity_and_rnea_match_pinocchio() {
                 &qd,
                 &qdd,
                 &Frame::identity(),
-                Motion::zeros(),
-                Motion::zeros(),
+                Twist::zeros(),
+                Twist::zeros(),
                 &[],
             )
             .unwrap();

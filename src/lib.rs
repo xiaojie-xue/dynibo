@@ -1,12 +1,14 @@
-//! Serial robot-arm kinematics and inverse dynamics with fixed-size calculation types.
+//! Tree-structured robot kinematics and dynamics with fixed-size joint-space calculation types.
+
+#![warn(missing_docs)]
 
 mod error;
 mod model;
-mod robot_arm;
+mod robot;
 mod spatial;
 mod urdf;
 
-pub use error::{Error, InverseKinematicsError, Result};
-pub use model::{JointKind, JointLimit, RobotJoint, RobotLink};
-pub use robot_arm::{ExternalWrench, InverseKinematicsOptions, LinkId, RobotArm};
-pub use spatial::{Frame, Jacobian, JointVector, Motion, Wrench};
+pub use error::{Error, Result};
+pub use model::{Joint, JointType, Link};
+pub use robot::{InverseKinematicsOptions, Load, Robot};
+pub use spatial::{Frame, Jacobian, JointVector, Twist, Wrench};
