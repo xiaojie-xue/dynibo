@@ -6,10 +6,14 @@ use std::{
 };
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use dyno::{Frame, JointVector, Motion, RobotArm, Wrench};
+use dyno::{Frame, JointVector, LinkId, Motion, RobotArm};
 
 unsafe extern "C" {
     fn dyno_pinocchio_create(urdf_path: *const std::ffi::c_char) -> *mut std::ffi::c_void;
+    fn dyno_pinocchio_create_for_joint(
+        urdf_path: *const std::ffi::c_char,
+        end_joint_name: *const std::ffi::c_char,
+    ) -> *mut std::ffi::c_void;
     fn dyno_pinocchio_destroy(context: *mut std::ffi::c_void);
     fn dyno_pinocchio_dof(context: *const std::ffi::c_void) -> usize;
     fn dyno_pinocchio_noop(context: *const std::ffi::c_void, q: *const f64) -> f64;
@@ -35,9 +39,53 @@ impl PinocchioContext {
         Self(NonNull::new(context).expect("Pinocchio failed to load the benchmark URDF"))
     }
 
+    fn new_for_joint(urdf_path: &std::path::Path, end_joint_name: &str) -> Self {
+        let path = CString::new(urdf_path.to_string_lossy().as_bytes())
+            .expect("URDF path must not contain a NUL byte");
+        let joint_name =
+            CString::new(end_joint_name).expect("joint name must not contain a NUL byte");
+        // SAFETY: both arguments are valid, NUL-terminated strings for the duration of the call.
+        let context =
+            unsafe { dyno_pinocchio_create_for_joint(path.as_ptr(), joint_name.as_ptr()) };
+        Self(NonNull::new(context).expect("Pinocchio failed to load the requested end joint"))
+    }
+
     fn dof(&self) -> usize {
         // SAFETY: the context is owned by `self` and remains valid until `drop`.
         unsafe { dyno_pinocchio_dof(self.0.as_ptr()) }
+    }
+}
+
+struct TreeBenchmarkCase<const N: usize> {
+    arm: RobotArm,
+    pinocchio: PinocchioContext,
+    target: LinkId,
+    q: JointVector<N>,
+    qd: JointVector<N>,
+    qdd: JointVector<N>,
+    base: Frame,
+}
+
+impl<const N: usize> TreeBenchmarkCase<N> {
+    fn new(relative_urdf_path: impl AsRef<Path>, target_link: &str, target_joint: &str) -> Self {
+        let urdf_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_urdf_path.as_ref());
+        let arm = RobotArm::from_urdf(&urdf_path).expect("Dyno must load the tree benchmark URDF");
+        let target = arm
+            .link_id(target_link)
+            .expect("target link must exist in the tree benchmark URDF");
+        let pinocchio = PinocchioContext::new_for_joint(&urdf_path, target_joint);
+        assert_eq!(pinocchio.dof(), N);
+        assert_eq!(arm.joint_count(), N);
+
+        Self {
+            arm,
+            pinocchio,
+            target,
+            q: JointVector::<N>::repeat(0.2),
+            qd: JointVector::<N>::repeat(-0.1),
+            qdd: JointVector::<N>::repeat(0.15),
+            base: Frame::identity(),
+        }
     }
 }
 
@@ -51,6 +99,7 @@ impl Drop for PinocchioContext {
 struct BenchmarkCase<const N: usize> {
     arm: RobotArm,
     pinocchio: PinocchioContext,
+    target: LinkId,
     q: JointVector<N>,
     qd: JointVector<N>,
     qdd: JointVector<N>,
@@ -67,10 +116,12 @@ impl<const N: usize> BenchmarkCase<N> {
             N,
             "Pinocchio and Dyno must load the same number of DoF"
         );
+        let target = arm.leaf_links()[0];
 
         Self {
             arm,
             pinocchio,
+            target,
             q: JointVector::<N>::from_fn(|row, _| (0.37 * (row + 1) as f64).sin() * 0.5),
             qd: JointVector::<N>::from_fn(|row, _| (0.23 * (row + 1) as f64).cos() * 0.4),
             qdd: JointVector::<N>::from_fn(|row, _| (0.41 * (row + 1) as f64).sin() * 0.3),
@@ -85,7 +136,13 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
     let mut fk = c.benchmark_group(format!("forward_kinematics/{size}"));
     fk.throughput(Throughput::Elements(1));
     fk.bench_with_input(BenchmarkId::from_parameter("dyno"), &case.q, |b, q| {
-        b.iter(|| black_box(case.arm.forward_kinematics(black_box(q)).unwrap()));
+        b.iter(|| {
+            black_box(
+                case.arm
+                    .forward_kinematics(black_box(q), case.target)
+                    .unwrap(),
+            )
+        });
     });
     fk.bench_with_input(BenchmarkId::from_parameter("pinocchio"), &case.q, |b, q| {
         b.iter(|| {
@@ -100,7 +157,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
     let mut jacobian = c.benchmark_group(format!("end_jacobian/{size}"));
     jacobian.throughput(Throughput::Elements(1));
     jacobian.bench_with_input(BenchmarkId::from_parameter("dyno"), &case.q, |b, q| {
-        b.iter(|| black_box(case.arm.jacobian(black_box(q)).unwrap()))
+        b.iter(|| black_box(case.arm.jacobian(black_box(q), case.target).unwrap()))
     });
     jacobian.bench_with_input(BenchmarkId::from_parameter("pinocchio"), &case.q, |b, q| {
         b.iter(|| {
@@ -122,6 +179,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
                         black_box(&case.q),
                         black_box(&case.qd),
                         black_box(&case.qdd),
+                        case.target,
                     )
                     .unwrap(),
             )
@@ -135,7 +193,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
         b.iter(|| {
             black_box(
                 case.arm
-                    .gravity(black_box(q), &case.base, Wrench::zeros())
+                    .gravity(black_box(q), &case.base, black_box(&[]))
                     .unwrap(),
             )
         });
@@ -163,7 +221,105 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
                         &case.base,
                         Motion::zeros(),
                         Motion::zeros(),
-                        Wrench::zeros(),
+                        black_box(&[]),
+                    )
+                    .unwrap(),
+            )
+        });
+    });
+    rnea.bench_function("pinocchio", |b| {
+        b.iter(|| {
+            // SAFETY: context and input vectors remain valid for the duration of every call.
+            black_box(unsafe {
+                dyno_pinocchio_rnea(
+                    case.pinocchio.0.as_ptr(),
+                    black_box(case.q.as_ptr()),
+                    black_box(case.qd.as_ptr()),
+                    black_box(case.qdd.as_ptr()),
+                )
+            })
+        });
+    });
+    rnea.finish();
+}
+
+fn benchmark_tree_case<const N: usize>(c: &mut Criterion, case: &TreeBenchmarkCase<N>) {
+    let size = format!("tree_{N}joint_2leaf");
+
+    let mut fk = c.benchmark_group(format!("tree_forward_kinematics/{size}"));
+    fk.throughput(Throughput::Elements(1));
+    fk.bench_function("dyno", |b| {
+        b.iter(|| {
+            black_box(
+                case.arm
+                    .forward_kinematics(black_box(&case.q), case.target)
+                    .unwrap(),
+            )
+        });
+    });
+    fk.bench_function("pinocchio", |b| {
+        b.iter(|| {
+            // SAFETY: context and input vector remain valid for the duration of every call.
+            black_box(unsafe {
+                dyno_pinocchio_forward_kinematics(
+                    case.pinocchio.0.as_ptr(),
+                    black_box(case.q.as_ptr()),
+                )
+            })
+        });
+    });
+    fk.finish();
+
+    let mut jacobian = c.benchmark_group(format!("tree_jacobian/{size}"));
+    jacobian.throughput(Throughput::Elements(1));
+    jacobian.bench_function("dyno", |b| {
+        b.iter(|| black_box(case.arm.jacobian(black_box(&case.q), case.target).unwrap()));
+    });
+    jacobian.bench_function("pinocchio", |b| {
+        b.iter(|| {
+            // SAFETY: context and input vector remain valid for the duration of every call.
+            black_box(unsafe {
+                dyno_pinocchio_jacobian(case.pinocchio.0.as_ptr(), black_box(case.q.as_ptr()))
+            })
+        });
+    });
+    jacobian.finish();
+
+    let mut gravity = c.benchmark_group(format!("tree_gravity/{size}"));
+    gravity.throughput(Throughput::Elements(1));
+    gravity.bench_function("dyno", |b| {
+        b.iter(|| {
+            black_box(
+                case.arm
+                    .gravity(black_box(&case.q), &case.base, black_box(&[]))
+                    .unwrap(),
+            )
+        });
+    });
+    gravity.bench_function("pinocchio", |b| {
+        b.iter(|| {
+            // SAFETY: context and input vector remain valid for the duration of every call.
+            black_box(unsafe {
+                dyno_pinocchio_gravity(case.pinocchio.0.as_ptr(), black_box(case.q.as_ptr()))
+            })
+        });
+    });
+    gravity.finish();
+
+    let mut rnea = c.benchmark_group(format!("tree_rnea/{size}"));
+    rnea.throughput(Throughput::Elements(1));
+    rnea.bench_function("dyno", |b| {
+        b.iter(|| {
+            black_box(
+                case.arm
+                    .inverse_dynamics(
+                        black_box(&case.q),
+                        black_box(&case.qd),
+                        black_box(&case.qdd),
+                        &case.base,
+                        Motion::zeros(),
+                        Motion::zeros(),
+                        black_box(&[]),
                     )
                     .unwrap(),
             )
@@ -204,6 +360,10 @@ fn benchmark_pinocchio(c: &mut Criterion) {
     benchmark_case(
         c,
         &BenchmarkCase::<40>::new("benches/data/test_arm_40.urdf"),
+    );
+    benchmark_tree_case(
+        c,
+        &TreeBenchmarkCase::<7>::new("benches/data/test_tree_7.urdf", "right_tool", "right_wrist"),
     );
 }
 
