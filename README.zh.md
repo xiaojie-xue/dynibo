@@ -2,8 +2,9 @@
 
 [English](README.md) | 简体中文
 
-`dyno` 是一个轻量、可靠、基于 Rust 的串联机器人运动学与动力学库。模型构建时自动
-确定关节数量，计算输入和输出仍保持固定尺寸。数值计算基于
+`dyno` 是一个轻量、可靠、基于 Rust 的树状机器人运动学与动力学库。在当前支持的
+关节类型范围内，可以加载任意分支数量和深度的合法树状 URDF。模型构建时自动确定
+link、关节和父子拓扑，计算输入和输出仍保持固定尺寸。数值计算基于
 [`nalgebra`](https://nalgebra.rs/)，URDF 解析基于
 [`urdf-rs`](https://github.com/openrr/urdf-rs)。
 
@@ -17,8 +18,8 @@
 - **基于 Rust：** 使用 const generics 保持计算输入和输出为固定尺寸，模型的关节
   数量则在构造时自动确定。
 
-URDF 解析和名称查找只在模型构建阶段分配内存，不进入实时计算路径。这里的“可靠”
-是指经过测试的安全 Rust 实现，不代表已获得功能安全认证。
+URDF 解析和拓扑构建只在模型构建阶段分配内存；运动学和动力学计算路径不进行堆内存
+分配。这里的“可靠”是指经过测试的安全 Rust 实现，不代表已获得功能安全认证。
 
 ## 公共接口
 
@@ -26,9 +27,11 @@ URDF 解析和名称查找只在模型构建阶段分配内存，不进入实时
 
 | 类型 | 用途 |
 |---|---|
-| `RobotArm` | 运行时确定自由度、使用固定尺寸计算接口的串联模型 |
+| `RobotArm` | 运行时确定拓扑、使用固定尺寸计算接口的树模型 |
 | `RobotJoint` | 关节变换、轴、限位和关节状态 |
 | `RobotLink` | Link 的质量、质心和惯量 |
+| `LinkId` | 模型内稳定的 link 数字标识，用于选择计算目标 |
+| `ExternalWrench` | 施加在指定 link 原点、以该 link 坐标系表达的 Wrench |
 | `JointVector<N>` | 固定尺寸关节向量 |
 | `Jacobian<N>` | 角运动分量在前的 `6 x N` 几何 Jacobian |
 | `Frame` | 基于 `nalgebra::Isometry3<f64>` 的刚体变换 |
@@ -40,8 +43,10 @@ URDF 解析和名称查找只在模型构建阶段分配内存，不进入实时
 | 接口 | 结果 |
 |---|---|
 | `RobotArm::from_urdf(path)` | 从 URDF 文件路径构建模型 |
-| `name()`、`joints()`、`links()` | 查看模型数据，`links()` 包含 root link |
-| `link_count()` | 返回包含 root link 的 URDF link 数量 |
+| `name()`、`joints()`、`links()` | 查看模型数据，`links()` 包含父 link |
+| `root_link()`、`leaf_links()` | 查看父 link 和所有子 link |
+| `link_id(name)` | 按名称解析可复用的 `LinkId` |
+| `link_count()` | 返回包含父 link 的 URDF link 数量 |
 | `joint_count()` | 返回从模型中解析出的关节数量 |
 
 ### 计算接口
@@ -51,62 +56,69 @@ URDF 解析和名称查找只在模型构建阶段分配内存，不进入实时
 
 | 接口 | 状态与结果 |
 |---|---|
-| `forward_kinematics(q)` | 末端位姿 |
-| `jacobian(q)` | 基座坐标系几何 Jacobian |
+| `forward_kinematics(q, target)` | 指定 link 的位姿 |
+| `jacobian(q, target)` | 指定 link 的基座坐标系 Jacobian，非祖先关节列为零 |
 | `inverse_kinematics(...)` | 规划中，尚未实现 |
 | `inverse_kinematics_with_boundary(...)` | 规划中，尚未实现 |
-| `forward_velocity_kinematics(q, qd, base, tool)` | 末端空间速度 |
-| `forward_acceleration_kinematics(q, qd, qdd)` | 直接递推加速度 `J * qdd + J_dot * qd` |
-| `gravity(q, base, end_load)` | 关节重力和基座 Wrench |
-| `inverse_dynamics(...)` | Newton–Euler 递推得到的关节力和基座 Wrench |
+| `forward_velocity_kinematics(q, qd, target, base, tool)` | 指定 link/tool 的空间速度 |
+| `forward_acceleration_kinematics(q, qd, qdd, target)` | 指定 link 的直接递推加速度 |
+| `gravity(q, base, external_wrenches)` | 支持多 link 外载荷的树形重力递推 |
+| `inverse_dynamics(..., external_wrenches)` | 支持多 link 外载荷和分支汇聚的树形 RNEA |
 
 ```rust
 use dyno::{JointVector, RobotArm};
 
 let arm = RobotArm::from_urdf("test_arm.urdf")?;
 let q = JointVector::<4>::zeros();
-let end = arm.forward_kinematics(&q)?;
-let jacobian = arm.jacobian(&q)?;
+let target = arm.link_id("test_link_4").expect("target link must exist");
+let end = arm.forward_kinematics(&q, target)?;
+let jacobian = arm.jacobian(&q, target)?;
 # Ok::<(), dyno::Error>(())
 ```
 
 计算尺寸 `N` 会从每次传入的 `JointVector<N>` 自动推导，不再属于 `RobotArm` 类型的
 一部分。若模型与输入尺寸不一致，会在开始计算前返回 `Error::WrongJointCount`。
 
-## 兼容范围
+## 树模型约定与兼容范围
 
-当前 `RobotArm` 面向串联机构。构建模型时会明确拒绝多分叉 URDF，而不会静默地将其
-展平成串联链。支持多分叉机器人需要使用基于父节点索引的树形模型，适合作为后续
-独立扩展。
+`RobotArm` 支持任意分支数量和深度的合法树状 URDF：模型具有唯一父 link，每个非父
+link 只有一个父 joint。构建时会生成父先于子的拓扑顺序，并拒绝多父、重复名称、环、
+断连、缺失 link 和一个 link 被多个 joint 重复连接的模型。当前
+支持 revolute、continuous、prismatic 和 fixed joint；其他 URDF joint 类型仍会返回
+`UnsupportedJoint`。
 
-兼容动力学内核有意保留已有的数值约定，包括正 Z 方向重力和既有的惯量积符号，使
-C++ 数值回归结果可以复现。因此，下述重力和 RNEA benchmark 比较的是执行开销，
-并不表示其数值结果与采用标准刚体动力学约定的 Pinocchio 完全等价。
+运动学接口直接接收目标 `LinkId`，因此同一个模型可以计算任意分叉末端。重力和逆动力学
+接口接收 `&[ExternalWrench]`，可同时在任意多个 link 上施加载荷；空切片表示没有外载荷。
+`JointVector<N>` 当前按全部 URDF joint 排列，fixed joint 仍占一个元素但其运动和主动
+关节力为零。
 
-## Pinocchio 性能基准
+父 link 会保存在 `links()` 中，但固定基座兼容动力学不把父 link 自身的惯性计入
+关节力或基座 Wrench。`ExternalWrench` 作用在 link 原点，并以该 link 坐标系表达。
 
-可选的 Criterion benchmark 分别在 `N=4` 和 `N=40` 下，使用两边完全相同的 URDF
-和关节输入，对比 Dyno 与 Pinocchio 的正运动学、末端关节 Jacobian、重力和 RNEA。
-模型构建及 URDF 解析均在计时区间之外；两边都会复用已解析的模型，Pinocchio 还会
-复用其 `Data` 对象。另行测得的空操作用于修正 Rust 到 C ABI 的固定调用开销。
+兼容动力学内核保留已有的正 Z 方向重力和惯量积符号。Pinocchio 桥接层会转换相应
+约定，正确性测试逐元素比较转换后的数值，性能基准只统计执行开销。
 
-以下冒烟结果使用 `--quick` 在 Intel Core i9-14900K 上测得，工具链为 rustc 1.97.1、
-Pinocchio 3.9.0；数值越小越好。它们用于展示当前机器上的性能趋势，不应视为跨平台
-或具有严格统计意义的性能结论。
+## 性能基准
 
-| 操作 | 自由度 | Dyno | Pinocchio | Dyno 加速比 |
-|---|---:|---:|---:|---:|
-| 正运动学 | 4 | 65.5 ns | 79.0 ns | 1.21x |
-| 末端 Jacobian | 4 | 81.4 ns | 135.6 ns | 1.67x |
-| 重力 | 4 | 91.5 ns | 187.6 ns | 2.05x |
-| RNEA | 4 | 148.4 ns | 298.8 ns | 2.01x |
-| 正运动学 | 40 | 646.4 ns | 819.2 ns | 1.27x |
-| 末端 Jacobian | 40 | 786.1 ns | 1.351 µs | 1.72x |
-| 重力 | 40 | 950.0 ns | 1.850 µs | 1.95x |
-| RNEA | 40 | 1.462 µs | 3.209 µs | 2.19x |
+树基准模型包含 7 个可动关节：一个公共 trunk 和左右两条三级分支，共有 2 个子 link。
+以下结果使用相同的树状 URDF 和关节输入，对比 Dyno 与 Pinocchio 3.9.0。
+数据通过 `cargo bench --features pinocchio-bench --bench pinocchio -- --quick` 在 Intel
+Core i9-14900K 上测得；Pinocchio 时间已扣除本次测得的 0.70 ns C ABI 固定开销。
 
-上述 Pinocchio 数据已考虑并扣除测得的 C ABI 开销。如前所述，由于兼容内核与
-Pinocchio 使用不同的数值约定，重力和 RNEA 两组数据只比较执行时间。
+| 函数 | Dyno | Pinocchio | Dyno 加速比 |
+|---|---:|---:|---:|
+| `forward_kinematics` | 111.27 ns | 134.07 ns | 1.20x |
+| `jacobian` | 138.88 ns | 214.00 ns | 1.54x |
+| `gravity` | 163.51 ns | 321.75 ns | 1.97x |
+| `inverse_dynamics` | 256.50 ns | 513.81 ns | 2.00x |
+
+模型构建和 URDF 解析不在计时区间内，两边都会复用已解析的模型，Pinocchio 还会复用
+其 `Data` 对象。Dyno 计算路径使用固定尺寸栈数组保存节点中间状态，不进行堆内存分配。
+Criterion quick 模式样本较少，上述结果仅展示当前机器上的性能趋势，不应视为跨平台或
+严格统计结论。
+
+桥接层会统一关节顺序、空间向量行顺序和重力方向。另有集成测试逐元素比较 FK、
+Jacobian、gravity 和 RNEA 的完整输出；性能基准本身只测执行时间。
 
 只有启用 `pinocchio-bench` feature 时才需要安装 Pinocchio。C++ 桥接、`cc`、
 `pkg-config` 和 Criterion 都不会成为 Dyno 常规构建的运行时依赖。例如，在 x86-64
@@ -135,7 +147,10 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 # 已安装 Pinocchio 时：
 cargo clippy --features pinocchio-bench --bench pinocchio -- -D warnings
+cargo test --features pinocchio-bench --test tree_pinocchio
 ```
 
-集成测试覆盖通用四轴测试 URDF、Jacobian 导数、加速度、逆动力学参考值、
-Jacobian 及其导数的有限差分验证、旋转与移动关节、重力、关节限位和被动关节。
+集成测试覆盖 Jacobian 导数、加速度、逆动力学参考值、Jacobian 及其导数的有限差分
+验证、旋转与移动关节、重力、关节限位和被动关节。Pinocchio 交叉测试在 32 组确定性
+配置下验证两条分支，并逐元素比较 FK、Jacobian、gravity 和 RNEA。性能基准使用同一份
+包含公共 trunk、两条分支和两个子 link 的 7 关节树状 URDF。

@@ -2,9 +2,11 @@
 
 English | [简体中文](README.zh.md)
 
-`dyno` is a lightweight and reliable, Rust-based library for serial robot
-kinematics and dynamics. Robot size is discovered while parsing the model,
-while calculation inputs and outputs remain fixed-size. It uses
+`dyno` is a lightweight and reliable, Rust-based library for tree-structured
+robot kinematics and dynamics. Within the currently supported joint types, it
+loads valid tree URDFs with arbitrary branch count and depth. Link, joint, and
+parent-child topology are discovered automatically while calculation inputs and
+outputs remain fixed-size. It uses
 [`nalgebra`](https://nalgebra.rs/) for numerical types and
 [`urdf-rs`](https://github.com/openrr/urdf-rs) for URDF parsing.
 
@@ -21,9 +23,10 @@ while calculation inputs and outputs remain fixed-size. It uses
 - **Rust-based:** const generics preserve fixed-size calculation inputs and
   outputs, while the model's joint count is discovered at construction.
 
-URDF parsing and name lookup allocate memory only while constructing a model;
-they do not enter the real-time compute path. "Reliable" describes the tested,
-safe-Rust implementation and is not a functional-safety certification.
+URDF parsing and topology construction allocate memory only while constructing
+a model; kinematics and dynamics evaluation do not allocate on the heap.
+"Reliable" describes the tested, safe-Rust implementation and is not a
+functional-safety certification.
 
 ## Public API
 
@@ -31,9 +34,11 @@ safe-Rust implementation and is not a functional-safety certification.
 
 | Type | Purpose |
 |---|---|
-| `RobotArm` | Runtime-sized serial model with fixed-size calculation APIs |
+| `RobotArm` | Runtime-topology tree model with fixed-size calculation APIs |
 | `RobotJoint` | Joint transform, axis, limits, and stored joint state |
 | `RobotLink` | Link mass, center of mass, and inertia |
+| `LinkId` | Stable numeric link identifier used to select calculation targets |
+| `ExternalWrench` | Wrench applied at a link origin and expressed in that link frame |
 | `JointVector<N>` | Fixed-size joint vector |
 | `Jacobian<N>` | Angular-first `6 x N` geometric Jacobian |
 | `Frame` | Rigid transform backed by `nalgebra::Isometry3<f64>` |
@@ -46,6 +51,8 @@ safe-Rust implementation and is not a functional-safety certification.
 |---|---|
 | `RobotArm::from_urdf(path)` | Construct a model from a URDF file path |
 | `name()`, `joints()`, `links()` | Inspect the model, with the root included in `links()` |
+| `root_link()`, `leaf_links()` | Inspect the root and all leaf links |
+| `link_id(name)` | Resolve a reusable `LinkId` by name |
 | `link_count()` | Return the number of URDF links, including the root link |
 | `joint_count()` | Return the number of joints parsed from the model |
 
@@ -57,22 +64,23 @@ scope but are not implemented yet.
 
 | Interface | Status and result |
 |---|---|
-| `forward_kinematics(q)` | End-effector frame |
-| `jacobian(q)` | Base-frame geometric Jacobian |
+| `forward_kinematics(q, target)` | Frame of a selected link |
+| `jacobian(q, target)` | Base-frame Jacobian of a selected link; non-ancestor columns are zero |
 | `inverse_kinematics(...)` | Planned; not implemented yet |
 | `inverse_kinematics_with_boundary(...)` | Planned; not implemented yet |
-| `forward_velocity_kinematics(q, qd, base, tool)` | End-effector spatial velocity |
-| `forward_acceleration_kinematics(q, qd, qdd)` | Direct-recursive acceleration `J * qdd + J_dot * qd` |
-| `gravity(q, base, end_load)` | Joint gravity forces and base wrench |
-| `inverse_dynamics(...)` | Joint forces and base wrench from Newton-Euler recursion |
+| `forward_velocity_kinematics(q, qd, target, base, tool)` | Spatial velocity of a selected link/tool |
+| `forward_acceleration_kinematics(q, qd, qdd, target)` | Direct-recursive acceleration of a selected link |
+| `gravity(q, base, external_wrenches)` | Tree gravity recursion with loads on multiple links |
+| `inverse_dynamics(..., external_wrenches)` | Tree RNEA with multi-link loads and branch accumulation |
 
 ```rust
 use dyno::{JointVector, RobotArm};
 
 let arm = RobotArm::from_urdf("test_arm.urdf")?;
 let q = JointVector::<4>::zeros();
-let end = arm.forward_kinematics(&q)?;
-let jacobian = arm.jacobian(&q)?;
+let target = arm.link_id("test_link_4").expect("target link must exist");
+let end = arm.forward_kinematics(&q, target)?;
+let jacobian = arm.jacobian(&q, target)?;
 # Ok::<(), dyno::Error>(())
 ```
 
@@ -80,11 +88,25 @@ The calculation size `N` is inferred from each `JointVector<N>` input; it is
 not part of the `RobotArm` type. A mismatch returns `Error::WrongJointCount`
 before calculation begins.
 
-## Compatibility scope
+## Tree-model conventions and compatibility scope
 
-This crate currently supports serial chains. A branched URDF is rejected during
-construction instead of being silently flattened. Branched-tree support needs
-a parent-indexed model and is a separate extension.
+`RobotArm` supports valid tree URDFs with arbitrary branch count and depth. A
+model has one root and exactly one parent joint for every non-root link.
+Construction creates a parent-before-child topological order and rejects
+multiple roots, duplicate names, cycles, disconnected components, missing
+links, and links reached by multiple joints. Revolute, continuous, prismatic,
+and fixed joints are supported; other URDF joint types still return
+`UnsupportedJoint`.
+
+Kinematics functions accept a target `LinkId` directly, so one model can
+evaluate any branched endpoint. Gravity and inverse dynamics accept an
+`&[ExternalWrench]`, allowing loads on any number of links; an empty slice means
+no external load. `JointVector<N>` currently contains every URDF joint; fixed
+joints occupy an element but contribute no motion or active joint force.
+
+The root is retained in `links()`, but fixed-base compatibility dynamics do not
+include the root link's own inertia in joint forces or the base wrench. An
+`ExternalWrench` acts at a link origin and is expressed in that link's frame.
 
 The compatibility dynamics intentionally preserve legacy numerical conventions,
 including positive-Z gravity and the original product-of-inertia signs, so the
@@ -92,35 +114,32 @@ C++ regression values remain reproducible. Consequently, the gravity and RNEA
 benchmarks below compare execution cost, not numerical equivalence with
 Pinocchio's standard rigid-body dynamics conventions.
 
-## Pinocchio benchmark
+## Performance benchmarks
 
-The optional Criterion benchmark compares Dyno and Pinocchio at `N=4` and
-`N=40`, using the same URDF and joint inputs for each implementation. It covers
-forward kinematics, end-joint Jacobian, gravity, and RNEA. Model construction
-and URDF parsing are outside the timed region; both implementations reuse their
-parsed models, and Pinocchio reuses its `Data` object. A separate no-op
-measurement is used to correct Pinocchio timings for the fixed Rust-to-C ABI
-call overhead.
+The tree benchmark model has seven movable joints: one shared trunk and two
+three-joint branches ending in two leaves. The results use the same tree URDF
+and joint inputs for Dyno and Pinocchio 3.9.0. They were collected
+with `cargo bench --features pinocchio-bench --bench pinocchio -- --quick` on an
+Intel Core i9-14900K. The measured 0.70 ns C ABI overhead has been subtracted
+from the Pinocchio values.
 
-The following smoke-test results were measured with `--quick` on an Intel Core
-i9-14900K, using rustc 1.97.1 and Pinocchio 3.9.0. Lower latency is better.
-They show the local trend rather than serving as a portable or statistically
-rigorous performance claim.
+| Function | Dyno | Pinocchio | Dyno speedup |
+|---|---:|---:|---:|
+| `forward_kinematics` | 111.27 ns | 134.07 ns | 1.20x |
+| `jacobian` | 138.88 ns | 214.00 ns | 1.54x |
+| `gravity` | 163.51 ns | 321.75 ns | 1.97x |
+| `inverse_dynamics` | 256.50 ns | 513.81 ns | 2.00x |
 
-| Operation | DoF | Dyno | Pinocchio | Dyno speedup |
-|---|---:|---:|---:|---:|
-| Forward kinematics | 4 | 65.5 ns | 79.0 ns | 1.21x |
-| End Jacobian | 4 | 81.4 ns | 135.6 ns | 1.67x |
-| Gravity | 4 | 91.5 ns | 187.6 ns | 2.05x |
-| RNEA | 4 | 148.4 ns | 298.8 ns | 2.01x |
-| Forward kinematics | 40 | 646.4 ns | 819.2 ns | 1.27x |
-| End Jacobian | 40 | 786.1 ns | 1.351 µs | 1.72x |
-| Gravity | 40 | 950.0 ns | 1.850 µs | 1.95x |
-| RNEA | 40 | 1.462 µs | 3.209 µs | 2.19x |
+Model construction and URDF parsing are outside the timed region. Both
+implementations reuse their parsed model, and Pinocchio also reuses its `Data`
+object. Dyno uses fixed-size stack arrays for per-node intermediates and does
+not allocate on the heap during evaluation. Criterion quick mode uses few
+samples, so these values show the current machine's trend rather than portable
+or rigorous statistical results.
 
-The Pinocchio values above already account for the measured C ABI overhead. As
-noted above, the gravity and RNEA rows compare runtime only because the
-compatibility kernel and Pinocchio use different numerical conventions.
+The bridge normalizes joint ordering, spatial-vector row ordering, and gravity
+direction. A separate integration test compares full FK, Jacobian, gravity, and
+RNEA outputs against Pinocchio; the benchmark itself measures execution time.
 
 Pinocchio is only needed when the `pinocchio-bench` feature is selected. The
 bridge, `cc`, `pkg-config`, and Criterion do not become runtime dependencies of
@@ -150,9 +169,13 @@ cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
 # With Pinocchio installed:
 cargo clippy --features pinocchio-bench --bench pinocchio -- -D warnings
+cargo test --features pinocchio-bench --test tree_pinocchio
 ```
 
-The integration tests cover a generic four-axis test URDF, Jacobian derivatives,
-acceleration and inverse-dynamics reference values, finite-difference Jacobian
-and Jacobian-derivative validation, revolute/prismatic links, gravity, limits
-and passive joints.
+Integration tests cover Jacobian derivatives, acceleration and inverse-dynamics
+reference values, finite-difference Jacobian and Jacobian-derivative validation,
+revolute/prismatic links, gravity, limits, and passive joints. The Pinocchio
+cross-check evaluates both branches over 32 deterministic configurations and
+compares FK, Jacobian, gravity, and RNEA element by element. The performance
+benchmark uses the same seven-joint tree URDF with a shared trunk, two branches,
+and two leaves.
