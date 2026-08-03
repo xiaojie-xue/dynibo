@@ -16,8 +16,6 @@ pub enum JointType {
 /// Identity and immutable inertial properties of one URDF link.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Link {
-    model_id: u64,
-    index: usize,
     name: String,
     mass: f64,
     center_of_mass: Vector3<f64>,
@@ -25,37 +23,19 @@ pub struct Link {
 }
 
 impl Link {
-    /// Creates a model-owned link with a topological index.
+    /// Creates a link from its immutable inertial properties.
     pub(crate) fn new(
-        index: usize,
         name: impl Into<String>,
         mass: f64,
         center_of_mass: Vector3<f64>,
         inertia: Matrix3<f64>,
     ) -> Self {
         Self {
-            model_id: 0,
-            index,
             name: name.into(),
             mass,
             center_of_mass,
             inertia,
         }
-    }
-
-    /// Returns the internal topological index of this model-owned link.
-    pub(crate) const fn index(&self) -> usize {
-        self.index
-    }
-
-    /// Returns the identity of the model that owns this link.
-    pub(crate) const fn model_id(&self) -> u64 {
-        self.model_id
-    }
-
-    /// Associates this link with a loaded robot model.
-    pub(crate) const fn set_model_id(&mut self, model_id: u64) {
-        self.model_id = model_id;
     }
 
     /// Returns the link name loaded from the URDF.

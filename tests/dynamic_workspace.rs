@@ -1,0 +1,376 @@
+use std::path::PathBuf;
+
+use approx::assert_relative_eq;
+use dyno::{Error, Frame, IndexedLoad, InverseKinematicsOptions, Robot, Twist, Wrench};
+use nalgebra::{SMatrix, SVector, Translation3, UnitQuaternion, Vector3};
+
+fn urdf_path(file_name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/data")
+        .join(file_name)
+}
+
+fn test_arm() -> Robot {
+    Robot::from_urdf(urdf_path("test_arm.urdf")).expect("test URDF must load")
+}
+
+fn tree_arm() -> Robot {
+    Robot::from_urdf(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/data/test_tree_7.urdf"),
+    )
+    .expect("tree URDF must load")
+}
+
+fn assert_slice_close(actual: &[f64], expected: &[f64]) {
+    assert_eq!(actual.len(), expected.len());
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert_relative_eq!(actual, expected, epsilon = 2.0e-12);
+    }
+}
+
+#[test]
+fn all_dynamic_calculations_share_consistent_results() {
+    let robot = test_arm();
+    let target_id = robot.link_id("test_link_4").unwrap();
+    let mut workspace = robot.workspace();
+    assert_eq!(workspace.joint_count(), 4);
+
+    let q = [0.2, 1.0, -0.7, 0.4];
+    let qd = [-0.3, 0.5, -0.2, 0.8];
+    let qdd = [0.7, -0.4, 0.1, 0.3];
+    let base = Frame::from_parts(
+        Translation3::new(0.3, -0.2, 0.5),
+        UnitQuaternion::from_euler_angles(0.2, -0.4, 0.1),
+    );
+    let tool = Frame::translation(0.1, -0.03, 0.2);
+
+    let frame = robot
+        .forward_kinematics(&q, target_id, &mut workspace)
+        .unwrap();
+    assert!(
+        frame
+            .translation
+            .vector
+            .iter()
+            .all(|value| value.is_finite())
+    );
+
+    let mut jacobian = vec![f64::NAN; 24];
+    robot
+        .jacobian(&q, target_id, &mut workspace, &mut jacobian)
+        .unwrap();
+
+    let velocity = robot
+        .forward_velocity_kinematics(&q, &qd, target_id, &base, &tool, &mut workspace)
+        .unwrap();
+    let mut tool_jacobian = SMatrix::<f64, 6, 4>::from_column_slice(&jacobian);
+    let offset_world = frame.rotation * tool.translation.vector;
+    for column in 0..4 {
+        let angular = tool_jacobian.fixed_view::<3, 1>(0, column).into_owned();
+        let shifted =
+            tool_jacobian.fixed_view::<3, 1>(3, column).into_owned() + angular.cross(&offset_world);
+        tool_jacobian
+            .fixed_view_mut::<3, 1>(3, column)
+            .copy_from(&shifted);
+    }
+    let expected_velocity = tool_jacobian * SVector::<f64, 4>::from(qd);
+    assert_relative_eq!(
+        velocity.to_vector(),
+        SVector::<f64, 6>::from_iterator(
+            (base.rotation * expected_velocity.fixed_rows::<3>(0).into_owned())
+                .iter()
+                .chain((base.rotation * expected_velocity.fixed_rows::<3>(3).into_owned()).iter())
+                .copied()
+        ),
+        epsilon = 2.0e-12
+    );
+
+    let acceleration = robot
+        .forward_acceleration_kinematics(&q, &qd, &qdd, target_id, &mut workspace)
+        .unwrap();
+    assert!(
+        acceleration
+            .to_vector()
+            .iter()
+            .all(|value| value.is_finite())
+    );
+
+    let wrench = Wrench::new(Vector3::new(0.3, -0.2, 0.4), Vector3::new(1.0, 0.5, -0.7));
+    let indexed_load = [IndexedLoad {
+        link: target_id,
+        wrench,
+    }];
+    let mut gravity = vec![f64::NAN; 4];
+    robot
+        .gravity(&q, &base, &indexed_load, &mut workspace, &mut gravity)
+        .unwrap();
+    assert!(gravity.iter().all(|value| value.is_finite()));
+
+    let mut dynamics = vec![f64::NAN; 4];
+    robot
+        .inverse_dynamics(
+            &q,
+            &qd,
+            &qdd,
+            &base,
+            Twist::new(Vector3::new(0.1, -0.2, 0.3), Vector3::new(-0.2, 0.4, 0.1)),
+            Twist::new(Vector3::new(-0.3, 0.2, 0.1), Vector3::new(0.5, -0.2, 0.4)),
+            &indexed_load,
+            &mut workspace,
+            &mut dynamics,
+        )
+        .unwrap();
+    assert!(dynamics.iter().all(|value| value.is_finite()));
+
+    let desired_q = [0.2, 1.0, -1.2, 0.45];
+    let desired = robot
+        .forward_kinematics(&desired_q, target_id, &mut workspace)
+        .unwrap();
+    let mut solution = vec![f64::NAN; 4];
+    robot
+        .inverse_kinematics(
+            &[0.0; 4],
+            target_id,
+            &desired,
+            InverseKinematicsOptions::default(),
+            &mut workspace,
+            &mut solution,
+        )
+        .unwrap();
+    let solved = robot
+        .forward_kinematics(&solution, target_id, &mut workspace)
+        .unwrap();
+    assert_relative_eq!(solved, desired, epsilon = 1.0e-6);
+}
+
+#[test]
+fn workspace_reuse_clears_jacobian_load_and_solver_state() {
+    let robot = tree_arm();
+    let mut workspace = robot.workspace();
+    let left_id = robot.link_id("left_tool").unwrap();
+    let right_id = robot.link_id("right_tool").unwrap();
+    let q_a = [0.2, -0.3, 0.4, -0.5, 0.6, -0.7, 0.8];
+    let q_b = [-0.4, 0.2, -0.1, 0.7, -0.3, 0.5, -0.6];
+    let load = IndexedLoad {
+        link: left_id,
+        wrench: Wrench::new(Vector3::new(0.3, -0.2, 0.4), Vector3::new(1.0, 0.5, -0.7)),
+    };
+
+    let mut first = vec![0.0; 7];
+    let mut middle = vec![0.0; 7];
+    let mut third = vec![0.0; 7];
+    robot
+        .gravity(
+            &q_a,
+            &Frame::identity(),
+            &[load],
+            &mut workspace,
+            &mut first,
+        )
+        .unwrap();
+    robot
+        .gravity(&q_b, &Frame::identity(), &[], &mut workspace, &mut middle)
+        .unwrap();
+    robot
+        .gravity(
+            &q_a,
+            &Frame::identity(),
+            &[load],
+            &mut workspace,
+            &mut third,
+        )
+        .unwrap();
+    assert_slice_close(&first, &third);
+    let mut expected_middle = vec![0.0; 7];
+    let mut clean_workspace = robot.workspace();
+    robot
+        .gravity(
+            &q_b,
+            &Frame::identity(),
+            &[],
+            &mut clean_workspace,
+            &mut expected_middle,
+        )
+        .unwrap();
+    assert_slice_close(&middle, &expected_middle);
+
+    let zero = [0.0; 7];
+    let mut first_rnea = vec![0.0; 7];
+    let mut middle_rnea = vec![0.0; 7];
+    let mut third_rnea = vec![0.0; 7];
+    robot
+        .inverse_dynamics(
+            &q_a,
+            &zero,
+            &zero,
+            &Frame::identity(),
+            Twist::zeros(),
+            Twist::zeros(),
+            &[load, load],
+            &mut workspace,
+            &mut first_rnea,
+        )
+        .unwrap();
+    robot
+        .inverse_dynamics(
+            &q_b,
+            &zero,
+            &zero,
+            &Frame::identity(),
+            Twist::zeros(),
+            Twist::zeros(),
+            &[],
+            &mut workspace,
+            &mut middle_rnea,
+        )
+        .unwrap();
+    robot
+        .inverse_dynamics(
+            &q_a,
+            &zero,
+            &zero,
+            &Frame::identity(),
+            Twist::zeros(),
+            Twist::zeros(),
+            &[load, load],
+            &mut workspace,
+            &mut third_rnea,
+        )
+        .unwrap();
+    assert_slice_close(&first_rnea, &third_rnea);
+    let mut expected_middle_rnea = vec![0.0; 7];
+    robot
+        .inverse_dynamics(
+            &q_b,
+            &zero,
+            &zero,
+            &Frame::identity(),
+            Twist::zeros(),
+            Twist::zeros(),
+            &[],
+            &mut clean_workspace,
+            &mut expected_middle_rnea,
+        )
+        .unwrap();
+    assert_slice_close(&middle_rnea, &expected_middle_rnea);
+
+    let mut jacobian = vec![f64::NAN; 42];
+    robot
+        .jacobian(&q_a, left_id, &mut workspace, &mut jacobian)
+        .unwrap();
+    robot
+        .jacobian(&q_b, right_id, &mut workspace, &mut jacobian)
+        .unwrap();
+    let mut expected_jacobian = vec![0.0; 42];
+    robot
+        .jacobian(&q_b, right_id, &mut clean_workspace, &mut expected_jacobian)
+        .unwrap();
+    assert_slice_close(&jacobian, &expected_jacobian);
+    robot
+        .jacobian(&q_a, left_id, &mut workspace, &mut jacobian)
+        .unwrap();
+    robot
+        .jacobian(&q_a, left_id, &mut clean_workspace, &mut expected_jacobian)
+        .unwrap();
+    assert_slice_close(&jacobian, &expected_jacobian);
+
+    let desired = robot
+        .forward_kinematics(&q_a, left_id, &mut workspace)
+        .unwrap();
+    let mut solution = vec![0.0; 7];
+    robot
+        .inverse_kinematics(
+            &[0.0; 7],
+            left_id,
+            &desired,
+            InverseKinematicsOptions::default(),
+            &mut workspace,
+            &mut solution,
+        )
+        .unwrap();
+    assert_relative_eq!(
+        robot
+            .forward_kinematics(&solution, left_id, &mut workspace)
+            .unwrap(),
+        desired,
+        epsilon = 1.0e-6
+    );
+}
+
+#[test]
+fn dynamic_api_rejects_wrong_models_and_lengths() {
+    let robot_a = test_arm();
+    let robot_b = test_arm();
+    let target_a = robot_a.link_id("test_link_4").unwrap();
+    let target_b = robot_b.link_id("test_link_4").unwrap();
+    let mut workspace_a = robot_a.workspace();
+    let mut workspace_b = robot_b.workspace();
+    let q = [0.0; 4];
+
+    assert!(matches!(
+        robot_a.forward_kinematics(&q, target_b, &mut workspace_a),
+        Err(Error::InvalidLinkId)
+    ));
+    assert!(matches!(
+        robot_a.forward_kinematics(&q, target_a, &mut workspace_b),
+        Err(Error::InvalidWorkspace)
+    ));
+    assert!(matches!(
+        robot_a.forward_kinematics(&q[..3], target_a, &mut workspace_a),
+        Err(Error::WrongSliceLength {
+            slice: "q",
+            expected: 4,
+            actual: 3
+        })
+    ));
+    let mut wrong_jacobian = [0.0; 23];
+    assert!(matches!(
+        robot_a.jacobian(&q, target_a, &mut workspace_a, &mut wrong_jacobian),
+        Err(Error::WrongSliceLength {
+            slice: "jacobian output",
+            expected: 24,
+            actual: 23
+        })
+    ));
+    let invalid_load = IndexedLoad {
+        link: target_b,
+        wrench: Wrench::zeros(),
+    };
+    let mut output = [0.0; 4];
+    assert!(matches!(
+        robot_a.gravity(
+            &q,
+            &Frame::identity(),
+            &[invalid_load],
+            &mut workspace_a,
+            &mut output,
+        ),
+        Err(Error::InvalidLinkId)
+    ));
+
+    let clone = robot_a.clone();
+    assert!(
+        clone
+            .forward_kinematics(&q, target_a, &mut workspace_a)
+            .is_ok()
+    );
+}
+
+#[test]
+fn dynamic_root_results_are_zero_or_identity() {
+    let robot = test_arm();
+    let root = robot.link_id("test_base_link").unwrap();
+    let mut workspace = robot.workspace();
+    let q = [0.1, -0.2, 0.3, -0.4];
+    let frame = robot.forward_kinematics(&q, root, &mut workspace).unwrap();
+    assert_relative_eq!(frame, Frame::identity(), epsilon = 2.0e-12);
+    let mut jacobian = [f64::NAN; 24];
+    robot
+        .jacobian(&q, root, &mut workspace, &mut jacobian)
+        .unwrap();
+    assert_eq!(jacobian, [0.0; 24]);
+    let acceleration = robot
+        .forward_acceleration_kinematics(&q, &[0.2; 4], &[0.3; 4], root, &mut workspace)
+        .unwrap();
+    assert_eq!(acceleration, Twist::zeros());
+}

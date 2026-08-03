@@ -1,12 +1,7 @@
-use nalgebra::{Isometry3, SMatrix, SVector, Vector3};
+use nalgebra::{Isometry3, SVector, Vector3};
 
 /// A rigid-body transform in three-dimensional space.
 pub type Frame = Isometry3<f64>;
-/// A fixed-size vector containing one value for each joint.
-pub type JointVector<const N: usize> = SVector<f64, N>;
-/// A six-row geometric Jacobian with angular rows followed by linear rows.
-pub type Jacobian<const N: usize> = SMatrix<f64, 6, N>;
-
 /// Angular-first spatial twist vector `[angular, linear]`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Twist {

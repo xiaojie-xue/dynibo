@@ -80,7 +80,7 @@ pub(crate) fn tree_model(robot: &Robot) -> Result<TreeModel> {
     let mut has_children = Vec::with_capacity(robot.links.len());
 
     let root = roots[0];
-    links.push(robot_link(links_by_name[root], 0));
+    links.push(robot_link(links_by_name[root]));
     topological_names.push(root);
     discovered.insert(root, 0);
     has_children.push(false);
@@ -107,7 +107,7 @@ pub(crate) fn tree_model(robot: &Robot) -> Result<TreeModel> {
                 let child_index = links.len();
                 discovered.insert(child_name, child_index);
                 topological_names.push(child_name);
-                links.push(robot_link(child, child_index));
+                links.push(robot_link(child));
                 has_children.push(false);
                 joints.push(robot_joint(joint)?);
                 joint_parents.push(parent_index);
@@ -159,7 +159,7 @@ fn robot_joint(joint: &urdf_rs::Joint) -> Result<Joint> {
 }
 
 /// Converts one URDF link and its inertial block into a [`Link`].
-fn robot_link(link: &urdf_rs::Link, index: usize) -> Link {
+fn robot_link(link: &urdf_rs::Link) -> Link {
     let inertial = &link.inertial;
     // Preserve the compatibility convention: URDF products of inertia are
     // stored with a negative sign in Link.
@@ -175,7 +175,6 @@ fn robot_link(link: &urdf_rs::Link, index: usize) -> Link {
         inertial.inertia.izz,
     );
     Link::new(
-        index,
         link.name.clone(),
         inertial.mass.value,
         Vector3::new(

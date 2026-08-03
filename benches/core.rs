@@ -1,95 +1,108 @@
 use std::{hint::black_box, path::PathBuf};
 
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use dyno::{Frame, JointVector, Load, Robot, Twist, Wrench};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use dyno::{Frame, IndexedLoad, InverseKinematicsOptions, LinkId, Robot, Twist, Wrench};
 use nalgebra::Vector3;
 
-struct BenchmarkCase<const N: usize> {
+struct BenchmarkCase {
     arm: Robot,
-    target: usize,
-    q: JointVector<N>,
-    qd: JointVector<N>,
-    qdd: JointVector<N>,
+    target: LinkId,
+    q: Vec<f64>,
+    qd: Vec<f64>,
+    qdd: Vec<f64>,
     base: Frame,
 }
 
-struct TreeBenchmarkCase<const N: usize> {
-    case: BenchmarkCase<N>,
-    target: usize,
-    other_leaf: usize,
-}
-
-impl<const N: usize> TreeBenchmarkCase<N> {
-    fn new(relative_urdf_path: &str, target_name: &str, other_leaf_name: &str) -> Self {
-        let case = BenchmarkCase::new(relative_urdf_path);
-        let target = case
-            .arm
-            .links()
-            .iter()
-            .position(|link| link.name() == target_name)
-            .expect("target link must exist");
-        let other_leaf = case
-            .arm
-            .links()
-            .iter()
-            .position(|link| link.name() == other_leaf_name)
-            .expect("other leaf link must exist");
-        assert_eq!(case.arm.leaf_links().len(), 2);
-
-        Self {
-            case,
-            target,
-            other_leaf,
-        }
-    }
-}
-
-impl<const N: usize> BenchmarkCase<N> {
+impl BenchmarkCase {
     fn new(relative_urdf_path: &str) -> Self {
         let urdf_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_urdf_path);
         let arm = Robot::from_urdf(urdf_path).expect("Dyno must load the benchmark URDF");
-        assert_eq!(arm.joint_count(), N);
-        let leaf = arm
+        let target_name = arm
             .leaf_links()
             .next()
-            .expect("benchmark robot must have a leaf link");
-        let target = arm
-            .links()
-            .iter()
-            .position(|link| std::ptr::eq(link, leaf))
-            .expect("leaf link must belong to the benchmark robot");
-
+            .expect("benchmark robot must have a leaf link")
+            .name()
+            .to_owned();
+        let target = arm.link_id(&target_name).unwrap();
+        let n = arm.joint_count();
         Self {
             arm,
             target,
-            q: JointVector::<N>::from_fn(|row, _| (0.37 * (row + 1) as f64).sin() * 0.5),
-            qd: JointVector::<N>::from_fn(|row, _| (0.23 * (row + 1) as f64).cos() * 0.4),
-            qdd: JointVector::<N>::from_fn(|row, _| (0.41 * (row + 1) as f64).sin() * 0.3),
+            q: (0..n)
+                .map(|index| (0.37 * (index + 1) as f64).sin() * 0.5)
+                .collect(),
+            qd: (0..n)
+                .map(|index| (0.23 * (index + 1) as f64).cos() * 0.4)
+                .collect(),
+            qdd: (0..n)
+                .map(|index| (0.41 * (index + 1) as f64).sin() * 0.3)
+                .collect(),
             base: Frame::identity(),
         }
     }
 }
 
-fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
-    let size = format!("{N}dof");
-    let target = &case.arm.links()[case.target];
+fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
+    let n = case.arm.joint_count();
+    let size = format!("{n}joint");
 
     let mut fk = c.benchmark_group(format!("forward_kinematics/{size}"));
     fk.throughput(Throughput::Elements(1));
-    fk.bench_with_input(BenchmarkId::from_parameter("dyno"), &case.q, |b, q| {
-        b.iter(|| black_box(case.arm.forward_kinematics(black_box(q), target).unwrap()));
+    let mut workspace = case.arm.workspace();
+    fk.bench_function("dyno", |b| {
+        b.iter(|| {
+            black_box(
+                case.arm
+                    .forward_kinematics(black_box(&case.q), case.target, &mut workspace)
+                    .unwrap(),
+            )
+        });
     });
     fk.finish();
 
-    let mut jacobian = c.benchmark_group(format!("end_jacobian/{size}"));
+    let mut jacobian = c.benchmark_group(format!("jacobian/{size}"));
     jacobian.throughput(Throughput::Elements(1));
-    jacobian.bench_with_input(BenchmarkId::from_parameter("dyno"), &case.q, |b, q| {
-        b.iter(|| black_box(case.arm.jacobian(black_box(q), target).unwrap()));
+    let mut workspace = case.arm.workspace();
+    let mut jacobian_output = vec![0.0; 6 * n];
+    jacobian.bench_function("dyno", |b| {
+        b.iter(|| {
+            case.arm
+                .jacobian(
+                    black_box(&case.q),
+                    case.target,
+                    &mut workspace,
+                    black_box(&mut jacobian_output),
+                )
+                .unwrap();
+            black_box(&jacobian_output);
+        });
     });
     jacobian.finish();
 
+    let mut velocity = c.benchmark_group(format!("forward_velocity/{size}"));
+    velocity.throughput(Throughput::Elements(1));
+    let mut workspace = case.arm.workspace();
+    velocity.bench_function("dyno", |b| {
+        b.iter(|| {
+            black_box(
+                case.arm
+                    .forward_velocity_kinematics(
+                        black_box(&case.q),
+                        black_box(&case.qd),
+                        case.target,
+                        &case.base,
+                        &Frame::identity(),
+                        &mut workspace,
+                    )
+                    .unwrap(),
+            )
+        });
+    });
+    velocity.finish();
+
     let mut acceleration = c.benchmark_group(format!("forward_acceleration/{size}"));
     acceleration.throughput(Throughput::Elements(1));
+    let mut workspace = case.arm.workspace();
     acceleration.bench_function("dyno", |b| {
         b.iter(|| {
             black_box(
@@ -98,7 +111,8 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
                         black_box(&case.q),
                         black_box(&case.qd),
                         black_box(&case.qdd),
-                        target,
+                        case.target,
+                        &mut workspace,
                     )
                     .unwrap(),
             )
@@ -108,138 +122,143 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
 
     let mut gravity = c.benchmark_group(format!("gravity/{size}"));
     gravity.throughput(Throughput::Elements(1));
-    gravity.bench_with_input(BenchmarkId::from_parameter("dyno"), &case.q, |b, q| {
+    let mut workspace = case.arm.workspace();
+    let mut output = vec![0.0; n];
+    gravity.bench_function("dyno", |b| {
         b.iter(|| {
-            black_box(
-                case.arm
-                    .gravity(black_box(q), &case.base, black_box(&[]))
-                    .unwrap(),
-            )
+            case.arm
+                .gravity(
+                    black_box(&case.q),
+                    &case.base,
+                    black_box(&[]),
+                    &mut workspace,
+                    black_box(&mut output),
+                )
+                .unwrap();
+            black_box(&output);
         });
     });
     gravity.finish();
 
     let mut rnea = c.benchmark_group(format!("rnea/{size}"));
     rnea.throughput(Throughput::Elements(1));
+    let mut workspace = case.arm.workspace();
+    let mut output = vec![0.0; n];
     rnea.bench_function("dyno", |b| {
         b.iter(|| {
-            black_box(
-                case.arm
-                    .inverse_dynamics(
-                        black_box(&case.q),
-                        black_box(&case.qd),
-                        black_box(&case.qdd),
-                        &case.base,
-                        Twist::zeros(),
-                        Twist::zeros(),
-                        black_box(&[]),
-                    )
-                    .unwrap(),
-            )
+            case.arm
+                .inverse_dynamics(
+                    black_box(&case.q),
+                    black_box(&case.qd),
+                    black_box(&case.qdd),
+                    &case.base,
+                    Twist::zeros(),
+                    Twist::zeros(),
+                    black_box(&[]),
+                    &mut workspace,
+                    black_box(&mut output),
+                )
+                .unwrap();
+            black_box(&output);
         });
     });
     rnea.finish();
 }
 
-fn benchmark_tree_case<const N: usize>(c: &mut Criterion, tree: &TreeBenchmarkCase<N>) {
-    let case = &tree.case;
-    let size = format!("{N}joint_2leaf");
-    let target = &case.arm.links()[tree.target];
-    let other_leaf = &case.arm.links()[tree.other_leaf];
+fn benchmark_tree_case(c: &mut Criterion) {
+    let case = BenchmarkCase::new("benches/data/test_tree_7.urdf");
+    let left = case.arm.link_id("left_tool").unwrap();
+    let right = case.arm.link_id("right_tool").unwrap();
     let loads = [
-        Load {
-            link: target,
+        IndexedLoad {
+            link: left,
             wrench: Wrench::new(Vector3::new(0.1, -0.2, 0.3), Vector3::new(1.0, 0.5, -0.25)),
         },
-        Load {
-            link: other_leaf,
+        IndexedLoad {
+            link: right,
             wrench: Wrench::new(Vector3::new(-0.3, 0.2, 0.1), Vector3::new(-0.5, 0.75, 0.4)),
         },
     ];
+    let mut output = vec![0.0; case.arm.joint_count()];
 
-    let mut fk = c.benchmark_group(format!("tree_forward_kinematics/{size}"));
-    fk.throughput(Throughput::Elements(1));
-    fk.bench_function("selected_leaf", |b| {
-        b.iter(|| {
-            black_box(
-                case.arm
-                    .forward_kinematics(black_box(&case.q), target)
-                    .unwrap(),
-            )
-        });
-    });
-    fk.finish();
-
-    let mut jacobian = c.benchmark_group(format!("tree_jacobian/{size}"));
-    jacobian.throughput(Throughput::Elements(1));
-    jacobian.bench_function("selected_leaf", |b| {
-        b.iter(|| black_box(case.arm.jacobian(black_box(&case.q), target).unwrap()));
-    });
-    jacobian.finish();
-
-    let mut acceleration = c.benchmark_group(format!("tree_forward_acceleration/{size}"));
-    acceleration.throughput(Throughput::Elements(1));
-    acceleration.bench_function("selected_leaf", |b| {
-        b.iter(|| {
-            black_box(
-                case.arm
-                    .forward_acceleration_kinematics(
-                        black_box(&case.q),
-                        black_box(&case.qd),
-                        black_box(&case.qdd),
-                        target,
-                    )
-                    .unwrap(),
-            )
-        });
-    });
-    acceleration.finish();
-
-    let mut gravity = c.benchmark_group(format!("tree_gravity/{size}"));
+    let mut gravity = c.benchmark_group("tree_gravity/7joint_2leaf");
     gravity.throughput(Throughput::Elements(1));
+    let mut workspace = case.arm.workspace();
     gravity.bench_function("two_leaf_loads", |b| {
         b.iter(|| {
-            black_box(
-                case.arm
-                    .gravity(black_box(&case.q), &case.base, black_box(&loads))
-                    .unwrap(),
-            )
+            case.arm
+                .gravity(
+                    black_box(&case.q),
+                    &case.base,
+                    black_box(&loads),
+                    &mut workspace,
+                    black_box(&mut output),
+                )
+                .unwrap();
+            black_box(&output);
         });
     });
     gravity.finish();
 
-    let mut rnea = c.benchmark_group(format!("tree_rnea/{size}"));
+    let mut rnea = c.benchmark_group("tree_rnea/7joint_2leaf");
     rnea.throughput(Throughput::Elements(1));
+    let mut workspace = case.arm.workspace();
     rnea.bench_function("two_leaf_loads", |b| {
         b.iter(|| {
-            black_box(
-                case.arm
-                    .inverse_dynamics(
-                        black_box(&case.q),
-                        black_box(&case.qd),
-                        black_box(&case.qdd),
-                        &case.base,
-                        Twist::zeros(),
-                        Twist::zeros(),
-                        black_box(&loads),
-                    )
-                    .unwrap(),
-            )
+            case.arm
+                .inverse_dynamics(
+                    black_box(&case.q),
+                    black_box(&case.qd),
+                    black_box(&case.qdd),
+                    &case.base,
+                    Twist::zeros(),
+                    Twist::zeros(),
+                    black_box(&loads),
+                    &mut workspace,
+                    black_box(&mut output),
+                )
+                .unwrap();
+            black_box(&output);
         });
     });
     rnea.finish();
 }
 
+fn benchmark_inverse_kinematics(c: &mut Criterion, case: &BenchmarkCase) {
+    let mut setup_workspace = case.arm.workspace();
+    let desired = case
+        .arm
+        .forward_kinematics(&case.q, case.target, &mut setup_workspace)
+        .unwrap();
+    let initial = vec![0.0; case.arm.joint_count()];
+    let mut output = vec![0.0; case.arm.joint_count()];
+    let mut workspace = case.arm.workspace();
+    let mut ik = c.benchmark_group("inverse_kinematics/4joint");
+    ik.throughput(Throughput::Elements(1));
+    ik.bench_function("dyno", |b| {
+        b.iter(|| {
+            case.arm
+                .inverse_kinematics(
+                    black_box(&initial),
+                    case.target,
+                    &desired,
+                    InverseKinematicsOptions::default(),
+                    &mut workspace,
+                    black_box(&mut output),
+                )
+                .unwrap();
+            black_box(&output);
+        });
+    });
+    ik.finish();
+}
+
 fn benchmark_core(c: &mut Criterion) {
-    benchmark_case(c, &BenchmarkCase::<4>::new("tests/data/test_arm.urdf"));
-    benchmark_case(
-        c,
-        &BenchmarkCase::<40>::new("benches/data/test_arm_40.urdf"),
-    );
-    benchmark_tree_case(
-        c,
-        &TreeBenchmarkCase::<7>::new("benches/data/test_tree_7.urdf", "left_tool", "right_tool"),
-    );
+    let case_4 = BenchmarkCase::new("tests/data/test_arm.urdf");
+    benchmark_case(c, &case_4);
+    benchmark_inverse_kinematics(c, &case_4);
+    benchmark_case(c, &BenchmarkCase::new("benches/data/test_arm_40.urdf"));
+    benchmark_tree_case(c);
 }
 
 criterion_group!(benches, benchmark_core);

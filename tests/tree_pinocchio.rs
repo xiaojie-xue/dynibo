@@ -3,8 +3,8 @@
 use std::{ffi::CString, path::PathBuf, ptr::NonNull};
 
 use approx::assert_relative_eq;
-use dyno::{Frame, JointVector, Robot, Twist};
-use nalgebra::{Matrix3, SMatrix, Vector3};
+use dyno::{Frame, Robot, Twist};
+use nalgebra::{Matrix3, SMatrix, SVector, Vector3};
 
 unsafe extern "C" {
     fn dyno_pinocchio_create_for_joint(
@@ -83,7 +83,7 @@ fn joint_mapping(arm: &Robot, pinocchio: &PinocchioContext) -> [usize; 7] {
     std::array::from_fn(|index| pinocchio.joint_index(arm.joints()[index].name()))
 }
 
-fn pinocchio_order(values: &JointVector<7>, mapping: &[usize; 7]) -> [f64; 7] {
+fn pinocchio_order(values: &[f64; 7], mapping: &[usize; 7]) -> [f64; 7] {
     let mut result = [0.0; 7];
     for dyno_index in 0..7 {
         result[mapping[dyno_index]] = values[dyno_index];
@@ -91,12 +91,12 @@ fn pinocchio_order(values: &JointVector<7>, mapping: &[usize; 7]) -> [f64; 7] {
     result
 }
 
-fn dyno_order(values: &[f64; 7], mapping: &[usize; 7]) -> JointVector<7> {
-    JointVector::from_fn(|index, _| values[mapping[index]])
+fn dyno_order(values: &[f64; 7], mapping: &[usize; 7]) -> SVector<f64, 7> {
+    SVector::from_fn(|index, _| values[mapping[index]])
 }
 
-fn deterministic_state(sample: usize, phase: f64, amplitude: f64) -> JointVector<7> {
-    JointVector::from_fn(|joint, _| {
+fn deterministic_state(sample: usize, phase: f64, amplitude: f64) -> [f64; 7] {
+    std::array::from_fn(|joint| {
         let argument = (sample + 1) as f64 * (joint + 3) as f64 * 0.731 + phase;
         amplitude * argument.sin()
     })
@@ -107,7 +107,8 @@ fn branched_fk_and_jacobian_match_pinocchio() {
     let path = tree_path();
     let arm = Robot::from_urdf(&path).unwrap();
     for (link_name, joint_name) in [("left_tool", "left_wrist"), ("right_tool", "right_wrist")] {
-        let target = arm.link(link_name).unwrap();
+        let target = arm.link_id(link_name).unwrap();
+        let mut workspace = arm.workspace();
         let pinocchio = PinocchioContext::new(&path, joint_name);
         let mapping = joint_mapping(&arm, &pinocchio);
 
@@ -126,7 +127,7 @@ fn branched_fk_and_jacobian_match_pinocchio() {
                 )
             };
 
-            let frame = arm.forward_kinematics(&q, target).unwrap();
+            let frame = arm.forward_kinematics(&q, target, &mut workspace).unwrap();
             assert_relative_eq!(
                 frame.rotation.to_rotation_matrix().matrix(),
                 &Matrix3::from_column_slice(&rotation),
@@ -152,8 +153,11 @@ fn branched_fk_and_jacobian_match_pinocchio() {
                 let pin_row = if row < 3 { row + 3 } else { row - 3 };
                 pin_jacobian[(pin_row, mapping[dyno_column])]
             });
+            let mut jacobian = [0.0; 42];
+            arm.jacobian(&q, target, &mut workspace, &mut jacobian)
+                .unwrap();
             assert_relative_eq!(
-                arm.jacobian(&q, target).unwrap(),
+                SMatrix::<f64, 6, 7>::from_column_slice(&jacobian),
                 expected,
                 epsilon = 2.0e-12
             );
@@ -167,6 +171,7 @@ fn branched_gravity_and_rnea_match_pinocchio() {
     let arm = Robot::from_urdf(&path).unwrap();
     let pinocchio = PinocchioContext::new(&path, "right_wrist");
     let mapping = joint_mapping(&arm, &pinocchio);
+    let mut workspace = arm.workspace();
 
     for sample in 0..32 {
         let q = deterministic_state(sample, 0.0, 0.9);
@@ -180,9 +185,11 @@ fn branched_gravity_and_rnea_match_pinocchio() {
                 pin_gravity.as_mut_ptr(),
             )
         };
-        let gravity = arm.gravity(&q, &Frame::identity(), &[]).unwrap();
+        let mut gravity = [0.0; 7];
+        arm.gravity(&q, &Frame::identity(), &[], &mut workspace, &mut gravity)
+            .unwrap();
         assert_relative_eq!(
-            gravity,
+            SVector::<f64, 7>::from(gravity),
             dyno_order(&pin_gravity, &mapping),
             epsilon = 2.0e-11
         );
@@ -202,17 +209,23 @@ fn branched_gravity_and_rnea_match_pinocchio() {
                 pin_torque.as_mut_ptr(),
             )
         };
-        let torque = arm
-            .inverse_dynamics(
-                &q,
-                &qd,
-                &qdd,
-                &Frame::identity(),
-                Twist::zeros(),
-                Twist::zeros(),
-                &[],
-            )
-            .unwrap();
-        assert_relative_eq!(torque, dyno_order(&pin_torque, &mapping), epsilon = 2.0e-11);
+        let mut torque = [0.0; 7];
+        arm.inverse_dynamics(
+            &q,
+            &qd,
+            &qdd,
+            &Frame::identity(),
+            Twist::zeros(),
+            Twist::zeros(),
+            &[],
+            &mut workspace,
+            &mut torque,
+        )
+        .unwrap();
+        assert_relative_eq!(
+            SVector::<f64, 7>::from(torque),
+            dyno_order(&pin_torque, &mapping),
+            epsilon = 2.0e-11
+        );
     }
 }

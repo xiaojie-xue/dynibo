@@ -9,11 +9,13 @@ pub enum Error {
     InvalidModel(String),
     /// A joint uses a motion type not supported by this crate.
     UnsupportedJoint(String),
-    /// The compile-time vector dimension does not match the loaded model.
-    WrongJointCount {
-        /// Number of joints in the loaded model.
+    /// A runtime-sized input or output has the wrong length.
+    WrongSliceLength {
+        /// Name of the rejected input or output.
+        slice: &'static str,
+        /// Required number of elements.
         expected: usize,
-        /// Compile-time dimension supplied by the caller.
+        /// Number of elements supplied by the caller.
         actual: usize,
     },
     /// A joint axis is too small to normalize.
@@ -26,11 +28,10 @@ pub enum Error {
         /// Link name requested by the caller.
         name: String,
     },
-    /// A link belongs to a different model or is not model-owned.
-    InvalidLink {
-        /// Name of the rejected link.
-        name: String,
-    },
+    /// A link identifier belongs to a different robot model.
+    InvalidLinkId,
+    /// A workspace belongs to a different robot model or has the wrong size.
+    InvalidWorkspace,
     /// One of the inverse-kinematics options is zero, negative, or non-finite.
     InvalidOptions(&'static str),
     /// An inverse-kinematics input contains a non-finite value.
@@ -74,13 +75,16 @@ impl fmt::Display for Error {
             Self::Urdf(error) => write!(f, "failed to parse URDF: {error}"),
             Self::InvalidModel(message) => write!(f, "invalid robot model: {message}"),
             Self::UnsupportedJoint(joint) => write!(f, "unsupported joint type for {joint}"),
-            Self::WrongJointCount { expected, actual } => {
-                write!(f, "expected {expected} joints, found {actual}")
-            }
+            Self::WrongSliceLength {
+                slice,
+                expected,
+                actual,
+            } => write!(f, "expected {expected} elements in {slice}, found {actual}"),
             Self::InvalidJointAxis { joint } => write!(f, "joint {joint} has an invalid axis"),
             Self::UnknownLink { name } => write!(f, "link {name} does not exist in the model"),
-            Self::InvalidLink { name } => {
-                write!(f, "link {name} does not belong to this robot model")
+            Self::InvalidLinkId => write!(f, "link identifier does not belong to this robot model"),
+            Self::InvalidWorkspace => {
+                write!(f, "workspace does not belong to this robot model")
             }
             Self::InvalidOptions(message) => {
                 write!(f, "invalid inverse-kinematics options: {message}")
