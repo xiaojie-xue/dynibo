@@ -170,21 +170,40 @@ def _array(values: Sequence[float], name: str) -> ct.Array[ct.c_double]:
         raise TypeError(f"{name} must be a finite-sized sequence of numbers") from error
 
 
+def _fixed_array(values: Sequence[float], length: int, name: str) -> ct.Array[ct.c_double]:
+    if len(values) != length:
+        raise ValueError(f"{name} must contain exactly {length} elements")
+    return _array(values, name)
+
+
+def _require_same_length(q: Sequence[float], **states: Sequence[float]) -> None:
+    for name, values in states.items():
+        if len(values) != len(q):
+            raise ValueError(f"q and {name} must have the same length")
+
+
 def _pose(value: Pose) -> _Pose:
     return _Pose(
-        (ct.c_double * 3)(*value.translation),
-        (ct.c_double * 4)(*value.rotation_xyzw),
+        _fixed_array(value.translation, 3, "pose translation"),
+        _fixed_array(value.rotation_xyzw, 4, "pose quaternion"),
     )
 
 
 def _twist(value: Twist) -> _Twist:
-    return _Twist((ct.c_double * 3)(*value.angular), (ct.c_double * 3)(*value.linear))
+    return _Twist(
+        _fixed_array(value.angular, 3, "twist angular"),
+        _fixed_array(value.linear, 3, "twist linear"),
+    )
 
 
 def _loads(values: Iterable[Load]) -> ct.Array[_Load]:
     values = tuple(values)
     return (_Load * len(values))(*(
-        _Load(value.link_id, (ct.c_double * 3)(*value.torque), (ct.c_double * 3)(*value.force))
+        _Load(
+            value.link_id,
+            _fixed_array(value.torque, 3, "load torque"),
+            _fixed_array(value.force, 3, "load force"),
+        )
         for value in values
     ))
 
@@ -280,6 +299,7 @@ class Robot:
         self, q: Sequence[float], qd: Sequence[float], target: int,
         base: Pose = Pose(), tool: Pose = Pose(),
     ) -> Twist:
+        _require_same_length(q, qd=qd)
         q_array, qd_array = _array(q, "q"), _array(qd, "qd")
         base_c, tool_c, output = _pose(base), _pose(tool), _Twist()
         _check(_lib.dyno_forward_velocity(
@@ -292,6 +312,7 @@ class Robot:
         self, q: Sequence[float], qd: Sequence[float],
         qdd: Sequence[float], target: int,
     ) -> Twist:
+        _require_same_length(q, qd=qd, qdd=qdd)
         q_array = _array(q, "q")
         qd_array = _array(qd, "qd")
         qdd_array = _array(qdd, "qdd")
@@ -319,6 +340,7 @@ class Robot:
         base: Pose = Pose(), base_velocity: Twist = Twist(),
         base_acceleration: Twist = Twist(), loads: Iterable[Load] = (),
     ) -> tuple[float, ...]:
+        _require_same_length(q, qd=qd, qdd=qdd)
         q_array = _array(q, "q")
         qd_array = _array(qd, "qd")
         qdd_array = _array(qdd, "qdd")

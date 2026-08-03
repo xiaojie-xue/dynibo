@@ -65,6 +65,49 @@ class PackageTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "zero quaternion"):
             self.robot.inverse_kinematics(self.q, self.target, pose)
 
+    def test_non_default_frames_options_and_loads(self) -> None:
+        moving = [0.1, -0.2, 0.3, -0.4]
+        base = dyno.Pose(rotation_xyzw=(2**-0.5, 0.0, 0.0, 2**-0.5))
+        tool = dyno.Pose(translation=(0.1, -0.03, 0.2))
+        origin_velocity = self.robot.forward_velocity(self.q, moving, self.target)
+        tool_velocity = self.robot.forward_velocity(
+            self.q, moving, self.target, base=base, tool=tool
+        )
+        self.assertNotEqual(tool_velocity, origin_velocity)
+        self.assertNotEqual(self.robot.gravity(self.q, base=base), self.robot.gravity(self.q))
+
+        pose = self.robot.forward_kinematics(self.q, self.target)
+        options = dyno.IkOptions(
+            max_iterations=1,
+            translation_tolerance=1.0e-8,
+            rotation_tolerance=1.0e-8,
+            damping=1.0e-4,
+            max_step_norm=0.1,
+        )
+        self.assertEqual(
+            self.robot.inverse_kinematics(self.q, self.target, pose, options), tuple(self.q)
+        )
+
+    def test_python_input_validation_and_lifecycle(self) -> None:
+        with self.assertRaisesRegex(TypeError, "sequence of numbers"):
+            self.robot.forward_kinematics(["not-a-number"] * 4, self.target)
+        with self.assertRaisesRegex(ValueError, "q and qd must have the same length"):
+            self.robot.forward_velocity(self.q, self.q[:-1], self.target)
+        with self.assertRaisesRegex(ValueError, "q and qdd must have the same length"):
+            self.robot.forward_acceleration(self.q, self.q, self.q[:-1], self.target)
+        with self.assertRaisesRegex(ValueError, "q and qd must have the same length"):
+            self.robot.inverse_dynamics(self.q, self.q[:-1], self.q)
+        with self.assertRaisesRegex(ValueError, "pose translation must contain exactly 3"):
+            self.robot.gravity(self.q, base=dyno.Pose(translation=(0.0, 0.0)))
+        with self.assertRaisesRegex(ValueError, "load force must contain exactly 3"):
+            self.robot.gravity(self.q, loads=[dyno.Load(self.target, force=(1.0, 2.0))])
+
+        with dyno.Robot(URDF) as managed:
+            self.assertEqual(managed.name, "test_arm")
+        managed.close()
+        with self.assertRaisesRegex(RuntimeError, "robot must not be null"):
+            managed.forward_kinematics(self.q, self.target)
+
 
 if __name__ == "__main__":
     unittest.main()
