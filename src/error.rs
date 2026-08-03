@@ -139,3 +139,87 @@ impl From<urdf_rs::UrdfError> for Error {
 
 /// Result type returned by robot-model construction and calculations.
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::Error;
+
+    #[test]
+    fn display_describes_each_library_error_and_has_no_source() {
+        let cases = [
+            (
+                Error::InvalidModel("broken tree".to_owned()),
+                "invalid robot model: broken tree".to_owned(),
+            ),
+            (
+                Error::UnsupportedJoint("floating_base".to_owned()),
+                "unsupported joint type for floating_base".to_owned(),
+            ),
+            (
+                Error::WrongSliceLength {
+                    slice: "q",
+                    expected: 4,
+                    actual: 3,
+                },
+                "expected 4 elements in q, found 3".to_owned(),
+            ),
+            (
+                Error::InvalidJointAxis {
+                    joint: "shoulder".to_owned(),
+                },
+                "joint shoulder has an invalid axis".to_owned(),
+            ),
+            (
+                Error::UnknownLink {
+                    name: "tool".to_owned(),
+                },
+                "link tool does not exist in the model".to_owned(),
+            ),
+            (
+                Error::InvalidLinkId,
+                "link identifier does not belong to this robot model".to_owned(),
+            ),
+            (
+                Error::InvalidWorkspace,
+                "workspace does not belong to this robot model".to_owned(),
+            ),
+            (
+                Error::InvalidOptions("damping must be positive"),
+                "invalid inverse-kinematics options: damping must be positive".to_owned(),
+            ),
+            (
+                Error::NonFiniteInput {
+                    input: "target frame",
+                },
+                "inverse-kinematics target frame contains a non-finite value".to_owned(),
+            ),
+            (
+                Error::NumericalFailure { iteration: 3 },
+                "inverse-kinematics linear solve failed at iteration 3".to_owned(),
+            ),
+            (
+                Error::JointLimitViolation {
+                    joint_index: 2,
+                    joint: "elbow".to_owned(),
+                    position: 1.5,
+                    lower: -1.0,
+                    upper: 1.0,
+                },
+                "inverse-kinematics solution 1.500000e0 for joint 2 (elbow) is outside URDF limits [-1.000000e0, 1.000000e0]".to_owned(),
+            ),
+            (
+                Error::NotConverged {
+                    iterations: 4,
+                    translation_error: 0.25,
+                    rotation_error: 0.5,
+                },
+                "inverse kinematics did not converge after 4 iterations (translation error 2.500000e-1, rotation error 5.000000e-1)".to_owned(),
+            ),
+        ];
+
+        for (error, expected) in cases {
+            assert_eq!(error.to_string(), expected);
+            assert!(std::error::Error::source(&error).is_none());
+        }
+    }
+}
