@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,6 +25,18 @@ static void check(DynoStatus status) {
 int main(int argc, char **argv) {
     CHECK(argc == 2);
     CHECK(strcmp(dyno_version(), "0.1.0") == 0);
+    CHECK(dyno_robot_name(NULL) == NULL);
+    CHECK(dyno_robot_joint_count(NULL) == 0);
+    CHECK(dyno_robot_link_count(NULL) == 0);
+    dyno_robot_destroy(NULL);
+    dyno_workspace_destroy(NULL);
+
+    const DynoIkOptions defaults = dyno_ik_options_default();
+    CHECK(defaults.max_iterations > 0);
+    CHECK(defaults.translation_tolerance > 0.0);
+    CHECK(defaults.rotation_tolerance > 0.0);
+    CHECK(defaults.damping > 0.0);
+    CHECK(defaults.max_step_norm > 0.0);
 
     DynoRobot *robot = NULL;
     DynoWorkspace *workspace = NULL;
@@ -61,7 +74,7 @@ int main(int argc, char **argv) {
         robot, workspace, q, q, q, n, &identity, zero_twist, zero_twist,
         NULL, 0, output, n));
 
-    DynoIkOptions options = dyno_ik_options_default();
+    DynoIkOptions options = defaults;
     check(dyno_inverse_kinematics(
         robot, workspace, q, n, target, &pose, options, output, n));
     for (size_t index = 0; index < n; ++index) {
@@ -72,6 +85,30 @@ int main(int argc, char **argv) {
         robot, workspace, q, n - 1, target, jacobian, 6 * n) != DYNO_STATUS_OK);
     CHECK(strlen(dyno_last_error_message()) > 0);
     CHECK(dyno_robot_link_id(robot, "missing", &target) == DYNO_STATUS_ERROR);
+    CHECK(dyno_robot_link_id(robot, "test_link_4", &target) == DYNO_STATUS_OK);
+    CHECK(strlen(dyno_last_error_message()) == 0);
+
+    CHECK(dyno_forward_kinematics(
+        NULL, workspace, q, n, target, &pose) == DYNO_STATUS_INVALID_ARGUMENT);
+    CHECK(dyno_forward_kinematics(
+        robot, NULL, q, n, target, &pose) == DYNO_STATUS_INVALID_ARGUMENT);
+    CHECK(dyno_forward_kinematics(
+        robot, workspace, NULL, n, target, &pose) == DYNO_STATUS_INVALID_ARGUMENT);
+    CHECK(dyno_forward_kinematics(
+        robot, workspace, q, n, target, NULL) == DYNO_STATUS_INVALID_ARGUMENT);
+
+    DynoPose invalid_pose = identity;
+    memset(invalid_pose.rotation_xyzw, 0, sizeof(invalid_pose.rotation_xyzw));
+    CHECK(dyno_inverse_kinematics(
+        robot, workspace, q, n, target, &invalid_pose, options, output, n)
+        == DYNO_STATUS_INVALID_ARGUMENT);
+    CHECK(dyno_gravity(
+        robot, workspace, q, n, &identity, NULL, 1, output, n)
+        == DYNO_STATUS_INVALID_ARGUMENT);
+    const DynoLoad invalid_load = {SIZE_MAX, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}};
+    CHECK(dyno_gravity(
+        robot, workspace, q, n, &identity, &invalid_load, 1, output, n)
+        == DYNO_STATUS_INVALID_ARGUMENT);
 
     free(output);
     free(jacobian);

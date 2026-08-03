@@ -675,3 +675,420 @@ pub unsafe extern "C" fn dyno_inverse_dynamics(
             .map_err(core_error)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{ffi::CString, ptr, thread};
+
+    use super::*;
+
+    fn fixture_path() -> CString {
+        CString::new(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tests/data/test_arm.urdf")
+                .to_string_lossy()
+                .as_bytes(),
+        )
+        .unwrap()
+    }
+
+    fn last_error() -> String {
+        // SAFETY: the function always returns a valid thread-local C string.
+        unsafe {
+            CStr::from_ptr(dyno_last_error_message())
+                .to_string_lossy()
+                .into_owned()
+        }
+    }
+
+    unsafe fn create_handles() -> (*mut DynoRobot, *mut DynoWorkspace, usize) {
+        let mut robot = ptr::null_mut();
+        // SAFETY: all pointers refer to live local storage or a valid C string.
+        assert_eq!(
+            unsafe { dyno_robot_load_urdf(fixture_path().as_ptr(), &mut robot) },
+            DynoStatus::Ok
+        );
+        let mut workspace = ptr::null_mut();
+        // SAFETY: `robot` was created above and output is writable.
+        assert_eq!(
+            unsafe { dyno_workspace_create(robot, &mut workspace) },
+            DynoStatus::Ok
+        );
+        let mut target = usize::MAX;
+        // SAFETY: handles, string, and output are valid.
+        assert_eq!(
+            unsafe { dyno_robot_link_id(robot, c"test_link_4".as_ptr(), &mut target) },
+            DynoStatus::Ok
+        );
+        (robot, workspace, target)
+    }
+
+    #[test]
+    fn metadata_and_construction_reject_invalid_arguments() {
+        // SAFETY: null is explicitly supported by the metadata/destructor functions.
+        unsafe {
+            assert!(dyno_robot_name(ptr::null()).is_null());
+            assert_eq!(dyno_robot_joint_count(ptr::null()), 0);
+            assert_eq!(dyno_robot_link_count(ptr::null()), 0);
+            dyno_robot_destroy(ptr::null_mut());
+            dyno_workspace_destroy(ptr::null_mut());
+
+            let path = fixture_path();
+            assert_eq!(
+                dyno_robot_load_urdf(path.as_ptr(), ptr::null_mut()),
+                DynoStatus::InvalidArgument
+            );
+            let mut robot = ptr::dangling_mut::<DynoRobot>();
+            assert_eq!(
+                dyno_robot_load_urdf(ptr::null(), &mut robot),
+                DynoStatus::InvalidArgument
+            );
+            assert!(robot.is_null());
+            let invalid_utf8 = [0xff_u8, 0];
+            assert_eq!(
+                dyno_robot_load_urdf(invalid_utf8.as_ptr().cast(), &mut robot),
+                DynoStatus::InvalidArgument
+            );
+            assert_eq!(
+                dyno_workspace_create(ptr::null(), ptr::null_mut()),
+                DynoStatus::InvalidArgument
+            );
+        }
+    }
+
+    #[test]
+    fn link_and_workspace_functions_validate_every_pointer_class() {
+        // SAFETY: valid handles are created and destroyed exactly once; deliberately null
+        // pointers are passed only to functions that validate them before dereferencing.
+        unsafe {
+            let (robot, workspace, _) = create_handles();
+            let mut target = 0;
+            assert_eq!(
+                dyno_robot_link_id(ptr::null(), c"test_link_4".as_ptr(), &mut target),
+                DynoStatus::InvalidArgument
+            );
+            assert_eq!(
+                dyno_robot_link_id(robot, ptr::null(), &mut target),
+                DynoStatus::InvalidArgument
+            );
+            assert_eq!(
+                dyno_robot_link_id(robot, c"test_link_4".as_ptr(), ptr::null_mut()),
+                DynoStatus::InvalidArgument
+            );
+            assert_eq!(
+                dyno_robot_link_id(robot, c"missing".as_ptr(), &mut target),
+                DynoStatus::Error
+            );
+            let invalid_utf8 = [0xff_u8, 0];
+            assert_eq!(
+                dyno_robot_link_id(robot, invalid_utf8.as_ptr().cast(), &mut target),
+                DynoStatus::InvalidArgument
+            );
+            assert_eq!(
+                dyno_workspace_create(robot, ptr::null_mut()),
+                DynoStatus::InvalidArgument
+            );
+            dyno_workspace_destroy(workspace);
+            dyno_robot_destroy(robot);
+        }
+    }
+
+    #[test]
+    fn calculation_abi_covers_success_and_defensive_paths() {
+        // SAFETY: valid buffers satisfy the documented ABI contracts; null pointers are used
+        // only for validation cases where the callee checks them before constructing slices.
+        unsafe {
+            let (robot, workspace, target) = create_handles();
+            let q = [0.0; 4];
+            let mut pose = DynoPose::default();
+            let mut twist = DynoTwist::default();
+            let mut jacobian = [0.0; 24];
+            let mut output = [0.0; 4];
+
+            assert_eq!(
+                dyno_forward_kinematics(robot, workspace, q.as_ptr(), 4, target, &mut pose),
+                DynoStatus::Ok
+            );
+            assert_eq!(
+                dyno_jacobian(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    4,
+                    target,
+                    jacobian.as_mut_ptr(),
+                    24,
+                ),
+                DynoStatus::Ok
+            );
+            assert_eq!(
+                dyno_inverse_kinematics(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    4,
+                    target,
+                    &pose,
+                    dyno_ik_options_default(),
+                    output.as_mut_ptr(),
+                    4,
+                ),
+                DynoStatus::Ok
+            );
+            assert_eq!(
+                dyno_forward_velocity(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    q.as_ptr(),
+                    4,
+                    target,
+                    &DynoPose::default(),
+                    &DynoPose::default(),
+                    &mut twist,
+                ),
+                DynoStatus::Ok
+            );
+            assert_eq!(
+                dyno_forward_acceleration(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    q.as_ptr(),
+                    q.as_ptr(),
+                    4,
+                    target,
+                    &mut twist,
+                ),
+                DynoStatus::Ok
+            );
+            assert_eq!(
+                dyno_gravity(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    4,
+                    &DynoPose::default(),
+                    ptr::null(),
+                    0,
+                    output.as_mut_ptr(),
+                    4,
+                ),
+                DynoStatus::Ok
+            );
+            assert_eq!(
+                dyno_inverse_dynamics(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    q.as_ptr(),
+                    q.as_ptr(),
+                    4,
+                    &DynoPose::default(),
+                    DynoTwist::default(),
+                    DynoTwist::default(),
+                    ptr::null(),
+                    0,
+                    output.as_mut_ptr(),
+                    4,
+                ),
+                DynoStatus::Ok
+            );
+
+            assert_eq!(
+                dyno_forward_kinematics(ptr::null(), workspace, q.as_ptr(), 4, target, &mut pose,),
+                DynoStatus::InvalidArgument
+            );
+            assert_eq!(
+                dyno_forward_kinematics(robot, ptr::null_mut(), q.as_ptr(), 4, target, &mut pose),
+                DynoStatus::InvalidArgument
+            );
+            assert_eq!(
+                dyno_forward_kinematics(robot, workspace, ptr::null(), 4, target, &mut pose),
+                DynoStatus::InvalidArgument
+            );
+            assert_eq!(
+                dyno_forward_kinematics(robot, workspace, q.as_ptr(), 4, usize::MAX, &mut pose,),
+                DynoStatus::InvalidArgument
+            );
+            assert_eq!(
+                dyno_forward_kinematics(robot, workspace, q.as_ptr(), 4, target, ptr::null_mut(),),
+                DynoStatus::InvalidArgument
+            );
+            assert_eq!(
+                dyno_jacobian(robot, workspace, q.as_ptr(), 4, target, ptr::null_mut(), 24,),
+                DynoStatus::InvalidArgument
+            );
+            assert_eq!(
+                dyno_jacobian(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    4,
+                    target,
+                    jacobian.as_mut_ptr(),
+                    23,
+                ),
+                DynoStatus::Error
+            );
+            assert_eq!(
+                dyno_jacobian(
+                    robot,
+                    workspace,
+                    ptr::null(),
+                    0,
+                    target,
+                    jacobian.as_mut_ptr(),
+                    24,
+                ),
+                DynoStatus::Error
+            );
+            assert_eq!(
+                dyno_jacobian(robot, workspace, q.as_ptr(), 4, target, ptr::null_mut(), 0,),
+                DynoStatus::Error
+            );
+
+            let zero_quaternion = DynoPose {
+                rotation_xyzw: [0.0; 4],
+                ..DynoPose::default()
+            };
+            assert_eq!(
+                dyno_inverse_kinematics(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    4,
+                    target,
+                    &zero_quaternion,
+                    dyno_ik_options_default(),
+                    output.as_mut_ptr(),
+                    4,
+                ),
+                DynoStatus::InvalidArgument
+            );
+            let non_finite_translation = DynoPose {
+                translation: [f64::NAN, 0.0, 0.0],
+                ..DynoPose::default()
+            };
+            assert_eq!(
+                dyno_inverse_kinematics(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    4,
+                    target,
+                    &non_finite_translation,
+                    dyno_ik_options_default(),
+                    output.as_mut_ptr(),
+                    4,
+                ),
+                DynoStatus::InvalidArgument
+            );
+            let non_finite_quaternion = DynoPose {
+                rotation_xyzw: [f64::INFINITY, 0.0, 0.0, 1.0],
+                ..DynoPose::default()
+            };
+            assert_eq!(
+                dyno_inverse_kinematics(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    4,
+                    target,
+                    &non_finite_quaternion,
+                    dyno_ik_options_default(),
+                    output.as_mut_ptr(),
+                    4,
+                ),
+                DynoStatus::InvalidArgument
+            );
+            assert_eq!(
+                dyno_forward_velocity(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    q.as_ptr(),
+                    4,
+                    target,
+                    ptr::null(),
+                    &DynoPose::default(),
+                    &mut twist,
+                ),
+                DynoStatus::InvalidArgument
+            );
+            assert_eq!(
+                dyno_forward_acceleration(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    q.as_ptr(),
+                    ptr::null(),
+                    4,
+                    target,
+                    &mut twist,
+                ),
+                DynoStatus::InvalidArgument
+            );
+            assert_eq!(
+                dyno_gravity(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    4,
+                    &DynoPose::default(),
+                    ptr::null(),
+                    1,
+                    output.as_mut_ptr(),
+                    4,
+                ),
+                DynoStatus::InvalidArgument
+            );
+            let invalid_load = DynoLoad {
+                link_id: usize::MAX,
+                ..DynoLoad::default()
+            };
+            assert_eq!(
+                dyno_inverse_dynamics(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    q.as_ptr(),
+                    q.as_ptr(),
+                    4,
+                    &DynoPose::default(),
+                    DynoTwist::default(),
+                    DynoTwist::default(),
+                    &invalid_load,
+                    1,
+                    output.as_mut_ptr(),
+                    4,
+                ),
+                DynoStatus::InvalidArgument
+            );
+
+            dyno_workspace_destroy(workspace);
+            dyno_robot_destroy(robot);
+        }
+    }
+
+    #[test]
+    fn abi_catches_panics_clears_errors_and_keeps_them_thread_local() {
+        let status = call(|| panic!("intentional test panic"));
+        assert_eq!(status, DynoStatus::Panic);
+        assert!(last_error().contains("panic caught"));
+
+        // A successful call clears the previous error.
+        assert_eq!(dyno_ik_options_default().max_iterations, 100);
+        assert_eq!(call(|| Ok(())), DynoStatus::Ok);
+        assert!(last_error().is_empty());
+
+        set_error("main thread");
+        let child = thread::spawn(|| {
+            assert!(last_error().is_empty());
+            set_error("child thread");
+            last_error()
+        });
+        assert_eq!(child.join().unwrap(), "child thread");
+        assert_eq!(last_error(), "main thread");
+    }
+}

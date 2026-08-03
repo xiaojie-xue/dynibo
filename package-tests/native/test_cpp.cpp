@@ -17,24 +17,65 @@
 int main(int argc, char** argv) {
     CHECK(argc == 2);
     dyno::Robot robot(argv[1]);
-    CHECK(robot.name() == "test_arm");
-    CHECK(robot.joint_count() == 4);
-    CHECK(robot.link_count() == 5);
+    dyno::Robot moved(std::move(robot));
+    dyno::Robot assigned(argv[1]);
+    assigned = std::move(moved);
+    CHECK(assigned.native_handle() != nullptr);
+    CHECK(assigned.workspace_handle() != nullptr);
+    CHECK(assigned.name() == "test_arm");
+    CHECK(assigned.joint_count() == 4);
+    CHECK(assigned.link_count() == 5);
 
-    const auto target = robot.link_id("test_link_4");
-    const std::vector<double> q(robot.joint_count(), 0.0);
-    const auto pose = robot.forward_kinematics(q, target);
+    const auto target = assigned.link_id("test_link_4");
+    const std::vector<double> q(assigned.joint_count(), 0.0);
+    const auto pose = assigned.forward_kinematics(q, target);
     CHECK(std::abs(pose.translation[0] - 0.62) < 1.0e-12);
-    CHECK(robot.jacobian(q, target).size() == 6 * robot.joint_count());
-    CHECK(robot.gravity(q).size() == robot.joint_count());
-    CHECK(robot.inverse_dynamics(q, q, q).size() == robot.joint_count());
-    CHECK(robot.inverse_kinematics(q, target, pose) == q);
+    CHECK(assigned.jacobian(q, target).size() == 6 * assigned.joint_count());
+    const auto gravity = assigned.gravity(q);
+    CHECK(gravity.size() == assigned.joint_count());
+    CHECK(assigned.inverse_dynamics(q, q, q).size() == assigned.joint_count());
+    CHECK(assigned.inverse_kinematics(q, target, pose) == q);
+
+    const auto velocity = assigned.forward_velocity(q, q, target);
+    const auto acceleration = assigned.forward_acceleration(q, q, q, target);
+    for (double value : velocity.angular) CHECK(std::abs(value) < 1.0e-12);
+    for (double value : velocity.linear) CHECK(std::abs(value) < 1.0e-12);
+    for (double value : acceleration.angular) CHECK(std::abs(value) < 1.0e-12);
+    for (double value : acceleration.linear) CHECK(std::abs(value) < 1.0e-12);
+
+    DynoLoad load{};
+    load.link_id = target;
+    load.force[1] = 1.0;
+    CHECK(assigned.gravity(q, dyno::identity_pose(), {load}) != gravity);
 
     bool caught = false;
     try {
-        static_cast<void>(robot.link_id("missing"));
+        static_cast<void>(assigned.link_id("missing"));
     } catch (const dyno::Error& error) {
         caught = std::string(error.what()).find("does not exist") != std::string::npos;
+    }
+    CHECK(caught);
+
+    const std::vector<double> short_q(q.size() - 1, 0.0);
+    caught = false;
+    try {
+        static_cast<void>(assigned.forward_velocity(q, short_q, target));
+    } catch (const dyno::Error& error) {
+        caught = std::string(error.what()).find("same length") != std::string::npos;
+    }
+    CHECK(caught);
+    caught = false;
+    try {
+        static_cast<void>(assigned.forward_acceleration(q, q, short_q, target));
+    } catch (const dyno::Error& error) {
+        caught = std::string(error.what()).find("same length") != std::string::npos;
+    }
+    CHECK(caught);
+    caught = false;
+    try {
+        static_cast<void>(assigned.inverse_dynamics(q, short_q, q));
+    } catch (const dyno::Error& error) {
+        caught = std::string(error.what()).find("same length") != std::string::npos;
     }
     CHECK(caught);
     return 0;
