@@ -1,0 +1,19 @@
+# dyno-robotics
+
+Python bindings for the `dyno` tree-structured robot kinematics and dynamics
+library. The wheel bundles the Rust native library and has no runtime Python
+dependencies.
+
+```python
+from dyno import Robot
+
+with Robot("robot.urdf") as robot:
+    tool = robot.link_id("tool")
+    q = [0.0] * robot.joint_count
+    pose = robot.forward_kinematics(q, tool)
+    jacobian = robot.jacobian(q, tool)
+    gravity = robot.gravity(q)
+```
+
+The Jacobian is a flat column-major `6 x N` tuple. With NumPy, convert it using
+`np.asarray(jacobian).reshape((6, robot.joint_count), order="F")`.
