@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<robot name="fixed_arm">
+  <link name="base"/>
+  <link name="tool">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0.1 0 0"/>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
+    </inertial>
+  </link>
+  <joint name="mount" type="fixed">
+    <parent link="base"/>
+    <child link="tool"/>
+    <origin rpy="0.1 -0.2 0.3" xyz="0.2 0.1 0.3"/>
+  </joint>
+</robot>

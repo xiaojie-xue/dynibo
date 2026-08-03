@@ -835,6 +835,54 @@ fn forward_acceleration_matches_finite_difference() {
 }
 
 #[test]
+fn fixed_joint_has_constant_pose_and_no_motion_or_generalized_force() {
+    let arm = Robot::from_urdf(urdf_path("fixed_arm.urdf")).unwrap();
+    let target = end_link(&arm);
+    let zero = JointVector::<1>::zeros();
+    let arbitrary = JointVector::<1>::new(123.0);
+    let expected = Isometry3::from_parts(
+        Translation3::new(0.2, 0.1, 0.3),
+        UnitQuaternion::from_euler_angles(0.1, -0.2, 0.3),
+    );
+
+    assert_relative_eq!(
+        arm.test_forward_kinematics(&zero, target).unwrap(),
+        expected,
+        epsilon = 1.0e-12
+    );
+    assert_relative_eq!(
+        arm.test_forward_kinematics(&arbitrary, target).unwrap(),
+        expected,
+        epsilon = 1.0e-12
+    );
+    assert_relative_eq!(
+        arm.test_jacobian(&arbitrary, target).unwrap(),
+        Jacobian::<1>::zeros(),
+        epsilon = 1.0e-12
+    );
+    assert_relative_eq!(
+        arm.test_forward_acceleration_kinematics(&arbitrary, &arbitrary, &arbitrary, target)
+            .unwrap()
+            .to_vector(),
+        Twist::zeros().to_vector(),
+        epsilon = 1.0e-12
+    );
+
+    let torque = arm
+        .test_inverse_dynamics(
+            &arbitrary,
+            &arbitrary,
+            &arbitrary,
+            &Frame::identity(),
+            Twist::zeros(),
+            Twist::zeros(),
+            &[],
+        )
+        .unwrap();
+    assert_relative_eq!(torque, zero, epsilon = 1.0e-12);
+}
+
+#[test]
 fn gravity_matches_original_two_link_cases() {
     let arm = Robot::from_urdf(urdf_path("gravity_arm.urdf")).unwrap();
     let q = JointVector::<2>::new(FRAC_PI_2, FRAC_PI_2);
@@ -917,6 +965,30 @@ fn inverse_dynamics_matches_test_arm_numeric_reference() {
             .unwrap();
         assert_relative_eq!(tau, expected, epsilon = epsilon);
     }
+}
+
+#[test]
+fn prismatic_inverse_dynamics_projects_linear_inertia_onto_its_axis() {
+    let arm = Robot::from_urdf(urdf_path("mixed_arm.urdf")).unwrap();
+    let zero = JointVector::<2>::zeros();
+    let gravity = arm.test_gravity(&zero, &Frame::identity(), &[]).unwrap();
+    let accelerated = arm
+        .test_inverse_dynamics(
+            &zero,
+            &zero,
+            &JointVector::<2>::new(0.0, 1.0),
+            &Frame::identity(),
+            Twist::zeros(),
+            Twist::zeros(),
+            &[],
+        )
+        .unwrap();
+
+    assert_relative_eq!(
+        accelerated - gravity,
+        JointVector::<2>::new(0.0, 1.0),
+        epsilon = 1.0e-12
+    );
 }
 
 #[test]
