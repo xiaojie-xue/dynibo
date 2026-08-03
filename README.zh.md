@@ -4,7 +4,7 @@
 
 `dyno` 是一个轻量、可靠、基于 Rust 的树状机器人运动学与动力学库。它在运行时从
 URDF 确定 link、关节数量和父子拓扑，并通过 slice 与显式 `Workspace` 提供一套统一的
-动态尺寸计算 API。
+计算接口。
 
 数值计算基于 [`nalgebra`](https://nalgebra.rs/)，URDF 解析基于
 [`urdf-rs`](https://github.com/openrr/urdf-rs)。
@@ -142,14 +142,14 @@ IK 使用阻尼最小二乘
 
 ## 与 Pinocchio 的性能对比
 
-以下数据在 Intel Core i9-14900K、rustc 1.97.1、Pinocchio 3.9.0 上使用当前动态
-Workspace API 测得。Robot、Workspace、Pinocchio `Data` 和输出 buffer 都在计时区间外
-创建并重复使用。Dyno 与 Pinocchio 使用相同 URDF 和关节输入。
+以下数据是 Dyno 与 Pinocchio 在 Intel Core i9-14900K、rustc 1.97.1、
+Pinocchio 3.9.0 上的对比结果。Robot、Workspace、Pinocchio `Data` 和输出 buffer 都在
+计时区间外创建并重复使用。Dyno 与 Pinocchio 使用相同 URDF 和关节输入。
 
 数据来自 Criterion quick 模式报告区间的中值。Pinocchio 时间已扣除本次测得的
 0.938 ns C ABI 固定开销；所有时间统一为 ns。
 
-| 模型 | 操作 | Dyno 动态 API | Pinocchio | Dyno 加速比 |
+| 模型 | 操作 | Dyno | Pinocchio | Dyno 加速比 |
 |---|---|---:|---:|---:|
 | 4 关节直链 | FK | 73.409 ns | 78.623 ns | 1.07x |
 | 4 关节直链 | Jacobian | 84.467 ns | 129.422 ns | 1.53x |

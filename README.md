@@ -4,8 +4,8 @@ English | [简体中文](README.zh.md)
 
 `dyno` is a lightweight Rust library for tree-structured robot kinematics and
 dynamics. It discovers link, joint, and parent-child topology from URDF at
-runtime and exposes one runtime-size calculation API based on slices and an
-explicit reusable `Workspace`.
+runtime and performs calculations through slices and an explicit reusable
+`Workspace`.
 
 Numerical types come from [`nalgebra`](https://nalgebra.rs/), and URDF parsing
 uses [`urdf-rs`](https://github.com/openrr/urdf-rs).
@@ -122,15 +122,15 @@ unconstrained; a converged solution is checked against URDF joint limits.
 
 ## Performance against Pinocchio
 
-These results use the current runtime-size Workspace API on an Intel Core
-i9-14900K with rustc 1.97.1 and Pinocchio 3.9.0. Robot and workspace creation,
-Pinocchio `Data`, and output-buffer allocation are outside the timed region and
-reused. Both implementations receive the same URDF and joint inputs.
+These results compare Dyno with Pinocchio on an Intel Core i9-14900K using rustc
+1.97.1 and Pinocchio 3.9.0. Robot and workspace creation, Pinocchio `Data`, and
+output-buffer allocation are outside the timed region and reused. Both
+implementations receive the same URDF and joint inputs.
 
 Values are Criterion quick-mode interval medians. The measured 0.938 ns fixed C
 ABI overhead has been subtracted from Pinocchio times. All times are in ns.
 
-| Model | Operation | Dyno runtime API | Pinocchio | Dyno speedup |
+| Model | Operation | Dyno | Pinocchio | Dyno speedup |
 |---|---|---:|---:|---:|
 | 4-joint chain | FK | 73.409 ns | 78.623 ns | 1.07x |
 | 4-joint chain | Jacobian | 84.467 ns | 129.422 ns | 1.53x |
