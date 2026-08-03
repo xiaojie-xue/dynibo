@@ -2,6 +2,8 @@
 
 [English](README.md) | 简体中文
 
+[Rust、Python 与 C/C++ 安装和发布指南](PACKAGING.zh.md)
+
 `dyno` 是一个轻量、可靠、基于 Rust 的树状机器人运动学与动力学库。它在运行时从
 URDF 确定 link、关节数量和父子拓扑，并通过 slice 与显式 `Workspace` 提供一套统一的
 计算接口。
@@ -16,8 +18,8 @@ URDF 确定 link、关节数量和父子拓扑，并通过 slice 与显式 `Work
   分配或调整容量。
 - **可靠行为：** 核心库不包含项目自身的 `unsafe`；错误长度、错误模型的 Workspace、
   `LinkId` 和载荷都会明确返回错误。
-- **FFI 友好：** 公共计算边界由 slice、调用方输出 buffer 和不透明 ID 构成，便于后续
-  Python 与 C++ 绑定复用同一套算法。
+- **多语言接口：** 稳定 C ABI、C++17 RAII wrapper 与 Python package 已复用同一套
+  Rust 算法实现。
 
 ## 公共类型
 
@@ -34,6 +36,9 @@ URDF 确定 link、关节数量和父子拓扑，并通过 slice 与显式 `Work
 | `Wrench` | 力矩分量在前的空间力 |
 
 ## 基本使用
+
+Rust 用户可执行 `cargo add dyno`；Python 用户安装 `dyno-robotics`；C/C++ 用户使用仓库
+提供的 CMake package。完整安装、调用和发布命令见[多语言打包指南](PACKAGING.zh.md)。
 
 ```rust
 use dyno::{Frame, Robot};
@@ -189,10 +194,12 @@ cargo run --example franka
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
-cargo test --all-targets
+cargo test --workspace --all-targets
 cargo bench --features core-bench --bench core
 ```
 
-测试覆盖有限差分 Jacobian 与加速度、数值动力学回归、树模型多分支载荷、Workspace
-残留、模型归属、错误长度、IK 以及计算期零分配。安装 Pinocchio 后还可运行逐元素交叉
-验证。
+本地单元测试只运行 Rust workspace 源码。GitHub Package CI 才会分别测试解包后的 Rust
+`.crate`、已安装的 Python package 与解包后的 C/C++ CPack 包；具体行为见
+[多语言打包指南](PACKAGING.zh.md#发布前检查)。Rust 测试覆盖有限差分 Jacobian 与加速度、
+数值动力学回归、树模型多分支载荷、Workspace 残留、模型归属、错误长度、IK 以及计算期
+零分配。

@@ -2,6 +2,8 @@
 
 English | [简体中文](README.zh.md)
 
+Packaging and bindings: [中文指南](PACKAGING.zh.md)
+
 `dyno` is a lightweight Rust library for tree-structured robot kinematics and
 dynamics. It discovers link, joint, and parent-child topology from URDF at
 runtime and performs calculations through slices and an explicit reusable
@@ -17,8 +19,8 @@ uses [`urdf-rs`](https://github.com/openrr/urdf-rs).
   buffers, kinematics, dynamics, and IK calls do not allocate or resize.
 - **Explicit errors:** invalid lengths and model-mismatched workspaces, link
   identifiers, and loads return errors before calculation.
-- **FFI-ready boundary:** slices, caller-owned output buffers, and opaque IDs
-  can be wrapped by future Python and C++ bindings without copying algorithms.
+- **FFI-ready boundary:** the included stable C ABI, C++17 RAII wrapper, and
+  Python package reuse the same Rust algorithms.
 
 The core library contains no project-owned `unsafe` code.
 
@@ -37,6 +39,10 @@ The core library contains no project-owned `unsafe` code.
 | `Wrench` | Torque-first spatial force |
 
 ## Basic usage
+
+Install the Rust crate with `cargo add dyno`. Python users install
+`dyno-robotics`; C and C++ users can build the CMake package. See the
+[packaging guide](PACKAGING.zh.md) for complete install and release commands.
 
 ```rust
 use dyno::{Frame, Robot};
@@ -164,11 +170,13 @@ the benchmark itself measures execution cost only.
 cargo run --example franka
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
-cargo test --all-targets
+cargo test --workspace --all-targets
 cargo bench --features core-bench --bench core
 ```
 
-Tests cover finite-difference kinematics, dynamics regressions, branched loads,
-workspace residue and ownership, invalid lengths, IK, and allocation-free
-calculation. Optional Pinocchio tests compare complete outputs element by
-element after normalizing conventions.
+Local unit tests cover only the Rust source workspace. GitHub Package CI tests
+the extracted Rust `.crate`, installed Python packages, and extracted C/C++
+CPack artifacts. See the [packaging guide](PACKAGING.zh.md#发布前检查) for the CI
+behavior. Tests cover finite-difference kinematics, dynamics regressions,
+branched loads, workspace residue and ownership, invalid lengths, IK, and
+allocation-free calculation.
