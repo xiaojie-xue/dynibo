@@ -204,7 +204,11 @@ artifact。发布仍需显式配置 registry credentials 和 release policy。
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
+cargo +nightly llvm-cov --branch --workspace --all-targets
 ```
+
+覆盖率 CI 会对 LLVM JSON 汇总执行 `ci/check-coverage.py`，要求行覆盖率至少为 85%、
+分支覆盖率至少为 75%。
 
 `ci/test-rust-package.sh`、`ci/test-native-package.py` 和 cibuildwheel 的
 `package-tests/python/test_package.py` 由 GitHub Actions 调用，分别验证发布包，不属于本地

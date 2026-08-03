@@ -171,6 +171,7 @@ cargo run --example franka
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test --workspace --all-targets
+cargo +nightly llvm-cov --branch --workspace --all-targets
 cargo bench --features core-bench --bench core
 ```
 
@@ -180,3 +181,5 @@ CPack artifacts. See the [packaging guide](PACKAGING.zh.md#发布前检查) for 
 behavior. Tests cover finite-difference kinematics, dynamics regressions,
 branched loads, workspace residue and ownership, invalid lengths, IK, and
 allocation-free calculation.
+The coverage CI job publishes an LLVM JSON report and requires at least 85%
+line coverage and 75% branch coverage across the Rust workspace.

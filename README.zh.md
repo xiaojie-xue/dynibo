@@ -195,6 +195,7 @@ cargo run --example franka
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test --workspace --all-targets
+cargo +nightly llvm-cov --branch --workspace --all-targets
 cargo bench --features core-bench --bench core
 ```
 
@@ -203,3 +204,5 @@ cargo bench --features core-bench --bench core
 [多语言打包指南](PACKAGING.zh.md#发布前检查)。Rust 测试覆盖有限差分 Jacobian 与加速度、
 数值动力学回归、树模型多分支载荷、Workspace 残留、模型归属、错误长度、IK 以及计算期
 零分配。
+覆盖率 CI 会生成 LLVM JSON 报告，并要求 Rust workspace 的行覆盖率不低于 85%、
+分支覆盖率不低于 75%。
