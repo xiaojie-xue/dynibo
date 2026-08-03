@@ -185,3 +185,114 @@ fn robot_link(link: &urdf_rs::Link) -> Link {
         inertia,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use urdf_rs::{JointType as UrdfJointType, read_from_string};
+
+    use super::tree_model;
+    use crate::{Error, JointType};
+
+    const CHAIN: &str = r#"
+        <robot name="chain">
+          <link name="base"/>
+          <link name="middle"/>
+          <link name="tool"/>
+          <joint name="shoulder" type="revolute">
+            <parent link="base"/><child link="middle"/><axis xyz="0 0 1"/>
+            <limit lower="-1" upper="1" effort="1" velocity="2"/>
+          </joint>
+          <joint name="wrist" type="fixed">
+            <parent link="middle"/><child link="tool"/>
+          </joint>
+        </robot>
+    "#;
+
+    fn chain() -> urdf_rs::Robot {
+        read_from_string(CHAIN).expect("test URDF must parse")
+    }
+
+    fn invalid_model(robot: &urdf_rs::Robot, expected: &str) {
+        let error = tree_model(robot).err().expect("model must be rejected");
+        assert!(
+            matches!(error, Error::InvalidModel(ref message) if message.contains(expected)),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_link_and_joint_names() {
+        let mut robot = chain();
+        robot.links[1].name = robot.links[0].name.clone();
+        invalid_model(&robot, "link names must be unique");
+
+        let mut robot = chain();
+        robot.joints[1].name = robot.joints[0].name.clone();
+        invalid_model(&robot, "joint names must be unique");
+    }
+
+    #[test]
+    fn rejects_invalid_root_counts_and_missing_children() {
+        let mut robot = chain();
+        let mut detached = robot.links[0].clone();
+        detached.name = "detached".to_owned();
+        robot.links.push(detached);
+        invalid_model(&robot, "expected one root link, found 2");
+
+        let mut robot = chain();
+        robot.joints.push(robot.joints[0].clone());
+        robot.joints[2].name = "cycle".to_owned();
+        robot.joints[2].parent.link = "tool".to_owned();
+        robot.joints[2].child.link = "base".to_owned();
+        invalid_model(&robot, "expected one root link, found 0");
+
+        let mut robot = chain();
+        robot.links.pop();
+        invalid_model(&robot, "references a missing child link");
+    }
+
+    #[test]
+    fn rejects_multiply_reached_and_disconnected_links() {
+        let mut robot = chain();
+        let mut duplicate_edge = robot.joints[1].clone();
+        duplicate_edge.name = "second_path".to_owned();
+        duplicate_edge.parent.link = "base".to_owned();
+        robot.joints.push(duplicate_edge);
+        invalid_model(&robot, "is reached more than once");
+
+        let mut robot = chain();
+        let mut detached_a = robot.links[0].clone();
+        detached_a.name = "detached_a".to_owned();
+        let mut detached_b = robot.links[0].clone();
+        detached_b.name = "detached_b".to_owned();
+        robot.links.extend([detached_a, detached_b]);
+
+        let mut forward = robot.joints[1].clone();
+        forward.name = "detached_forward".to_owned();
+        forward.parent.link = "detached_a".to_owned();
+        forward.child.link = "detached_b".to_owned();
+        let mut backward = forward.clone();
+        backward.name = "detached_backward".to_owned();
+        backward.parent.link = "detached_b".to_owned();
+        backward.child.link = "detached_a".to_owned();
+        robot.joints.extend([forward, backward]);
+        invalid_model(&robot, "joint graph is disconnected or cyclic");
+    }
+
+    #[test]
+    fn rejects_unsupported_joints_and_accepts_continuous_joints() {
+        let mut robot = chain();
+        robot.joints[0].joint_type = UrdfJointType::Planar;
+        assert!(matches!(
+            tree_model(&robot),
+            Err(Error::UnsupportedJoint(ref name)) if name == "shoulder"
+        ));
+
+        let mut robot = chain();
+        robot.joints[0].joint_type = UrdfJointType::Continuous;
+        let model = tree_model(&robot).expect("continuous joints are supported");
+        assert_eq!(model.joints[0].joint_type(), JointType::Revolute);
+        assert_eq!(model.joints[0].lower_limit(), f64::NEG_INFINITY);
+        assert_eq!(model.joints[0].upper_limit(), f64::INFINITY);
+    }
+}

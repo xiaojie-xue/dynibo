@@ -287,11 +287,22 @@ fn joint_and_loaded_link_preserve_their_parameters() {
     assert_eq!(link.mass(), 7.016);
     assert_abs_diff_eq!(joint.origin().translation.vector.x, 2.0);
     assert_abs_diff_eq!(link.center_of_mass().z, 0.129994);
+    assert!(link.inertia().iter().all(|value| value.is_finite()));
+    assert_relative_eq!(joint.axis().as_ref(), &Vector3::z(), epsilon = 1.0e-12);
     assert!(joint.is_over_limit(4.0));
     assert!(!joint.is_over_limit(0.0));
     assert_abs_diff_eq!(joint.set_position(10.0), 3.14);
+    assert_abs_diff_eq!(joint.position(), 3.14);
     assert_abs_diff_eq!(joint.set_velocity(-200.0), -100.0);
+    assert_abs_diff_eq!(joint.velocity(), -100.0);
     assert_abs_diff_eq!(joint.set_acceleration(12.0), 12.0);
+    assert_abs_diff_eq!(joint.acceleration(), 12.0);
+    assert_abs_diff_eq!(joint.set_home_offset(-0.25), -0.25);
+    assert_abs_diff_eq!(joint.home_offset(), -0.25);
+    assert_abs_diff_eq!(
+        joint.active_force(Wrench::new(Vector3::new(1.0, 2.0, 3.0), Vector3::zeros())),
+        3.0
+    );
 }
 
 #[test]
@@ -352,6 +363,23 @@ fn revolute_and_prismatic_joint_frames_match_urdf_semantics() {
         Vector3::new(1.0, 0.25, 0.0),
         epsilon = 1.0e-12
     );
+    assert_abs_diff_eq!(
+        prismatic.active_force(Wrench::new(Vector3::zeros(), Vector3::new(2.0, 3.0, 4.0))),
+        3.0
+    );
+
+    let fixed = joint(
+        "fixed",
+        JointType::Fixed,
+        [0.1, 0.2, 0.3],
+        [0.0; 3],
+        [0.0; 3],
+    );
+    assert_relative_eq!(fixed.frame(123.0), *fixed.origin(), epsilon = 1.0e-12);
+    assert_abs_diff_eq!(
+        fixed.active_force(Wrench::new(Vector3::z(), Vector3::x())),
+        0.0
+    );
 }
 
 #[test]
@@ -394,6 +422,16 @@ fn urdf_rs_loads_test_arm_and_checks_calculation_size() {
             actual: 3
         }
     ));
+}
+
+#[test]
+fn urdf_loading_reports_missing_and_malformed_files() {
+    for path in [urdf_path("does_not_exist.urdf"), urdf_path("invalid.urdf")] {
+        let error = Robot::from_urdf(path).expect_err("invalid input must not load");
+        assert!(matches!(error, Error::Urdf(_)));
+        assert!(error.to_string().starts_with("failed to parse URDF:"));
+        assert!(std::error::Error::source(&error).is_some());
+    }
 }
 
 #[test]
@@ -565,6 +603,104 @@ fn inverse_kinematics_reports_specific_solver_errors() {
             && (position - 0.8).abs() <= 1.0e-12
             && (lower + 0.610865238198015).abs() <= 1.0e-12
             && (upper - 0.610865238198015).abs() <= 1.0e-12
+    ));
+}
+
+#[test]
+fn inverse_kinematics_validates_every_option_and_target_component() {
+    let arm = test_arm();
+    let target = end_link(&arm);
+    let initial_q = JointVector::<4>::zeros();
+    let desired = Frame::identity();
+    let invalid_options = [
+        InverseKinematicsOptions {
+            max_iterations: 0,
+            ..InverseKinematicsOptions::default()
+        },
+        InverseKinematicsOptions {
+            translation_tolerance: 0.0,
+            ..InverseKinematicsOptions::default()
+        },
+        InverseKinematicsOptions {
+            rotation_tolerance: -1.0,
+            ..InverseKinematicsOptions::default()
+        },
+        InverseKinematicsOptions {
+            damping: f64::NAN,
+            ..InverseKinematicsOptions::default()
+        },
+        InverseKinematicsOptions {
+            max_step_norm: f64::INFINITY,
+            ..InverseKinematicsOptions::default()
+        },
+    ];
+    for options in invalid_options {
+        assert!(matches!(
+            arm.test_inverse_kinematics(&initial_q, target, &desired, options),
+            Err(Error::InvalidOptions(_))
+        ));
+    }
+
+    let mut non_finite_target = desired;
+    non_finite_target.translation.vector.y = f64::NAN;
+    assert!(matches!(
+        arm.test_inverse_kinematics(
+            &initial_q,
+            target,
+            &non_finite_target,
+            InverseKinematicsOptions::default(),
+        ),
+        Err(Error::NonFiniteInput {
+            input: "target frame"
+        })
+    ));
+
+    let unreachable = Frame::translation(1.0, 0.0, 0.0);
+    let numerically_singular = InverseKinematicsOptions {
+        damping: f64::MIN_POSITIVE,
+        ..InverseKinematicsOptions::default()
+    };
+    assert!(matches!(
+        arm.test_inverse_kinematics(
+            &initial_q,
+            arm.root_link(),
+            &unreachable,
+            numerically_singular,
+        ),
+        Err(Error::NumericalFailure { iteration: 1 })
+    ));
+
+    let rotation_only = Frame::from_parts(
+        Translation3::identity(),
+        UnitQuaternion::from_axis_angle(&Vector3::z_axis(), 0.25),
+    );
+    let one_iteration = InverseKinematicsOptions {
+        max_iterations: 1,
+        ..InverseKinematicsOptions::default()
+    };
+    assert!(matches!(
+        arm.test_inverse_kinematics(
+            &initial_q,
+            arm.root_link(),
+            &rotation_only,
+            one_iteration,
+        ),
+        Err(Error::NotConverged {
+            iterations: 1,
+            translation_error,
+            rotation_error,
+        }) if translation_error <= 1.0e-12 && (rotation_error - 0.25).abs() <= 1.0e-12
+    ));
+
+    let overflowing_target = Frame::translation(f64::MAX, f64::MAX, f64::MAX);
+    assert!(matches!(
+        arm.test_inverse_kinematics(
+            &initial_q,
+            target,
+            &overflowing_target,
+            InverseKinematicsOptions::default(),
+        ),
+        Err(Error::NumericalFailure { iteration: 1 })
     ));
 }
 
