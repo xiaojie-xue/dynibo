@@ -3,6 +3,15 @@
 **/*.rs.bk
 *.profraw
 
+# Python build and test output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+/build/
+/dist/
+/wheelhouse/
+*.egg-info/
+
 # IDE and editor state
 .idea/
 .vscode/

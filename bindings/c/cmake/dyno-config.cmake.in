@@ -1,0 +1,14 @@
+@PACKAGE_INIT@
+
+if(NOT TARGET dyno::dyno)
+    add_library(dyno::dyno SHARED IMPORTED)
+    set_target_properties(dyno::dyno PROPERTIES
+        IMPORTED_LOCATION "${PACKAGE_PREFIX_DIR}/@DYNO_LIBRARY_INSTALL_DIR@/@DYNO_LIBRARY_FILE@"
+        INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@")
+    if(WIN32)
+        set_target_properties(dyno::dyno PROPERTIES
+            IMPORTED_IMPLIB "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/@DYNO_IMPLIB_FILE@")
+    endif()
+endif()
+
+check_required_components(dyno)

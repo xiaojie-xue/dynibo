@@ -4,6 +4,27 @@ version = "0.1.0"
 edition = "2024"
 description = "Tree-structured robot kinematics and dynamics with runtime-size workspace APIs"
 license = "MIT"
+readme = "README.md"
+repository = "https://github.com/xiaojie-xue/dyno"
+homepage = "https://github.com/xiaojie-xue/dyno"
+documentation = "https://docs.rs/dyno"
+keywords = ["robotics", "kinematics", "dynamics", "urdf"]
+categories = ["science::robotics", "simulation"]
+exclude = [
+    ".github/",
+    "bindings/",
+    "ci/",
+    "package-tests/",
+    "python/",
+    "CMakeLists.txt",
+    "MANIFEST.in",
+    "pyproject.toml",
+    "setup.py",
+]
+
+[workspace]
+members = ["bindings/c"]
+resolver = "3"
 
 [features]
 default = []

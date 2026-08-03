@@ -1,0 +1,16 @@
+[package]
+name = "dyno-c"
+version = "0.1.0"
+edition = "2024"
+description = "Stable C ABI for the dyno robot kinematics and dynamics library"
+license = "MIT"
+repository = "https://github.com/xiaojie-xue/dyno"
+publish = false
+
+[lib]
+name = "dyno_c"
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+dyno = { path = "../..", version = "0.1.0" }
+nalgebra = "0.34.1"
