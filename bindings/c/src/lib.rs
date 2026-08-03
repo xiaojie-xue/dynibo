@@ -727,6 +727,7 @@ mod tests {
     fn metadata_and_construction_reject_invalid_arguments() {
         // SAFETY: null is explicitly supported by the metadata/destructor functions.
         unsafe {
+            assert_eq!(CStr::from_ptr(dyno_version()), c"0.1.0");
             assert!(dyno_robot_name(ptr::null()).is_null());
             assert_eq!(dyno_robot_joint_count(ptr::null()), 0);
             assert_eq!(dyno_robot_link_count(ptr::null()), 0);
@@ -876,6 +877,27 @@ mod tests {
                 ),
                 DynoStatus::Ok
             );
+            let gravity = output;
+            let load = DynoLoad {
+                link_id: target,
+                force: [0.0, 1.0, 0.0],
+                torque: [0.0, 0.0, 0.5],
+            };
+            assert_eq!(
+                dyno_gravity(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    4,
+                    &DynoPose::default(),
+                    &load,
+                    1,
+                    output.as_mut_ptr(),
+                    4,
+                ),
+                DynoStatus::Ok
+            );
+            assert_ne!(output, gravity);
             assert_eq!(
                 dyno_inverse_dynamics(
                     robot,
