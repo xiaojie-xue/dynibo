@@ -32,6 +32,9 @@ jobs:
   coverage:
     name: Rust line and branch coverage
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -50,10 +53,22 @@ jobs:
         run: >-
           python ci/check-coverage.py coverage.json
           --min-lines 85 --min-branches 75
+      - name: Generate Codecov report
+        run: >-
+          cargo +nightly llvm-cov report --branch
+          -p dyno -p dyno-c --codecov --output-path codecov.json
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          use_oidc: true
+          files: codecov.json
+          fail_ci_if_error: true
       - uses: actions/upload-artifact@v7
         with:
           name: rust-coverage
-          path: coverage.json
+          path: |
+            coverage.json
+            codecov.json
           if-no-files-found: error
 
   rust-package:

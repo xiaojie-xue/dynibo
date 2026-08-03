@@ -1,5 +1,8 @@
 # dyno
 
+[![Package CI](https://github.com/xiaojie-xue/dyno/actions/workflows/package-ci.yml/badge.svg?branch=main)](https://github.com/xiaojie-xue/dyno/actions/workflows/package-ci.yml)
+[![codecov](https://codecov.io/gh/xiaojie-xue/dyno/branch/main/graph/badge.svg)](https://codecov.io/gh/xiaojie-xue/dyno)
+
 English | [简体中文](README.zh.md)
 
 Packaging and bindings: [中文指南](PACKAGING.zh.md)
