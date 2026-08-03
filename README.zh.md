@@ -2,198 +2,197 @@
 
 [English](README.md) | 简体中文
 
-`dyno` 是一个轻量、可靠、基于 Rust 的树状机器人运动学与动力学库。在当前支持的
-关节类型范围内，可以加载任意分支数量和深度的合法树状 URDF。模型构建时自动确定
-link、关节和父子拓扑，计算输入和输出仍保持固定尺寸。数值计算基于
-[`nalgebra`](https://nalgebra.rs/)，URDF 解析基于
+`dyno` 是一个轻量、可靠、基于 Rust 的树状机器人运动学与动力学库。它在运行时从
+URDF 确定 link、关节数量和父子拓扑，并通过 slice 与显式 `Workspace` 提供一套统一的
+动态尺寸计算 API。
+
+数值计算基于 [`nalgebra`](https://nalgebra.rs/)，URDF 解析基于
 [`urdf-rs`](https://github.com/openrr/urdf-rs)。
 
 ## 设计目标
 
-- **轻量运行时：** 计算路径使用固定尺寸、基于栈的向量、矩阵和工作数组。运动学、
-  重力及逆动力学计算期间不进行堆内存分配。
-- **可靠行为：** 运行时库自身不包含 `unsafe` 代码；遇到无效模型会明确返回错误；
-  解析运动学通过有限差分和数值回归用例共同验证。可选 Pinocchio benchmark 所需的
-  C ABI 被隔离在 benchmark harness 内。
-- **基于 Rust：** 使用 const generics 保持计算输入和输出为固定尺寸，模型的关节
-  数量则在构造时自动确定。
+- **运行时尺寸：** 同一个二进制可加载任意合法关节数的 URDF，无需提前枚举尺寸。
+- **计算期零分配：** 创建 `Workspace` 和输出 buffer 后，运动学、动力学及 IK 调用不
+  分配或调整容量。
+- **可靠行为：** 核心库不包含项目自身的 `unsafe`；错误长度、错误模型的 Workspace、
+  `LinkId` 和载荷都会明确返回错误。
+- **FFI 友好：** 公共计算边界由 slice、调用方输出 buffer 和不透明 ID 构成，便于后续
+  Python 与 C++ 绑定复用同一套算法。
 
-URDF 解析和拓扑构建只在模型构建阶段分配内存；运动学和动力学计算路径不进行堆内存
-分配。这里的“可靠”是指经过测试的安全 Rust 实现，不代表已获得功能安全认证。
-
-## 公共接口
-
-### 核心类型
+## 公共类型
 
 | 类型 | 用途 |
 |---|---|
-| `Robot` | 运行时确定拓扑、使用固定尺寸计算接口的树模型 |
-| `Joint` | 关节变换、轴、限位和关节状态 |
-| `JointType` | Revolute、prismatic 或 fixed 关节运动类型 |
-| `Link` | Link 的质量、质心和惯量 |
-| `Load` | 施加在指定 link 原点、以该 link 坐标系表达的 Wrench |
-| `JointVector<N>` | 固定尺寸关节向量 |
-| `Jacobian<N>` | 角运动分量在前的 `6 x N` 几何 Jacobian |
-| `Frame` | 基于 `nalgebra::Isometry3<f64>` 的刚体变换 |
-| `Twist` | 角运动分量在前的空间速度或加速度 |
+| `Robot` | 运行时拓扑的只读树模型 |
+| `Workspace` | 与模型绑定、可重复使用的计算 scratch buffer |
+| `LinkId` | 不透明、与模型绑定的 link 标识符 |
+| `IndexedLoad` | 使用 `LinkId` 指定目标 link 的外载荷 |
+| `InverseKinematicsOptions` | IK 的容差、阻尼、步长和迭代配置 |
+| `Joint`、`JointType`、`Link` | URDF 模型信息 |
+| `Frame` | `nalgebra::Isometry3<f64>` 刚体变换 |
+| `Twist` | 角分量在前的空间速度或加速度 |
 | `Wrench` | 力矩分量在前的空间力 |
 
-### 模型构建与访问
+## 基本使用
+
+```rust
+use dyno::{Frame, Robot};
+
+let robot = Robot::from_urdf("robot.urdf")?;
+let target = robot.link_id("tool")?;
+let mut workspace = robot.workspace();
+
+let q = vec![0.0; robot.joint_count()];
+let mut jacobian = vec![0.0; 6 * robot.joint_count()];
+let mut gravity = vec![0.0; robot.joint_count()];
+
+let frame = robot.forward_kinematics(&q, target, &mut workspace)?;
+robot.jacobian(&q, target, &mut workspace, &mut jacobian)?;
+robot.gravity(
+    &q,
+    &Frame::identity(),
+    &[],
+    &mut workspace,
+    &mut gravity,
+)?;
+# Ok::<(), dyno::Error>(())
+```
+
+Workspace 创建时一次性分配全部内部 buffer。实时循环中应复用它：
+
+```rust
+loop {
+    robot.jacobian(&q, target, &mut workspace, &mut jacobian)?;
+    // 使用 jacobian……
+    # break;
+}
+# Ok::<(), dyno::Error>(())
+```
+
+并发计算应各自持有一个 Workspace；`Robot` 本身保持只读，可以共享。
+
+## 计算接口
 
 | 接口 | 结果 |
 |---|---|
-| `Robot::from_urdf(path)` | 从 URDF 文件路径构建模型 |
-| `name()`、`joints()`、`links()` | 查看模型数据，`links()` 包含父 link |
-| `root_link()`、`leaf_links()` | 查看父 link 和所有子 link |
-| `link(name)` | 按名称借用 `Link`，不存在时返回 `Error::UnknownLink` |
-| `link_count()` | 返回包含父 link 的 URDF link 数量 |
-| `joint_count()` | 返回从模型中解析出的关节数量 |
+| `forward_kinematics(q, target, workspace)` | 指定 link 相对根坐标系的位姿 |
+| `jacobian(q, target, workspace, output)` | 写入指定 link 的 `6 x N` Jacobian |
+| `forward_velocity_kinematics(...)` | 指定 link/tool 的空间速度 |
+| `forward_acceleration_kinematics(...)` | 指定 link 原点的空间加速度 |
+| `gravity(q, base, loads, workspace, output)` | 写入重力及外载荷关节力 |
+| `inverse_dynamics(...)` | 写入 Newton–Euler 逆动力学关节力 |
+| `inverse_kinematics(..., options, workspace, output)` | 使用指定参数写入 IK 解 |
 
-### 计算接口
+如果适用默认求解配置，显式传入 `InverseKinematicsOptions::default()` 即可。
 
-为保持库的定位专注、轻量，公开计算接口仅限下列操作。
-
-| 接口 | 状态与结果 |
-|---|---|
-| `forward_kinematics(q, target)` | 指定 link 的位姿 |
-| `jacobian(q, target)` | 指定 link 的基座坐标系 Jacobian，非祖先关节列为零 |
-| `inverse_kinematics(initial_q, target, desired)` | 使用默认参数的阻尼最小二乘位姿逆运动学 |
-| `inverse_kinematics_with_options(...)` | 可配置阻尼、容差、步长和迭代上限的位姿逆运动学 |
-| `forward_velocity_kinematics(q, qd, target, base, tool)` | 指定 link/tool 的空间速度 |
-| `forward_acceleration_kinematics(q, qd, qdd, target)` | 指定 link 的直接递推加速度 |
-| `gravity(q, base, loads)` | 支持多 link 外载荷的树形重力递推关节力向量 |
-| `inverse_dynamics(..., loads)` | 支持多 link 外载荷的树形 RNEA 关节力向量 |
+所有关节输入和普通输出必须包含 `robot.joint_count()` 个元素。Jacobian 输出必须包含
+`6 * robot.joint_count()` 个元素。长度不匹配会返回：
 
 ```rust
-use dyno::{JointVector, Robot};
-
-let arm = Robot::from_urdf("test_arm.urdf")?;
-let q = JointVector::<4>::zeros();
-let target = arm.link("test_link_4")?;
-let end = arm.forward_kinematics(&q, target)?;
-let jacobian = arm.jacobian(&q, target)?;
-let solved_q = arm.inverse_kinematics(&q, target, &end)?;
-# Ok::<(), dyno::Error>(())
+Error::WrongSliceLength {
+    slice: "q",
+    expected: robot.joint_count(),
+    actual: q.len(),
+}
 ```
 
-计算尺寸 `N` 会从每次传入的 `JointVector<N>` 自动推导，不再属于 `Robot` 类型的
-一部分。若模型与输入尺寸不一致，会在开始计算前返回 `Error::WrongJointCount`。
+接口不会自动 `resize`，也不会因为普通输入错误而退出进程。只有调用方主动对错误结果
+使用 `unwrap()` 才会触发 panic。
 
-## 示例
+## Jacobian 布局
 
-仓库内包含一份可独立加载的 Franka FER URDF，以及计算法兰位姿、Jacobian 和重力关节
-力矩的示例：
+Jacobian 是 column-major 的 `6 x N` 扁平数组。每个关节占连续 6 个元素：
+
+```text
+[angular_x, angular_y, angular_z, linear_x, linear_y, linear_z]
+```
+
+第 `joint` 列从 `jacobian[6 * joint]` 开始。该布局与 nalgebra 和 Eigen 默认列主序一致。
+
+## LinkId、Workspace 与载荷归属
+
+`LinkId` 和 `Workspace` 与产生它们的模型绑定：
 
 ```rust
-use std::path::PathBuf;
-
-use dyno::{Frame, JointVector, Robot};
-
-let urdf = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-    .join("examples/data/franka_fer.urdf");
-let robot = Robot::from_urdf(urdf)?;
-let flange = robot.link("fer_link8")?;
-let q = JointVector::from([0.0, -0.3, 0.0, -1.8, 0.0, 1.5, 0.7, 0.0]);
-
-let flange_frame = robot.forward_kinematics(&q, flange)?;
-let jacobian = robot.jacobian(&q, flange)?;
-let gravity_torque = robot.gravity(&q, &Frame::identity(), &[])?;
-# Ok::<(), dyno::Error>(())
+let tool = robot.link_id("tool")?;
+let mut workspace = robot.workspace();
 ```
 
-完整示例的运行方式为：
+将 Robot A 的 `LinkId`、Workspace 或 `IndexedLoad` 传给 Robot B 会分别返回
+`Error::InvalidLinkId` 或 `Error::InvalidWorkspace`。`Robot::clone()` 表示同一模型，原有
+ID 和 Workspace 对 clone 仍然有效。
+
+`LinkId` 是进程内 handle，不承诺持久化、序列化或跨进程稳定性。
+
+## 模型与动力学约定
+
+`Robot` 支持任意分支数量和深度的合法树状 URDF。构建过程拒绝多根、重复名称、环、
+断连、缺失 link 和一个 link 被多个 joint 重复连接的模型。支持 revolute、continuous、
+prismatic 和 fixed joint。
+
+关节 slice 当前按全部 URDF joint 排列，fixed joint 仍占一个元素，但不贡献运动或主动
+关节力。根 link 保存在 `links()` 中，但兼容动力学不把根 link 自身惯性计入关节力。
+
+兼容动力学保留已有正 Z 重力方向和惯量积符号约定。Pinocchio 桥接测试会转换这些约定后
+逐元素比较结果。
+
+IK 使用阻尼最小二乘
+`J^T (J J^T + lambda^2 I)^-1`。迭代过程不主动施加关节限位，只在收敛后验证 URDF
+限位。需要碰撞、冗余目标或其他约束时，应读取 Jacobian 并使用合适的优化器。
+
+## 与 Pinocchio 的性能对比
+
+以下数据在 Intel Core i9-14900K、rustc 1.97.1、Pinocchio 3.9.0 上使用当前动态
+Workspace API 测得。Robot、Workspace、Pinocchio `Data` 和输出 buffer 都在计时区间外
+创建并重复使用。Dyno 与 Pinocchio 使用相同 URDF 和关节输入。
+
+数据来自 Criterion quick 模式报告区间的中值。Pinocchio 时间已扣除本次测得的
+0.938 ns C ABI 固定开销；所有时间统一为 ns。
+
+| 模型 | 操作 | Dyno 动态 API | Pinocchio | Dyno 加速比 |
+|---|---|---:|---:|---:|
+| 4 关节直链 | FK | 73.409 ns | 78.623 ns | 1.07x |
+| 4 关节直链 | Jacobian | 84.467 ns | 129.422 ns | 1.53x |
+| 4 关节直链 | Gravity | 119.120 ns | 187.782 ns | 1.58x |
+| 4 关节直链 | RNEA | 181.740 ns | 304.192 ns | 1.67x |
+| 40 关节直链 | FK | 730.120 ns | 810.432 ns | 1.11x |
+| 40 关节直链 | Jacobian | 847.920 ns | 1327.462 ns | 1.57x |
+| 40 关节直链 | Gravity | 1130.600 ns | 1830.562 ns | 1.62x |
+| 40 关节直链 | RNEA | 1632.500 ns | 3147.862 ns | 1.93x |
+| 7 关节双叶树 | FK | 112.200 ns | 138.442 ns | 1.23x |
+| 7 关节双叶树 | Jacobian | 123.990 ns | 213.612 ns | 1.72x |
+| 7 关节双叶树 | Gravity | 170.280 ns | 326.032 ns | 1.91x |
+| 7 关节双叶树 | RNEA | 284.160 ns | 539.602 ns | 1.90x |
+
+执行命令：
+
+```bash
+export PKG_CONFIG_PATH=/opt/ros/humble/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH
+export LD_LIBRARY_PATH=/opt/ros/humble/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+cargo bench --features pinocchio-bench --bench pinocchio -- --quick
+```
+
+Quick 模式样本较少，以上数据用于展示当前机器上的性能趋势，不是跨平台性能承诺。
+Pinocchio 对照测试还会在 32 组确定性状态下逐元素验证 FK、Jacobian、gravity 和 RNEA，
+性能 benchmark 本身只测执行时间。
+
+## 示例与验证
+
+运行 Franka 示例：
 
 ```bash
 cargo run --example franka
 ```
 
-该 URDF 保留 7 个机械臂关节和 1 个 fixed 法兰关节。由于 fixed joint 当前也占用
-`JointVector` 的一个元素，包含 8 个元素的数组会自动推导为 `JointVector<8>`，最后一个
-元素保持为零。为避免依赖 ROS 或 xacro，示例 URDF 省略了显示和碰撞 mesh。
-
-`inverse_kinematics` 使用阻尼逆
-`J^T (J J^T + lambda^2 I)^-1`。迭代过程不施加约束，但收敛结果会使用 URDF 中的关节
-限位进行检查。求解错误直接通过 `Error` 的变体
-明确区分非法配置、非有限输入、数值分解失败、关节限位越界和不收敛；不收敛错误还会
-给出最终的平移与旋转残差。需要调整默认参数时，可使用
-`inverse_kinematics_with_options`。
-
-内置求解器仅适用于简单的位姿逆解。最终关节限位检查只会报告无效结果，并不会在优化
-过程中施加约束。需要冗余控制、关节位置或速度约束、碰撞约束以及其他任务优先级时，
-建议通过 `jacobian` 获取几何 Jacobian，再结合合适的 QP solver 自行构建约束 IK。
-
-## 树模型约定与兼容范围
-
-`Robot` 支持任意分支数量和深度的合法树状 URDF：模型具有唯一父 link，每个非父
-link 只有一个父 joint。构建时会生成父先于子的拓扑顺序，并拒绝多父、重复名称、环、
-断连、缺失 link 和一个 link 被多个 joint 重复连接的模型。当前
-支持 revolute、continuous、prismatic 和 fixed joint；其他 URDF joint 类型仍会返回
-`UnsupportedJoint`。
-
-运动学接口直接接收目标 `&Link`，因此同一个模型可以计算任意分叉末端。重力和逆动力学
-接口接收 `&[Load]`，可同时在任意多个 link 上施加载荷；空切片表示没有外载荷。
-`JointVector<N>` 当前按全部 URDF joint 排列，fixed joint 仍占一个元素但其运动和主动
-关节力为零。
-
-父 link 会保存在 `links()` 中，但固定基座兼容动力学不把父 link 自身的惯性计入
-关节力。`Load` 作用在 link 原点，并以该 link 坐标系表达。
-
-兼容动力学内核保留已有的正 Z 方向重力和惯量积符号。Pinocchio 桥接层会转换相应
-约定，正确性测试逐元素比较转换后的数值，性能基准只统计执行开销。
-
-## 性能基准
-
-树基准模型包含 7 个可动关节：一个公共 trunk 和左右两条三级分支，共有 2 个子 link。
-以下结果使用相同的树状 URDF 和关节输入，对比 Dyno 与 Pinocchio 3.9.0。
-数据通过 `cargo bench --features pinocchio-bench --bench pinocchio -- --quick` 在 Intel
-Core i9-14900K 上测得；Pinocchio 时间已扣除本次测得的 0.70 ns C ABI 固定开销。
-
-| 函数 | Dyno | Pinocchio | Dyno 加速比 |
-|---|---:|---:|---:|
-| `forward_kinematics` | 111.27 ns | 134.07 ns | 1.20x |
-| `jacobian` | 138.88 ns | 214.00 ns | 1.54x |
-| `gravity` | 163.51 ns | 321.75 ns | 1.97x |
-| `inverse_dynamics` | 256.50 ns | 513.81 ns | 2.00x |
-
-模型构建和 URDF 解析不在计时区间内，两边都会复用已解析的模型，Pinocchio 还会复用
-其 `Data` 对象。Dyno 计算路径使用固定尺寸栈数组保存节点中间状态，不进行堆内存分配。
-Criterion quick 模式样本较少，上述结果仅展示当前机器上的性能趋势，不应视为跨平台或
-严格统计结论。
-
-桥接层会统一关节顺序、空间向量行顺序和重力方向。另有集成测试逐元素比较 FK、
-Jacobian、gravity 和 RNEA 的完整输出；性能基准本身只测执行时间。
-
-只有启用 `pinocchio-bench` feature 时才需要安装 Pinocchio。C++ 桥接、`cc`、
-`pkg-config` 和 Criterion 都不会成为 Dyno 常规构建的运行时依赖。例如，在 x86-64
-Linux 的 ROS Humble 环境中执行：
+完整验证：
 
 ```bash
-export PKG_CONFIG_PATH=/opt/ros/humble/lib/x86_64-linux-gnu/pkgconfig:$PKG_CONFIG_PATH
-export LD_LIBRARY_PATH=/opt/ros/humble/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
-cargo bench --features pinocchio-bench --bench pinocchio
-```
-
-仅测试 Dyno 的基准不依赖 Pinocchio：
-
-```bash
-cargo bench --features core-bench --bench core
-```
-
-其他 ROS 发行版或 CPU 架构需要相应调整路径。可添加 `-- --quick` 做快速冒烟验证；
-需要正式比较时应省略该参数。
-
-## 验证
-
-```text
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test --all-targets
-# 已安装 Pinocchio 时：
-cargo clippy --features pinocchio-bench --bench pinocchio -- -D warnings
-cargo test --features pinocchio-bench --test tree_pinocchio
+cargo bench --features core-bench --bench core
 ```
 
-集成测试覆盖 Jacobian 导数、加速度、逆动力学参考值、Jacobian 及其导数的有限差分
-验证、旋转与移动关节、重力、关节限位和被动关节。Pinocchio 交叉测试在 32 组确定性
-配置下验证两条分支，并逐元素比较 FK、Jacobian、gravity 和 RNEA。性能基准使用同一份
-包含公共 trunk、两条分支和两个子 link 的 7 关节树状 URDF。
+测试覆盖有限差分 Jacobian 与加速度、数值动力学回归、树模型多分支载荷、Workspace
+残留、模型归属、错误长度、IK 以及计算期零分配。安装 Pinocchio 后还可运行逐元素交叉
+验证。

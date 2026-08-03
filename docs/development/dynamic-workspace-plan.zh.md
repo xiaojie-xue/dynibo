@@ -1,7 +1,14 @@
 # 动态 Slice Kernel 与 Workspace 开发计划
 
-- 状态：提案，待评审
+- 状态：已实施，最终接口调整为仅保留动态 API
 - 日期：2026-07-30
+- 完成日期：2026-08-03
+
+> 最终决策（2026-08-03）：删除固定尺寸公共计算 API、`JointVector<N>`、
+> `Jacobian<N>` 和借用式 `Load`，只发布 `LinkId + Workspace` 动态 API。动态方法沿用原
+> 固定 API 的名称，不使用 `_slice` 或 `_into` 后缀。
+> 本文后续关于“保留固定 API”的内容用于记录重构过程，不再描述当前公共接口；当前用法
+> 以仓库 README 为准。
 
 ## 背景
 
@@ -33,7 +40,7 @@ Python 和 C++ 绑定不属于本计划，但后续应只依赖这里建立的�
 - 支持运行时确定的任意合法模型关节数，不增加人为的最大关节数。
 - 保持现有数值、错误、关节顺序、fixed joint 和动力学兼容约定。
 - 保持 `Robot` 只读且可共享；并发计算由每个调用方持有独立 Workspace。
-- 固定 API 的性能回退控制在 5% 内，IK 放宽到 10%。
+- 测量并记录固定与动态 API 的性能变化，不设置性能评审线。
 
 ## 非目标
 
@@ -88,12 +95,12 @@ let mut workspace = robot.workspace();
 let q = vec![0.0; robot.joint_count()];
 let mut jacobian = vec![0.0; 6 * robot.joint_count()];
 
-let frame = robot.forward_kinematics_slice(&q, target, &mut workspace)?;
-robot.jacobian_slice_into(&q, target, &mut workspace, &mut jacobian)?;
+let frame = robot.forward_kinematics(&q, target, &mut workspace)?;
+robot.jacobian(&q, target, &mut workspace, &mut jacobian)?;
 ```
 
-方法名属于本计划的待评审项。`slice` 表示运行时尺寸输入，`into` 表示输出内存由调用方
-提供。
+原提案使用 `slice` 表示运行时尺寸输入，使用 `into` 表示输出内存由调用方提供；最终在
+删除固定 API 后沿用原方法名，不再需要后缀区分。
 
 ### Workspace 与模型绑定
 
@@ -189,8 +196,7 @@ src/
 - 增加独立的 allocation-count 测试目标；
 - 保存重构前的数值及性能结果。
 
-纳秒级阈值不作为共享 CI 的硬门禁。性能回归在固定参考机器上人工评审，CI 继续执行
-正确性、格式和 lint 检查。
+性能数据不作为共享 CI 或人工评审门禁。CI 继续执行正确性、格式和 lint 检查。
 
 验收条件：不改变核心行为，并获得可重复的重构前基线。
 
@@ -220,7 +226,7 @@ fn link_frames_kernel(
 - 固定和动态结果一致；
 - 根 link、错误长度、错误模型 LinkId 和错误 Workspace 均有测试；
 - Workspace 重复调用不存在残留污染；
-- 固定 FK 回退不超过 5%，动态 FK 相对固定 API 回退不超过 10%。
+- 记录固定 FK 重构前后的数据及动态 FK 相对固定 API 的数据。
 
 FK 是架构验证点。如果不能达到性能和可维护性目标，暂停后续迁移并调整设计。
 
@@ -251,7 +257,7 @@ fn jacobian_kernel(
 - 非祖先列保持为零；
 - 固定与动态结果一致；
 - 连续切换 target 不存在残留列；
-- 固定 API 回退不超过 5%，动态 API 回退不超过 10%。
+- 记录固定 API 重构前后的数据及动态 API 相对固定 API 的数据。
 
 ### 阶段 3：加速度运动学 kernel
 
@@ -271,8 +277,7 @@ struct AccelerationScratch<'a> {
 kernel 接收 `q`、`qd`、`qdd` slice、目标索引及 scratch view。所有输入分别验证长度；
 根 link 继续返回零 Twist。
 
-验收条件：现有解析与有限差分测试通过，固定与动态结果一致，性能回退满足 5%/10%
-目标。
+验收条件：现有解析与有限差分测试通过，固定与动态结果一致，并记录性能变化。
 
 ### 阶段 4：Gravity kernel
 
@@ -295,7 +300,7 @@ struct GravityScratch<'a> {
 - 保持根 link 外载荷和现有动力学约定。
 
 验收条件覆盖空载荷、重复 link 载荷、多分支载荷、错误模型载荷和连续调用残留；固定 API
-回退不超过 5%，动态 API 回退不超过 10%。
+记录固定与动态 API 的性能变化。
 
 ### 阶段 5：Inverse Dynamics kernel
 
@@ -323,7 +328,7 @@ struct DynamicsScratch<'a> {
 - Pinocchio 可用时通过完整输出对照测试；
 - 固定与动态输出一致；
 - 连续调用不存在载荷残留；
-- 固定 API 回退不超过 5%，动态 API 回退不超过 10%。
+- 记录固定与动态 API 的性能变化。
 
 ### 阶段 6：IK kernel
 
@@ -333,7 +338,7 @@ Workspace 增加 `jacobian`、`q_work` 和 `step`。`J J^T` 的结果始终为 `
 使用固定尺寸 `SMatrix<f64, 6, 6>`；只在关节维度上使用动态 slice 循环。`J^T e` 按每个
 关节的连续 6 元素列计算，避免动态矩阵分配。
 
-先尝试让固定和动态 API 完全调用同一个 IK kernel。如果固定 IK 回退超过 10%，允许
+先尝试让固定和动态 API 完全调用同一个 IK kernel。如果测量显示固定 IK 明显变慢，允许
 固定 API 保留 nalgebra 固定矩阵的线性代数包装，动态 API 使用 slice 循环；FK、
 Jacobian、误差计算、收敛条件和错误处理仍必须共享。
 
@@ -343,7 +348,7 @@ Jacobian、误差计算、收敛条件和错误处理仍必须共享。
 - `InvalidOptions`、`NonFiniteInput`、`NumericalFailure`、
   `JointLimitViolation` 和 `NotConverged` 行为保持；
 - Workspace 创建后，每轮及完整求解不分配；
-- 固定 IK 回退不超过 10%，动态 IK 回退不超过 15%。
+- 记录固定与动态 IK 的性能变化。
 
 ### 阶段 7：API 整理与 FFI 准备
 
@@ -392,19 +397,10 @@ Jacobian、误差计算、收敛条件和错误处理仍必须共享。
 FK、Jacobian into、加速度、gravity into、RNEA into 和 IK 的计算期分配次数必须为零。
 现有固定 API 的无分配保证也继续验证。
 
-## 性能验收
+## 性能测量
 
-| 路径 | 固定 API 最大回退 | 动态 API 相对固定 API最大回退 |
-|---|---:|---:|
-| FK | 5% | 10% |
-| Jacobian | 5% | 10% |
-| Velocity | 5% | 10% |
-| Acceleration | 5% | 10% |
-| Gravity | 5% | 10% |
-| RNEA | 5% | 10% |
-| IK | 10% | 15% |
-
-超出阈值时按以下顺序排查：
+不设置性能通过或失败阈值。每个阶段记录固定 API 重构前后的变化，以及动态 API 相对固定
+API 的开销；数据用于发现问题和指导优化，不作为合并门禁。出现明显变化时按以下顺序排查：
 
 1. 计算期是否出现堆分配或容量调整；
 2. 是否清零了本应完整覆盖的 buffer；
@@ -415,7 +411,7 @@ FK、Jacobian into、加速度、gravity into、RNEA into 和 IK 的计算期分
 7. 是否重复验证或复制完整输入输出；
 8. 是否引入锁或 trait object 动态分派。
 
-不能为达到阈值引入 `unsafe`。如果安全 slice kernel 无法满足目标，应先评估 API 和代码
+不能为追求性能引入 `unsafe`。如果安全 slice kernel 的测量结果不理想，应先评估 API 和代码
 结构上的折中。
 
 ## 建议 PR 拆分
@@ -464,14 +460,12 @@ FK、Jacobian into、加速度、gravity into、RNEA into 和 IK 的计算期分
 
 如果 bounds check 或 IK 出现明显回退，额外预留 2 至 4 天 profiling 和针对性优化。
 
-## 评审决策
-
-实施前需要确认：
+## 已确认决策
 
 1. 使用统一 `Workspace`，还是拆成 `KinematicsWorkspace` 与
-   `DynamicsWorkspace`。本计划推荐统一 Workspace。
-2. 是否将字段私有的 `LinkId` 作为正式公开类型。本计划推荐公开。
-3. Jacobian 是否正式规定为 column-major。本计划推荐保持 nalgebra/Eigen 默认布局。
-4. 动态 API 是否采用 `*_slice` 和 `*_slice_into` 命名。
-5. 是否接受固定 API 5%、IK 10% 的人工性能评审线。
-6. 动态 API 是直接作为 0.x 公共接口发布，还是先标记为实验性接口。
+   `DynamicsWorkspace`：使用统一 Workspace。
+2. 将字段私有的 `LinkId` 作为正式公开类型。
+3. Jacobian 正式规定为 column-major，保持 nalgebra/Eigen 默认布局。
+4. 删除固定 API 后，动态 API 沿用 `forward_kinematics`、`jacobian`、`gravity` 等原名称。
+5. 性能只测量和记录，不设置人工评审线。
+6. 动态 API 直接作为 0.x 正式公共接口发布，不标记为实验性接口。
