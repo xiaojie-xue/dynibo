@@ -1,6 +1,6 @@
 use std::{hint::black_box, path::PathBuf};
 
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use dyno::{Frame, IndexedLoad, InverseKinematicsOptions, LinkId, Robot, Twist, Wrench};
 use nalgebra::Vector3;
 
@@ -167,6 +167,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
 
 fn benchmark_tree_case(c: &mut Criterion) {
     let case = BenchmarkCase::new("benches/data/test_tree_7.urdf");
+    benchmark_case(c, &case);
     let left = case.arm.link_id("left_tool").unwrap();
     let right = case.arm.link_id("right_tool").unwrap();
     let loads = [
@@ -224,6 +225,126 @@ fn benchmark_tree_case(c: &mut Criterion) {
     rnea.finish();
 }
 
+fn benchmark_target_depths(c: &mut Criterion) {
+    let case = BenchmarkCase::new("benches/data/test_arm_40.urdf");
+    let targets = [
+        ("root", case.arm.link_id("test_base_link").unwrap()),
+        ("depth_1", case.arm.link_id("test_link_1").unwrap()),
+        ("depth_10", case.arm.link_id("test_link_10").unwrap()),
+        ("depth_40", case.arm.link_id("test_link_40").unwrap()),
+    ];
+
+    let mut fk = c.benchmark_group("target_depth/40joint/forward_kinematics");
+    for &(depth, target) in &targets {
+        let mut workspace = case.arm.workspace();
+        fk.bench_with_input(BenchmarkId::from_parameter(depth), &target, |b, &target| {
+            b.iter(|| {
+                black_box(
+                    case.arm
+                        .forward_kinematics(black_box(&case.q), target, &mut workspace)
+                        .unwrap(),
+                )
+            });
+        });
+    }
+    fk.finish();
+
+    let mut jacobian = c.benchmark_group("target_depth/40joint/jacobian");
+    for &(depth, target) in &targets {
+        let mut workspace = case.arm.workspace();
+        let mut output = vec![0.0; 6 * case.arm.joint_count()];
+        jacobian.bench_with_input(BenchmarkId::from_parameter(depth), &target, |b, &target| {
+            b.iter(|| {
+                case.arm
+                    .jacobian(
+                        black_box(&case.q),
+                        target,
+                        &mut workspace,
+                        black_box(&mut output),
+                    )
+                    .unwrap();
+                black_box(&output);
+            });
+        });
+    }
+    jacobian.finish();
+
+    let mut velocity = c.benchmark_group("target_depth/40joint/forward_velocity");
+    for &(depth, target) in &targets {
+        let mut workspace = case.arm.workspace();
+        velocity.bench_with_input(BenchmarkId::from_parameter(depth), &target, |b, &target| {
+            b.iter(|| {
+                black_box(
+                    case.arm
+                        .forward_velocity_kinematics(
+                            black_box(&case.q),
+                            black_box(&case.qd),
+                            target,
+                            &case.base,
+                            &Frame::identity(),
+                            &mut workspace,
+                        )
+                        .unwrap(),
+                )
+            });
+        });
+    }
+    velocity.finish();
+
+    let mut acceleration = c.benchmark_group("target_depth/40joint/forward_acceleration");
+    for &(depth, target) in &targets {
+        let mut workspace = case.arm.workspace();
+        acceleration.bench_with_input(BenchmarkId::from_parameter(depth), &target, |b, &target| {
+            b.iter(|| {
+                black_box(
+                    case.arm
+                        .forward_acceleration_kinematics(
+                            black_box(&case.q),
+                            black_box(&case.qd),
+                            black_box(&case.qdd),
+                            target,
+                            &mut workspace,
+                        )
+                        .unwrap(),
+                )
+            });
+        });
+    }
+    acceleration.finish();
+
+    let mut inverse_kinematics = c.benchmark_group("target_depth/40joint/inverse_kinematics");
+    for &(depth, target) in &targets[1..] {
+        let mut setup_workspace = case.arm.workspace();
+        let desired = case
+            .arm
+            .forward_kinematics(&case.q, target, &mut setup_workspace)
+            .unwrap();
+        let initial = vec![0.0; case.arm.joint_count()];
+        let mut output = vec![0.0; case.arm.joint_count()];
+        let mut workspace = case.arm.workspace();
+        inverse_kinematics.bench_with_input(
+            BenchmarkId::from_parameter(depth),
+            &target,
+            |b, &target| {
+                b.iter(|| {
+                    case.arm
+                        .inverse_kinematics(
+                            black_box(&initial),
+                            target,
+                            &desired,
+                            InverseKinematicsOptions::default(),
+                            &mut workspace,
+                            black_box(&mut output),
+                        )
+                        .unwrap();
+                    black_box(&output);
+                });
+            },
+        );
+    }
+    inverse_kinematics.finish();
+}
+
 fn benchmark_inverse_kinematics(c: &mut Criterion, case: &BenchmarkCase) {
     let mut setup_workspace = case.arm.workspace();
     let desired = case
@@ -259,6 +380,7 @@ fn benchmark_core(c: &mut Criterion) {
     benchmark_inverse_kinematics(c, &case_4);
     benchmark_case(c, &BenchmarkCase::new("benches/data/test_arm_40.urdf"));
     benchmark_tree_case(c);
+    benchmark_target_depths(c);
 }
 
 criterion_group!(benches, benchmark_core);
