@@ -57,13 +57,21 @@ class PackageTests(unittest.TestCase):
         self.assertNotEqual(loaded, gravity)
 
     def test_errors_cross_the_package_boundary(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "does not exist"):
+        with self.assertRaisesRegex(ValueError, "does not exist"):
             self.robot.link_id("missing")
-        with self.assertRaisesRegex(RuntimeError, "expected 4 elements"):
+        with self.assertRaisesRegex(ValueError, "expected 4 elements"):
             self.robot.jacobian(self.q[:-1], self.target)
         pose = dyno.Pose(rotation_xyzw=(0.0, 0.0, 0.0, 0.0))
-        with self.assertRaisesRegex(RuntimeError, "zero quaternion"):
+        with self.assertRaisesRegex(ValueError, "zero quaternion"):
             self.robot.inverse_kinematics(self.q, self.target, pose)
+
+        with self.assertRaises(dyno.ModelError):
+            dyno.Robot(URDF.with_name("missing-model.urdf"))
+
+        unreachable = dyno.Pose(translation=(100.0, 0.0, 0.0))
+        options = dyno.IkOptions(max_iterations=1)
+        with self.assertRaises(dyno.SolverError):
+            self.robot.inverse_kinematics(self.q, self.target, unreachable, options)
 
     def test_non_default_frames_options_and_loads(self) -> None:
         moving = [0.1, -0.2, 0.3, -0.4]
@@ -135,7 +143,7 @@ class PackageTests(unittest.TestCase):
         with dyno.Robot(URDF) as managed:
             self.assertEqual(managed.name, "test_arm")
         managed.close()
-        with self.assertRaisesRegex(RuntimeError, "robot must not be null"):
+        with self.assertRaisesRegex(ValueError, "robot must not be null"):
             managed.forward_kinematics(self.q, self.target)
 
 

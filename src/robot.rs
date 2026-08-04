@@ -756,7 +756,7 @@ impl Robot {
         self.validate_output("IK step workspace", step)?;
         validate_inverse_kinematics_options(options)?;
         if !initial_q.iter().all(|value| value.is_finite()) {
-            return Err(Error::NonFiniteInput {
+            return Err(Error::NonFiniteIkInput {
                 input: "initial joint vector",
             });
         }
@@ -767,7 +767,7 @@ impl Robot {
             .chain(desired.rotation.coords.iter())
             .all(|value| value.is_finite())
         {
-            return Err(Error::NonFiniteInput {
+            return Err(Error::NonFiniteIkInput {
                 input: "target frame",
             });
         }
@@ -790,7 +790,7 @@ impl Robot {
                 return Ok(());
             }
             if iteration == options.max_iterations {
-                return Err(Error::NotConverged {
+                return Err(Error::IkNotConverged {
                     iterations: options.max_iterations,
                     translation_error: translation_error_norm,
                     rotation_error: rotation_error_norm,
@@ -817,7 +817,7 @@ impl Robot {
             // nalgebra's Cholesky decomposition reads only the lower triangle.
             let Some(weighted_error) = regularized.cholesky().map(|factor| factor.solve(&error))
             else {
-                return Err(Error::NumericalFailure {
+                return Err(Error::IkNumericalFailure {
                     iteration: iteration + 1,
                 });
             };
@@ -836,7 +836,7 @@ impl Robot {
             }
             let step_norm = step_norm_squared.sqrt();
             if !step_norm.is_finite() {
-                return Err(Error::NumericalFailure {
+                return Err(Error::IkNumericalFailure {
                     iteration: iteration + 1,
                 });
             }
@@ -857,7 +857,7 @@ impl Robot {
     fn validate_inverse_kinematics_solution(&self, q: &[f64]) -> Result<()> {
         for (joint_index, (joint, &position)) in self.joints.iter().zip(q).enumerate() {
             if joint.is_over_limit(position) {
-                return Err(Error::JointLimitViolation {
+                return Err(Error::IkJointLimitViolation {
                     joint_index,
                     joint: joint.name().to_owned(),
                     position,
@@ -909,9 +909,10 @@ impl Robot {
 
 fn validate_inverse_kinematics_options(options: InverseKinematicsOptions) -> Result<()> {
     if options.max_iterations == 0 {
-        return Err(Error::InvalidOptions(
-            "max_iterations must be greater than zero",
-        ));
+        return Err(Error::InvalidIkOptions {
+            option: "max_iterations",
+            reason: "must be greater than zero",
+        });
     }
     for (name, value) in [
         ("translation_tolerance", options.translation_tolerance),
@@ -920,14 +921,10 @@ fn validate_inverse_kinematics_options(options: InverseKinematicsOptions) -> Res
         ("max_step_norm", options.max_step_norm),
     ] {
         if !value.is_finite() || value <= 0.0 {
-            return Err(Error::InvalidOptions(match name {
-                "translation_tolerance" => {
-                    "translation_tolerance must be finite and greater than zero"
-                }
-                "rotation_tolerance" => "rotation_tolerance must be finite and greater than zero",
-                "damping" => "damping must be finite and greater than zero",
-                _ => "max_step_norm must be finite and greater than zero",
-            }));
+            return Err(Error::InvalidIkOptions {
+                option: name,
+                reason: "must be finite and greater than zero",
+            });
         }
     }
     Ok(())

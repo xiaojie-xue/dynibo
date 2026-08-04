@@ -99,6 +99,22 @@ class IkOptions:
     max_step_norm: float = 0.5
 
 
+class DynoError(RuntimeError):
+    """Base class for native dyno model and calculation errors."""
+
+
+class ModelError(DynoError):
+    """A robot description could not be loaded or represented."""
+
+
+class SolverError(DynoError):
+    """An iterative numerical calculation did not produce a valid result."""
+
+
+class PanicError(DynoError):
+    """The native library caught an unexpected internal panic."""
+
+
 _lib = _load_library()
 _robot_p = ct.c_void_p
 _workspace_p = ct.c_void_p
@@ -159,8 +175,17 @@ _lib.dyno_inverse_dynamics.restype = ct.c_int
 
 def _check(status: int) -> None:
     if status != 0:
-        message = _lib.dyno_last_error_message()
-        raise RuntimeError(message.decode("utf-8", "replace") if message else "unknown dyno error")
+        raw_message = _lib.dyno_last_error_message()
+        message = raw_message.decode("utf-8", "replace") if raw_message else "unknown dyno error"
+        if status == 1:
+            raise ValueError(message)
+        if status == 2:
+            raise ModelError(message)
+        if status == 3:
+            raise PanicError(message)
+        if status == 4:
+            raise SolverError(message)
+        raise DynoError(message)
 
 
 def _array(values: Sequence[float], name: str) -> ct.Array[ct.c_double]:

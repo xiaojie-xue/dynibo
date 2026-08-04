@@ -89,6 +89,14 @@ calculation loop. Use a separate workspace for each concurrent calculation;
 Pass `InverseKinematicsOptions::default()` when the default solver settings are
 appropriate.
 
+## Errors
+
+Fallible Rust APIs return the non-exhaustive `dyno::Error` enum. Match the
+structured variants when details matter, and use `Error::category()` for the
+stable `InvalidInput`, `Model`, or `Solver` classification used by language
+bindings. Downstream exhaustive matches should include a wildcard arm so new
+specific errors can be added without breaking callers.
+
 Joint inputs and ordinary outputs must contain `robot.joint_count()` elements.
 Jacobian output must contain `6 * robot.joint_count()` elements. A mismatch
 returns `Error::WrongSliceLength`; methods never resize caller buffers.

@@ -12,7 +12,10 @@ use std::{
     ptr,
 };
 
-use dyno::{Frame, IndexedLoad, InverseKinematicsOptions, LinkId, Robot, Twist, Workspace, Wrench};
+use dyno::{
+    ErrorCategory, Frame, IndexedLoad, InverseKinematicsOptions, LinkId, Robot, Twist, Workspace,
+    Wrench,
+};
 use nalgebra::{Quaternion, Translation3, UnitQuaternion, Vector3};
 
 thread_local! {
@@ -27,10 +30,12 @@ pub enum DynoStatus {
     Ok = 0,
     /// A pointer, length, UTF-8 string, or quaternion was invalid.
     InvalidArgument = 1,
-    /// The core library rejected the model or calculation.
-    Error = 2,
+    /// A robot description could not be loaded or represented.
+    ModelError = 2,
     /// A Rust panic was caught at the ABI boundary.
     Panic = 3,
+    /// An iterative numerical calculation failed to produce a valid result.
+    SolverError = 4,
 }
 
 /// Translation plus an `(x, y, z, w)` unit quaternion.
@@ -141,8 +146,17 @@ fn invalid(message: impl Into<String>) -> (DynoStatus, String) {
     (DynoStatus::InvalidArgument, message.into())
 }
 
-fn core_error(error: impl std::fmt::Display) -> (DynoStatus, String) {
-    (DynoStatus::Error, error.to_string())
+fn core_error(error: dyno::Error) -> (DynoStatus, String) {
+    let status = match error.category() {
+        ErrorCategory::InvalidInput => DynoStatus::InvalidArgument,
+        ErrorCategory::Model => DynoStatus::ModelError,
+        ErrorCategory::Solver => DynoStatus::SolverError,
+    };
+    (status, error.to_string())
+}
+
+fn model_error(message: impl Into<String>) -> (DynoStatus, String) {
+    (DynoStatus::ModelError, message.into())
 }
 
 unsafe fn required_ref<'a, T>(
@@ -300,7 +314,8 @@ pub unsafe extern "C" fn dyno_robot_load_urdf(
             .iter()
             .map(|link| inner.link_id(link.name()).expect("link came from robot"))
             .collect();
-        let name = CString::new(inner.name()).map_err(|_| core_error("robot name contains NUL"))?;
+        let name =
+            CString::new(inner.name()).map_err(|_| model_error("robot name contains NUL"))?;
         *output = Box::into_raw(Box::new(DynoRobot {
             inner,
             link_ids,
@@ -778,7 +793,7 @@ mod tests {
             );
             assert_eq!(
                 dyno_robot_link_id(robot, c"missing".as_ptr(), &mut target),
-                DynoStatus::Error
+                DynoStatus::InvalidArgument
             );
             let invalid_utf8 = [0xff_u8, 0];
             assert_eq!(
@@ -951,7 +966,7 @@ mod tests {
                     jacobian.as_mut_ptr(),
                     23,
                 ),
-                DynoStatus::Error
+                DynoStatus::InvalidArgument
             );
             assert_eq!(
                 dyno_jacobian(
@@ -963,11 +978,11 @@ mod tests {
                     jacobian.as_mut_ptr(),
                     24,
                 ),
-                DynoStatus::Error
+                DynoStatus::InvalidArgument
             );
             assert_eq!(
                 dyno_jacobian(robot, workspace, q.as_ptr(), 4, target, ptr::null_mut(), 0,),
-                DynoStatus::Error
+                DynoStatus::InvalidArgument
             );
 
             let zero_quaternion = DynoPose {
@@ -1112,5 +1127,29 @@ mod tests {
         });
         assert_eq!(child.join().unwrap(), "child thread");
         assert_eq!(last_error(), "main thread");
+    }
+
+    #[test]
+    fn core_errors_map_to_stable_abi_categories() {
+        assert_eq!(
+            core_error(dyno::Error::InvalidModel("broken tree".to_owned())).0,
+            DynoStatus::ModelError
+        );
+        assert_eq!(
+            core_error(dyno::Error::UnknownLink {
+                name: "missing".to_owned(),
+            })
+            .0,
+            DynoStatus::InvalidArgument
+        );
+        assert_eq!(
+            core_error(dyno::Error::IkNotConverged {
+                iterations: 1,
+                translation_error: 1.0,
+                rotation_error: 0.0,
+            })
+            .0,
+            DynoStatus::SolverError
+        );
     }
 }

@@ -87,6 +87,9 @@ with Robot("robot.urdf") as robot:
 依次为角速度三分量和线速度三分量。`Robot` 内含一个可复用 Workspace，不应由多个线程
 同时调用；并行计算请为每个工作线程创建一个 `Robot`。
 
+native 参数错误会抛出 `ValueError`；模型加载错误抛出 `dyno.ModelError`，迭代求解错误
+抛出 `dyno.SolverError`，后两者都继承 `dyno.DynoError` 和 `RuntimeError`。
+
 本机构建 wheel：
 
 ```bash
@@ -154,6 +157,10 @@ dyno_robot_destroy(robot);
 所有 fallible C 函数返回 `DynoStatus`。非零时用 `dyno_last_error_message()` 读取当前线程
 的错误文本。opaque handle 必须由对应的 `destroy` 函数释放。
 
+状态码按调用方处理方式分为 `DYNO_STATUS_INVALID_ARGUMENT`、
+`DYNO_STATUS_MODEL_ERROR`、`DYNO_STATUS_SOLVER_ERROR` 和 `DYNO_STATUS_PANIC`。
+`DYNO_STATUS_ERROR` 继续作为 `DYNO_STATUS_MODEL_ERROR` 的兼容别名。
+
 ### C++17
 
 ```cpp
@@ -168,7 +175,8 @@ auto gravity = robot.gravity(q);
 ```
 
 C++ header 自动管理 Robot/Workspace，并把 C 错误转成 `dyno::Error`。一个 wrapper 对象同样
-不应被多个线程同时计算。
+不应被多个线程同时计算；可以通过 `dyno::Error::status()` 获取原始 `DynoStatus` 并进行
+程序化处理。
 
 CMake consumer：
 

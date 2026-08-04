@@ -93,6 +93,10 @@ followed by three linear components. Each `Robot` owns one reusable workspace
 and must not be used for calculations from multiple threads at the same time.
 Create a separate `Robot` for each worker thread.
 
+Native invalid arguments are raised as `ValueError`. Model-loading failures
+raise `dyno.ModelError`, while iterative solver failures raise
+`dyno.SolverError`; both derive from `dyno.DynoError` and `RuntimeError`.
+
 Build a wheel locally:
 
 ```bash
@@ -164,6 +168,11 @@ Every fallible C function returns `DynoStatus`. When it is nonzero, use
 `dyno_last_error_message()` to read the current thread's error message. Every
 opaque handle must be released with its matching `destroy` function.
 
+Statuses are grouped by caller action: `DYNO_STATUS_INVALID_ARGUMENT`,
+`DYNO_STATUS_MODEL_ERROR`, `DYNO_STATUS_SOLVER_ERROR`, and
+`DYNO_STATUS_PANIC`. `DYNO_STATUS_ERROR` remains a compatibility alias for
+`DYNO_STATUS_MODEL_ERROR`.
+
 ### C++17
 
 ```cpp
@@ -179,7 +188,8 @@ auto gravity = robot.gravity(q);
 
 The C++ header manages Robot and Workspace lifetimes and converts C errors into
 `dyno::Error`. A wrapper object must likewise not be used concurrently for
-calculations from multiple threads.
+calculations from multiple threads. `dyno::Error::status()` preserves the
+original `DynoStatus` for programmatic handling.
 
 For a CMake consumer:
 

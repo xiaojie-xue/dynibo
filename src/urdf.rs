@@ -140,7 +140,12 @@ fn robot_joint(joint: &urdf_rs::Joint) -> Result<Joint> {
         UrdfJointType::Revolute | UrdfJointType::Continuous => JointType::Revolute,
         UrdfJointType::Prismatic => JointType::Prismatic,
         UrdfJointType::Fixed => JointType::Fixed,
-        _ => return Err(Error::UnsupportedJoint(joint.name.clone())),
+        _ => {
+            return Err(Error::UnsupportedJointType {
+                joint: joint.name.clone(),
+                joint_type: format!("{:?}", joint.joint_type).to_ascii_lowercase(),
+            });
+        }
     };
     let (lower_limit, upper_limit) = if joint.joint_type == UrdfJointType::Continuous {
         (f64::NEG_INFINITY, f64::INFINITY)
@@ -295,7 +300,10 @@ mod tests {
         robot.joints[0].joint_type = UrdfJointType::Planar;
         assert!(matches!(
             tree_model(&robot),
-            Err(Error::UnsupportedJoint(ref name)) if name == "shoulder"
+            Err(Error::UnsupportedJointType {
+                ref joint,
+                ref joint_type,
+            }) if joint == "shoulder" && joint_type == "planar"
         ));
 
         let mut robot = chain();

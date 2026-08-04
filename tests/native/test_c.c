@@ -103,9 +103,11 @@ int main(int argc, char **argv) {
     }
 
     CHECK(dyno_jacobian(
-        robot, workspace, q, n - 1, target, jacobian, 6 * n) != DYNO_STATUS_OK);
+        robot, workspace, q, n - 1, target, jacobian, 6 * n)
+        == DYNO_STATUS_INVALID_ARGUMENT);
     CHECK(strlen(dyno_last_error_message()) > 0);
-    CHECK(dyno_robot_link_id(robot, "missing", &target) == DYNO_STATUS_ERROR);
+    CHECK(dyno_robot_link_id(robot, "missing", &target)
+        == DYNO_STATUS_INVALID_ARGUMENT);
     CHECK(dyno_robot_link_id(robot, "test_link_4", &target) == DYNO_STATUS_OK);
     CHECK(strlen(dyno_last_error_message()) == 0);
 

@@ -8,7 +8,7 @@ mod robot;
 mod spatial;
 mod urdf;
 
-pub use error::{Error, Result};
+pub use error::{Error, ErrorCategory, Result};
 pub use model::{Joint, JointType, Link};
 pub use robot::{IndexedLoad, InverseKinematicsOptions, LinkId, Robot, Workspace};
 pub use spatial::{Frame, Twist, Wrench};

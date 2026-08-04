@@ -554,7 +554,7 @@ fn inverse_kinematics_reports_specific_solver_errors() {
         .unwrap_err();
     assert!(matches!(
         error,
-        Error::NotConverged {
+        Error::IkNotConverged {
             iterations: 2,
             translation_error,
             rotation_error,
@@ -573,7 +573,13 @@ fn inverse_kinematics_reports_specific_solver_errors() {
             invalid_options,
         )
         .unwrap_err();
-    assert!(matches!(error, Error::InvalidOptions(_)));
+    assert!(matches!(
+        error,
+        Error::InvalidIkOptions {
+            option: "damping",
+            reason: "must be finite and greater than zero",
+        }
+    ));
 
     let mut non_finite_q = initial_q;
     non_finite_q[0] = f64::NAN;
@@ -587,7 +593,7 @@ fn inverse_kinematics_reports_specific_solver_errors() {
         .unwrap_err();
     assert!(matches!(
         error,
-        Error::NonFiniteInput {
+        Error::NonFiniteIkInput {
             input: "initial joint vector"
         }
     ));
@@ -606,7 +612,7 @@ fn inverse_kinematics_reports_specific_solver_errors() {
         .unwrap_err();
     assert!(matches!(
         error,
-        Error::JointLimitViolation {
+        Error::IkJointLimitViolation {
             joint_index: 0,
             ref joint,
             position,
@@ -650,7 +656,7 @@ fn inverse_kinematics_validates_every_option_and_target_component() {
     for options in invalid_options {
         assert!(matches!(
             arm.test_inverse_kinematics(&initial_q, target, &desired, options),
-            Err(Error::InvalidOptions(_))
+            Err(Error::InvalidIkOptions { .. })
         ));
     }
 
@@ -663,7 +669,7 @@ fn inverse_kinematics_validates_every_option_and_target_component() {
             &non_finite_target,
             InverseKinematicsOptions::default(),
         ),
-        Err(Error::NonFiniteInput {
+        Err(Error::NonFiniteIkInput {
             input: "target frame"
         })
     ));
@@ -680,7 +686,7 @@ fn inverse_kinematics_validates_every_option_and_target_component() {
             &unreachable,
             numerically_singular,
         ),
-        Err(Error::NumericalFailure { iteration: 1 })
+        Err(Error::IkNumericalFailure { iteration: 1 })
     ));
 
     let rotation_only = Frame::from_parts(
@@ -698,7 +704,7 @@ fn inverse_kinematics_validates_every_option_and_target_component() {
             &rotation_only,
             one_iteration,
         ),
-        Err(Error::NotConverged {
+        Err(Error::IkNotConverged {
             iterations: 1,
             translation_error,
             rotation_error,
@@ -713,7 +719,7 @@ fn inverse_kinematics_validates_every_option_and_target_component() {
             &overflowing_target,
             InverseKinematicsOptions::default(),
         ),
-        Err(Error::NumericalFailure { iteration: 1 })
+        Err(Error::IkNumericalFailure { iteration: 1 })
     ));
 }
 

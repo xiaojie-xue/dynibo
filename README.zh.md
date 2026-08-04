@@ -93,6 +93,12 @@ loop {
 
 如果适用默认求解配置，显式传入 `InverseKinematicsOptions::default()` 即可。
 
+## 错误处理
+
+Rust 的 fallible API 返回非穷举的 `dyno::Error` 枚举。需要具体上下文时匹配结构化变体；
+需要稳定的粗粒度分类时使用 `Error::category()`，其 `InvalidInput`、`Model` 和 `Solver`
+分类也供其他语言绑定统一映射。下游匹配应保留 wildcard 分支，以便库后续增加具体错误。
+
 所有关节输入和普通输出必须包含 `robot.joint_count()` 个元素。Jacobian 输出必须包含
 `6 * robot.joint_count()` 个元素。长度不匹配会返回：
 

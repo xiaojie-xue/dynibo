@@ -69,7 +69,8 @@ int main(int argc, char** argv) {
     try {
         static_cast<void>(assigned.link_id("missing"));
     } catch (const dyno::Error& error) {
-        caught = std::string(error.what()).find("does not exist") != std::string::npos;
+        caught = error.status() == DYNO_STATUS_INVALID_ARGUMENT
+            && std::string(error.what()).find("does not exist") != std::string::npos;
     }
     CHECK(caught);
 
@@ -78,21 +79,24 @@ int main(int argc, char** argv) {
     try {
         static_cast<void>(assigned.forward_velocity(q, short_q, target));
     } catch (const dyno::Error& error) {
-        caught = std::string(error.what()).find("same length") != std::string::npos;
+        caught = error.status() == DYNO_STATUS_INVALID_ARGUMENT
+            && std::string(error.what()).find("same length") != std::string::npos;
     }
     CHECK(caught);
     caught = false;
     try {
         static_cast<void>(assigned.forward_acceleration(q, q, short_q, target));
     } catch (const dyno::Error& error) {
-        caught = std::string(error.what()).find("same length") != std::string::npos;
+        caught = error.status() == DYNO_STATUS_INVALID_ARGUMENT
+            && std::string(error.what()).find("same length") != std::string::npos;
     }
     CHECK(caught);
     caught = false;
     try {
         static_cast<void>(assigned.inverse_dynamics(q, short_q, q));
     } catch (const dyno::Error& error) {
-        caught = std::string(error.what()).find("same length") != std::string::npos;
+        caught = error.status() == DYNO_STATUS_INVALID_ARGUMENT
+            && std::string(error.what()).find("same length") != std::string::npos;
     }
     CHECK(caught);
     return 0;

@@ -27,9 +27,13 @@ typedef struct DynoWorkspace DynoWorkspace;
 typedef enum DynoStatus {
     DYNO_STATUS_OK = 0,
     DYNO_STATUS_INVALID_ARGUMENT = 1,
-    DYNO_STATUS_ERROR = 2,
-    DYNO_STATUS_PANIC = 3
+    DYNO_STATUS_MODEL_ERROR = 2,
+    DYNO_STATUS_PANIC = 3,
+    DYNO_STATUS_SOLVER_ERROR = 4
 } DynoStatus;
+
+/* Compatibility alias retained for clients of dyno 0.1.0. */
+#define DYNO_STATUS_ERROR DYNO_STATUS_MODEL_ERROR
 
 typedef struct DynoPose {
     double translation[3];

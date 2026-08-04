@@ -12,13 +12,22 @@ namespace dyno {
 
 class Error : public std::runtime_error {
 public:
-    using std::runtime_error::runtime_error;
+    explicit Error(const std::string& message)
+        : Error(DYNO_STATUS_MODEL_ERROR, message) {}
+
+    Error(DynoStatus status, const std::string& message)
+        : std::runtime_error(message), status_(status) {}
+
+    DynoStatus status() const noexcept { return status_; }
+
+private:
+    DynoStatus status_;
 };
 
 inline void check(DynoStatus status) {
     if (status != DYNO_STATUS_OK) {
         const char* message = dyno_last_error_message();
-        throw Error(message != nullptr ? message : "unknown dyno error");
+        throw Error(status, message != nullptr ? message : "unknown dyno error");
     }
 }
 
@@ -107,7 +116,8 @@ public:
         std::size_t target, const DynoPose& base = identity_pose(),
         const DynoPose& tool = identity_pose()) {
         if (q.size() != qd.size()) {
-            throw Error("q and qd must have the same length");
+            throw Error(DYNO_STATUS_INVALID_ARGUMENT,
+                        "q and qd must have the same length");
         }
         DynoTwist result{};
         check(dyno_forward_velocity(robot_, workspace_, q.data(), qd.data(),
@@ -119,7 +129,8 @@ public:
         const std::vector<double>& q, const std::vector<double>& qd,
         const std::vector<double>& qdd, std::size_t target) {
         if (q.size() != qd.size() || q.size() != qdd.size()) {
-            throw Error("q, qd, and qdd must have the same length");
+            throw Error(DYNO_STATUS_INVALID_ARGUMENT,
+                        "q, qd, and qdd must have the same length");
         }
         DynoTwist result{};
         check(dyno_forward_acceleration(
@@ -145,7 +156,8 @@ public:
         DynoTwist base_velocity = {}, DynoTwist base_acceleration = {},
         const std::vector<DynoLoad>& loads = {}) {
         if (q.size() != qd.size() || q.size() != qdd.size()) {
-            throw Error("q, qd, and qdd must have the same length");
+            throw Error(DYNO_STATUS_INVALID_ARGUMENT,
+                        "q, qd, and qdd must have the same length");
         }
         std::vector<double> result(joint_count());
         check(dyno_inverse_dynamics(
