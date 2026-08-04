@@ -1,4 +1,6 @@
-# Rust、Python 与 C/C++ 打包和使用
+# Rust、Python 与 C/C++ 安装和发布
+
+[English](RELEASING.md) | 简体中文
 
 三种语言入口共用 `dyno` Rust 核心，不会重复实现运动学或动力学算法：
 
@@ -102,7 +104,7 @@ python -m twine check wheelhouse/*
 python -m twine upload wheelhouse/*
 ```
 
-上传前同步 `pyproject.toml`、`setup.py`、`python/dyno/__init__.py` 与 Cargo 包版本。
+上传前同步 `pyproject.toml`、`setup.py`、`bindings/python/dyno/__init__.py` 与 Cargo 包版本。
 PyPI token 应通过 CI secret 或 trusted publishing 提供。
 
 ## C/C++ package
@@ -186,7 +188,7 @@ cc app.c $(pkg-config --cflags --libs dyno)
 
 ## 发布前检查
 
-仓库的 [Package CI](.github/workflows/package-ci.yml) 在每次 push、pull request 和手动触发
+仓库的 [Package CI](../.github/workflows/package-ci.yml) 在每次 push、pull request 和手动触发
 时构建真实发布产物，并上传为 Actions artifact：
 
 - Rust：生成 `.crate`，解压到源码 workspace 外，再运行包中携带的全部测试；
@@ -217,5 +219,5 @@ bash ci/test-all.sh
 分支覆盖率至少为 75%。
 
 `ci/test-rust-package.sh`、`ci/test-native-package.py` 和 cibuildwheel 的
-`package-tests/python/test_package.py` 由 GitHub Actions 调用，分别验证发布包，不属于本地
+`tests/python/test_package.py` 由 GitHub Actions 调用，分别验证发布包，不属于本地
 默认单元测试流程。

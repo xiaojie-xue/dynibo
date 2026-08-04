@@ -5,7 +5,7 @@
 
 [English](README.md) | 简体中文
 
-[Rust、Python 与 C/C++ 安装和发布指南](PACKAGING.zh.md)
+[Rust、Python 与 C/C++ 安装和发布指南](docs/RELEASING.zh.md)
 
 `dyno` 是一个轻量、可靠、基于 Rust 的树状机器人运动学与动力学库。它在运行时从
 URDF 确定 link、关节数量和父子拓扑，并通过 slice 与显式 `Workspace` 提供一套统一的
@@ -41,7 +41,7 @@ URDF 确定 link、关节数量和父子拓扑，并通过 slice 与显式 `Work
 ## 基本使用
 
 Rust 用户可执行 `cargo add dyno`；Python 用户安装 `dyno-robotics`；C/C++ 用户使用仓库
-提供的 CMake package。完整安装、调用和发布命令见[多语言打包指南](PACKAGING.zh.md)。
+提供的 CMake package。完整安装、调用和发布命令见[多语言发布指南](docs/RELEASING.zh.md)。
 
 ```rust
 use dyno::{Frame, Robot};
@@ -217,7 +217,7 @@ cargo test -p dyno --features pinocchio-tests --tests
 
 本地单元测试只运行 Rust workspace 源码。GitHub Package CI 才会分别测试解包后的 Rust
 `.crate`、已安装的 Python package 与解包后的 C/C++ CPack 包；具体行为见
-[多语言打包指南](PACKAGING.zh.md#发布前检查)。Rust 测试覆盖有限差分 Jacobian 与加速度、
+[多语言发布指南](docs/RELEASING.zh.md#发布前检查)。Rust 测试覆盖有限差分 Jacobian 与加速度、
 数值动力学回归、树模型多分支载荷、Workspace 残留、模型归属、错误长度、IK 以及计算期
 零分配。
 覆盖率 CI 会生成 LLVM JSON 报告，并要求 Rust workspace 的行覆盖率不低于 85%、

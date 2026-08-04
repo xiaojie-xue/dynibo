@@ -5,7 +5,7 @@
 
 English | [简体中文](README.zh.md)
 
-Packaging and bindings: [中文指南](PACKAGING.zh.md)
+Installation and releases: [English guide](docs/RELEASING.md)
 
 `dyno` is a lightweight Rust library for tree-structured robot kinematics and
 dynamics. It discovers link, joint, and parent-child topology from URDF at
@@ -45,7 +45,7 @@ The core library contains no project-owned `unsafe` code.
 
 Install the Rust crate with `cargo add dyno`. Python users install
 `dyno-robotics`; C and C++ users can build the CMake package. See the
-[packaging guide](PACKAGING.zh.md) for complete install and release commands.
+[installation and release guide](docs/RELEASING.md) for complete commands.
 
 ```rust
 use dyno::{Frame, Robot};
@@ -195,7 +195,7 @@ cargo test -p dyno --features pinocchio-tests --tests
 
 Local unit tests cover only the Rust source workspace. GitHub Package CI tests
 the extracted Rust `.crate`, installed Python packages, and extracted C/C++
-CPack artifacts. See the [packaging guide](PACKAGING.zh.md#发布前检查) for the CI
+CPack artifacts. See the [release guide](docs/RELEASING.md#pre-release-checks) for the CI
 behavior. Tests cover finite-difference kinematics, dynamics regressions,
 branched loads, workspace residue and ownership, invalid lengths, IK, and
 allocation-free calculation.
