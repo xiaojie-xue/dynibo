@@ -88,6 +88,36 @@ class PackageTests(unittest.TestCase):
             self.robot.inverse_kinematics(self.q, self.target, pose, options), tuple(self.q)
         )
 
+    def test_pinocchio_numeric_reference(self) -> None:
+        q = [0.2, 1.0, -0.7, 0.4]
+        qd = [-0.3, 0.5, -0.2, 0.8]
+        qdd = [0.7, -0.4, 0.1, 0.3]
+        pose = self.robot.forward_kinematics(q, self.target)
+        for actual, expected in zip(
+            pose.translation,
+            (0.450338323287074, 0.09128809750443889, 0.46592677713692876),
+        ):
+            self.assertAlmostEqual(actual, expected, delta=2.0e-12)
+
+        gravity = self.robot.gravity(q)
+        expected_gravity = (
+            1.7763568394002505e-15,
+            39.629058959145354,
+            17.60815765611755,
+            0.053134179784508524,
+        )
+        dynamics = self.robot.inverse_dynamics(q, qd, qdd)
+        expected_dynamics = (
+            1.7649236924309104,
+            38.319908179086525,
+            17.136450444507805,
+            0.05169960944426318,
+        )
+        for actual, expected in zip(gravity, expected_gravity):
+            self.assertAlmostEqual(actual, expected, delta=2.0e-10)
+        for actual, expected in zip(dynamics, expected_dynamics):
+            self.assertAlmostEqual(actual, expected, delta=2.0e-10)
+
     def test_python_input_validation_and_lifecycle(self) -> None:
         with self.assertRaisesRegex(TypeError, "sequence of numbers"):
             self.robot.forward_kinematics(["not-a-number"] * 4, self.target)

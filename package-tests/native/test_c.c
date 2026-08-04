@@ -81,6 +81,27 @@ int main(int argc, char **argv) {
         CHECK(fabs(output[index]) < 1.0e-12);
     }
 
+    const double reference_q[4] = {0.2, 1.0, -0.7, 0.4};
+    const double reference_qd[4] = {-0.3, 0.5, -0.2, 0.8};
+    const double reference_qdd[4] = {0.7, -0.4, 0.1, 0.3};
+    const double expected_gravity[4] = {
+        1.7763568394002505e-15, 39.629058959145354,
+        17.60815765611755, 0.053134179784508524};
+    const double expected_dynamics[4] = {
+        1.7649236924309104, 38.319908179086525,
+        17.136450444507805, 0.05169960944426318};
+    check(dyno_gravity(robot, workspace, reference_q, n, &identity,
+                       NULL, 0, output, n));
+    for (size_t index = 0; index < n; ++index) {
+        CHECK(fabs(output[index] - expected_gravity[index]) < 2.0e-10);
+    }
+    check(dyno_inverse_dynamics(
+        robot, workspace, reference_q, reference_qd, reference_qdd, n,
+        &identity, zero_twist, zero_twist, NULL, 0, output, n));
+    for (size_t index = 0; index < n; ++index) {
+        CHECK(fabs(output[index] - expected_dynamics[index]) < 2.0e-10);
+    }
+
     CHECK(dyno_jacobian(
         robot, workspace, q, n - 1, target, jacobian, 6 * n) != DYNO_STATUS_OK);
     CHECK(strlen(dyno_last_error_message()) > 0);

@@ -36,6 +36,23 @@ int main(int argc, char** argv) {
     CHECK(assigned.inverse_dynamics(q, q, q).size() == assigned.joint_count());
     CHECK(assigned.inverse_kinematics(q, target, pose) == q);
 
+    const std::vector<double> reference_q{0.2, 1.0, -0.7, 0.4};
+    const std::vector<double> reference_qd{-0.3, 0.5, -0.2, 0.8};
+    const std::vector<double> reference_qdd{0.7, -0.4, 0.1, 0.3};
+    const std::vector<double> expected_gravity{
+        1.7763568394002505e-15, 39.629058959145354,
+        17.60815765611755, 0.053134179784508524};
+    const std::vector<double> expected_dynamics{
+        1.7649236924309104, 38.319908179086525,
+        17.136450444507805, 0.05169960944426318};
+    const auto reference_gravity = assigned.gravity(reference_q);
+    const auto reference_dynamics =
+        assigned.inverse_dynamics(reference_q, reference_qd, reference_qdd);
+    for (std::size_t index = 0; index < reference_q.size(); ++index) {
+        CHECK(std::abs(reference_gravity[index] - expected_gravity[index]) < 2.0e-10);
+        CHECK(std::abs(reference_dynamics[index] - expected_dynamics[index]) < 2.0e-10);
+    }
+
     const auto velocity = assigned.forward_velocity(q, q, target);
     const auto acceleration = assigned.forward_acceleration(q, q, q, target);
     for (double value : velocity.angular) CHECK(std::abs(value) < 1.0e-12);
