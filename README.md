@@ -136,23 +136,23 @@ These results compare Dyno with Pinocchio on an Intel Core i9-14900K using rustc
 output-buffer allocation are outside the timed region and reused. Both
 implementations receive the same URDF and joint inputs.
 
-Values are Criterion quick-mode interval medians. The measured 0.938 ns fixed C
+Values are Criterion quick-mode interval medians. The measured 0.882 ns fixed C
 ABI overhead has been subtracted from Pinocchio times. All times are in ns.
 
 | Model | Operation | Dyno | Pinocchio | Dyno speedup |
 |---|---|---:|---:|---:|
-| 4-joint chain | FK | 73.409 ns | 78.623 ns | 1.07x |
-| 4-joint chain | Jacobian | 84.467 ns | 129.422 ns | 1.53x |
-| 4-joint chain | Gravity | 119.120 ns | 187.782 ns | 1.58x |
-| 4-joint chain | RNEA | 181.740 ns | 304.192 ns | 1.67x |
-| 40-joint chain | FK | 730.120 ns | 810.432 ns | 1.11x |
-| 40-joint chain | Jacobian | 847.920 ns | 1327.462 ns | 1.57x |
-| 40-joint chain | Gravity | 1130.600 ns | 1830.562 ns | 1.62x |
-| 40-joint chain | RNEA | 1632.500 ns | 3147.862 ns | 1.93x |
-| 7-joint two-leaf tree | FK | 112.200 ns | 138.442 ns | 1.23x |
-| 7-joint two-leaf tree | Jacobian | 123.990 ns | 213.612 ns | 1.72x |
-| 7-joint two-leaf tree | Gravity | 170.280 ns | 326.032 ns | 1.91x |
-| 7-joint two-leaf tree | RNEA | 284.160 ns | 539.602 ns | 1.90x |
+| 4-joint chain | FK | 66.414 ns | 77.627 ns | 1.17x |
+| 4-joint chain | Jacobian | 81.475 ns | 128.778 ns | 1.58x |
+| 4-joint chain | Gravity | 117.420 ns | 187.158 ns | 1.59x |
+| 4-joint chain | RNEA | 181.030 ns | 300.268 ns | 1.66x |
+| 40-joint chain | FK | 669.530 ns | 833.328 ns | 1.24x |
+| 40-joint chain | Jacobian | 784.060 ns | 1347.518 ns | 1.72x |
+| 40-joint chain | Gravity | 1120.500 ns | 1824.718 ns | 1.63x |
+| 40-joint chain | RNEA | 1643.800 ns | 3133.918 ns | 1.91x |
+| 7-joint two-leaf tree | FK | 66.105 ns | 137.298 ns | 2.08x |
+| 7-joint two-leaf tree | Jacobian | 80.325 ns | 217.188 ns | 2.70x |
+| 7-joint two-leaf tree | Gravity | 170.080 ns | 322.128 ns | 1.89x |
+| 7-joint two-leaf tree | RNEA | 284.220 ns | 543.928 ns | 1.91x |
 
 Run the comparison with:
 
