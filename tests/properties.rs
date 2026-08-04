@@ -5,10 +5,8 @@ use dyno::{Frame, IndexedLoad, Robot, Twist, Wrench};
 use nalgebra::{DMatrix, Vector3};
 
 fn tree_arm() -> Robot {
-    Robot::from_urdf(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/data/test_tree_7.urdf"),
-    )
-    .expect("tree fixture must load")
+    Robot::from_urdf(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_tree_7.urdf"))
+        .expect("tree fixture must load")
 }
 
 fn mixed_oracle_arm() -> Robot {

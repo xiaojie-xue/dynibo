@@ -15,10 +15,8 @@ fn test_arm() -> Robot {
 }
 
 fn tree_arm() -> Robot {
-    Robot::from_urdf(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/data/test_tree_7.urdf"),
-    )
-    .expect("tree URDF must load")
+    Robot::from_urdf(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_tree_7.urdf"))
+        .expect("tree URDF must load")
 }
 
 fn assert_slice_close(actual: &[f64], expected: &[f64]) {

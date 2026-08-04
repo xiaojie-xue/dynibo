@@ -14,9 +14,9 @@ URDF = (
     if len(sys.argv) > 1
     else Path("tests/data/test_arm.urdf").resolve()
 )
-SOURCE_PACKAGE = Path(__file__).resolve().parents[2] / "python" / "dyno"
+SOURCE_PACKAGE = Path(__file__).resolve().parents[2] / "bindings" / "python" / "dyno"
 if Path(dyno.__file__).resolve().parent == SOURCE_PACKAGE:
-    raise RuntimeError("package test imported python/dyno from the source tree")
+    raise RuntimeError("package test imported bindings/python/dyno from the source tree")
 
 
 class PackageTests(unittest.TestCase):

@@ -239,10 +239,8 @@ fn urdf_path(file_name: &str) -> PathBuf {
 }
 
 fn tree_arm() -> Robot {
-    Robot::from_urdf(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/data/test_tree_7.urdf"),
-    )
-    .expect("tree URDF must load")
+    Robot::from_urdf(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_tree_7.urdf"))
+        .expect("tree URDF must load")
 }
 
 #[allow(clippy::too_many_arguments)]

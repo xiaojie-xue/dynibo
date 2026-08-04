@@ -35,7 +35,7 @@ dyno = ["*.so", "*.dylib", "*.dll"]
 build = "cp39-*"
 skip = "*-musllinux*"
 archs = ["auto64"]
-test-command = "python {project}/package-tests/python/test_package.py {project}/tests/data/test_arm.urdf"
+test-command = "python {project}/tests/python/test_package.py {project}/tests/data/test_arm.urdf"
 
 [tool.cibuildwheel.linux]
 before-all = "curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal"

@@ -3,6 +3,6 @@ recursive-include src *.rs
 recursive-include benches *.rs *.cpp
 recursive-include bindings/c *.toml *.rs *.h *.hpp
 recursive-include bindings/python *.md
-recursive-include package-tests/python *.py
+recursive-include tests/python *.py
 recursive-include python *.py
 recursive-include tests/data *.urdf

@@ -383,7 +383,7 @@ fn fixture() -> PathBuf {
 }
 
 fn tree_fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/data/test_tree_7.urdf")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_tree_7.urdf")
 }
 
 fn deterministic_state(sample: usize) -> ([f64; 4], [f64; 4], [f64; 4]) {

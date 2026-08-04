@@ -44,7 +44,7 @@ def main() -> None:
     urdf = (project / "tests" / "data" / "test_arm.urdf").resolve()
 
     run([
-        "cmake", "-S", str(project / "package-tests" / "native"),
+        "cmake", "-S", str(project / "tests" / "native"),
         "-B", str(build),
         f"-DCMAKE_PREFIX_PATH={prefix}",
         f"-DDYNO_TEST_URDF={urdf}",

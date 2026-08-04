@@ -39,4 +39,4 @@ trap cleanup EXIT
     --target "${python_test_root}/installed" \
     "${python_test_root}"/wheelhouse/*.whl
 PYTHONPATH="${python_test_root}/installed" \
-    "${python_command}" package-tests/python/test_package.py tests/data/test_arm.urdf
+    "${python_command}" tests/python/test_package.py tests/data/test_arm.urdf

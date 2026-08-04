@@ -411,13 +411,10 @@ fn benchmark_pinocchio(c: &mut Criterion) {
     overhead.finish();
 
     benchmark_case(c, &case_4);
-    benchmark_case(
-        c,
-        &BenchmarkCase::<40>::new("benches/data/test_arm_40.urdf"),
-    );
+    benchmark_case(c, &BenchmarkCase::<40>::new("tests/data/test_arm_40.urdf"));
     benchmark_tree_case(
         c,
-        &TreeBenchmarkCase::<7>::new("benches/data/test_tree_7.urdf", "right_tool", "right_wrist"),
+        &TreeBenchmarkCase::<7>::new("tests/data/test_tree_7.urdf", "right_tool", "right_wrist"),
     );
 }
 

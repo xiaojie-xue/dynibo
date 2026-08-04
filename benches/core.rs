@@ -166,7 +166,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
 }
 
 fn benchmark_tree_case(c: &mut Criterion) {
-    let case = BenchmarkCase::new("benches/data/test_tree_7.urdf");
+    let case = BenchmarkCase::new("tests/data/test_tree_7.urdf");
     benchmark_case(c, &case);
     let left = case.arm.link_id("left_tool").unwrap();
     let right = case.arm.link_id("right_tool").unwrap();
@@ -226,7 +226,7 @@ fn benchmark_tree_case(c: &mut Criterion) {
 }
 
 fn benchmark_target_depths(c: &mut Criterion) {
-    let case = BenchmarkCase::new("benches/data/test_arm_40.urdf");
+    let case = BenchmarkCase::new("tests/data/test_arm_40.urdf");
     let targets = [
         ("root", case.arm.link_id("test_base_link").unwrap()),
         ("depth_1", case.arm.link_id("test_link_1").unwrap()),
@@ -378,7 +378,7 @@ fn benchmark_core(c: &mut Criterion) {
     let case_4 = BenchmarkCase::new("tests/data/test_arm.urdf");
     benchmark_case(c, &case_4);
     benchmark_inverse_kinematics(c, &case_4);
-    benchmark_case(c, &BenchmarkCase::new("benches/data/test_arm_40.urdf"));
+    benchmark_case(c, &BenchmarkCase::new("tests/data/test_arm_40.urdf"));
     benchmark_tree_case(c);
     benchmark_target_depths(c);
 }
