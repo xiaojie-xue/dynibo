@@ -24,7 +24,7 @@ Homepage = "https://github.com/xiaojie-xue/dyno"
 Repository = "https://github.com/xiaojie-xue/dyno"
 
 [tool.setuptools]
-package-dir = { "" = "python" }
+package-dir = { "" = "bindings/python" }
 packages = ["dyno"]
 include-package-data = true
 
