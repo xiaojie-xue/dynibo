@@ -47,6 +47,7 @@ pub struct Workspace {
     pub(super) jacobian: Vec<f64>,
     pub(super) q_work: Vec<f64>,
     pub(super) step: Vec<f64>,
+    pub(super) ancestor_path: Vec<usize>,
 }
 
 impl Workspace {
@@ -63,6 +64,7 @@ impl Workspace {
             jacobian: vec![0.0; 6 * joint_count],
             q_work: vec![0.0; joint_count],
             step: vec![0.0; joint_count],
+            ancestor_path: vec![0; joint_count],
         }
     }
 

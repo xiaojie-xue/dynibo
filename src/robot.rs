@@ -50,14 +50,8 @@ pub struct Robot {
     joints: Box<[Joint]>,
     links: Box<[Link]>,
     joint_parents: Box<[usize]>,
+    link_depths: Box<[usize]>,
     leaf_links: Box<[usize]>,
-}
-
-struct AccelerationScratch<'a> {
-    frames: &'a mut [Frame],
-    angular_velocities: &'a mut [Vector3<f64>],
-    angular_accelerations: &'a mut [Vector3<f64>],
-    linear_accelerations: &'a mut [Vector3<f64>],
 }
 
 struct DynamicsScratch<'a> {
@@ -89,12 +83,17 @@ impl Robot {
             model_id, UNOWNED_MODEL_ID,
             "robot model identifier overflow"
         );
+        let mut link_depths = vec![0; model.links.len()];
+        for (joint_index, &parent) in model.joint_parents.iter().enumerate() {
+            link_depths[joint_index + 1] = link_depths[parent] + 1;
+        }
         Ok(Self {
             model_id,
             name: robot.name,
             joints: model.joints.into_boxed_slice(),
             links: model.links.into_boxed_slice(),
             joint_parents: model.joint_parents.into_boxed_slice(),
+            link_depths: link_depths.into_boxed_slice(),
             leaf_links: model.leaf_links.into_boxed_slice(),
         })
     }
@@ -223,8 +222,8 @@ impl Robot {
         self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         let target_index = self.validate_link_id(target)?;
-        self.link_frames_kernel(q, &mut workspace.frames)?;
-        Ok(frame_for_target(&workspace.frames, target_index))
+        let depth = self.prepare_ancestor_path(target_index, &mut workspace.ancestor_path);
+        self.target_frame_kernel(q, &workspace.ancestor_path[..depth])
     }
 
     /// Writes a runtime-sized `6 x N` geometric Jacobian in column-major order.
@@ -252,6 +251,8 @@ impl Robot {
             target_index,
             &mut workspace.frames,
             output,
+            &mut workspace.ancestor_path,
+            true,
         )?;
         Ok(())
     }
@@ -284,6 +285,7 @@ impl Robot {
             &mut workspace.jacobian,
             &mut workspace.q_work,
             &mut workspace.step,
+            &mut workspace.ancestor_path,
         )?;
         output.copy_from_slice(&workspace.q_work);
         Ok(())
@@ -315,6 +317,7 @@ impl Robot {
             tool,
             &mut workspace.frames,
             &mut workspace.jacobian,
+            &mut workspace.ancestor_path,
         )
     }
 
@@ -336,18 +339,7 @@ impl Robot {
         self.validate_slice("qd", qd)?;
         self.validate_slice("qdd", qdd)?;
         let target_index = self.validate_link_id(target)?;
-        self.acceleration_kernel(
-            q,
-            qd,
-            qdd,
-            target_index,
-            AccelerationScratch {
-                frames: &mut workspace.frames,
-                angular_velocities: &mut workspace.angular_velocities,
-                angular_accelerations: &mut workspace.angular_accelerations,
-                linear_accelerations: &mut workspace.origin_accelerations,
-            },
-        )
+        self.acceleration_kernel(q, qd, qdd, target_index, &mut workspace.ancestor_path)
     }
 
     /// Writes runtime-sized Newton-Euler joint forces into caller-owned output.
@@ -422,19 +414,25 @@ impl Robot {
         )
     }
 
-    fn link_frames_kernel(&self, q: &[f64], frames: &mut [Frame]) -> Result<()> {
-        self.validate_slice("q", q)?;
-        self.validate_slice_length("frame workspace", frames.len(), self.joint_count())?;
-        for i in 0..self.joint_count() {
-            let parent = self.joint_parents[i];
-            let parent_frame = if parent == 0 {
-                Frame::identity()
-            } else {
-                frames[parent - 1]
-            };
-            frames[i] = parent_frame * self.joints[i].frame(q[i]);
+    fn prepare_ancestor_path(&self, target_index: usize, path: &mut [usize]) -> usize {
+        let mut current = target_index;
+        let mut depth = 0;
+        while current != 0 {
+            let joint_index = current - 1;
+            path[depth] = joint_index;
+            depth += 1;
+            current = self.joint_parents[joint_index];
         }
-        Ok(())
+        depth
+    }
+
+    fn target_frame_kernel(&self, q: &[f64], path: &[usize]) -> Result<Frame> {
+        self.validate_slice("q", q)?;
+        let mut frame = Frame::identity();
+        for &joint_index in path.iter().rev() {
+            frame *= self.joints[joint_index].frame(q[joint_index]);
+        }
+        Ok(frame)
     }
 
     fn forward_kinematics_and_jacobian_kernel(
@@ -443,38 +441,56 @@ impl Robot {
         target_index: usize,
         frames: &mut [Frame],
         output: &mut [f64],
+        path: &mut [usize],
+        clear_output: bool,
     ) -> Result<Frame> {
-        self.link_frames_kernel(q, frames)?;
-        self.jacobian_kernel(frames, target_index, output)
+        let depth = self.prepare_ancestor_path(target_index, path);
+        self.target_frames_kernel(q, &path[..depth], frames)?;
+        self.jacobian_kernel(frames, target_index, &path[..depth], output, clear_output)
+    }
+
+    fn target_frames_kernel(&self, q: &[f64], path: &[usize], frames: &mut [Frame]) -> Result<()> {
+        self.validate_slice("q", q)?;
+        self.validate_slice_length("frame workspace", frames.len(), self.joint_count())?;
+        let mut frame = Frame::identity();
+        for &joint_index in path.iter().rev() {
+            frame *= self.joints[joint_index].frame(q[joint_index]);
+            frames[joint_index] = frame;
+        }
+        Ok(())
     }
 
     fn jacobian_kernel(
         &self,
         frames: &[Frame],
         target_index: usize,
+        path: &[usize],
         output: &mut [f64],
+        clear_output: bool,
     ) -> Result<Frame> {
         self.validate_slice_length("frame workspace", frames.len(), self.joint_count())?;
         self.validate_slice_length("jacobian output", output.len(), 6 * self.joint_count())?;
-        output.fill(0.0);
+        if clear_output {
+            output.fill(0.0);
+        }
         let target_frame = frame_for_target(frames, target_index);
-        let mut current = target_index;
-        while current != 0 {
-            let joint_index = current - 1;
+        for &joint_index in path {
             let joint_frame = frames[joint_index];
-            let axis = joint_frame.rotation * self.joints[joint_index].axis().as_ref();
             let column = &mut output[6 * joint_index..6 * joint_index + 6];
             match self.joints[joint_index].joint_type() {
                 JointType::Revolute => {
+                    let axis = joint_frame.rotation * self.joints[joint_index].axis().as_ref();
                     let linear = axis
                         .cross(&(target_frame.translation.vector - joint_frame.translation.vector));
                     column[..3].copy_from_slice(axis.as_slice());
                     column[3..].copy_from_slice(linear.as_slice());
                 }
-                JointType::Prismatic => column[3..].copy_from_slice(axis.as_slice()),
+                JointType::Prismatic => {
+                    let axis = joint_frame.rotation * self.joints[joint_index].axis().as_ref();
+                    column[3..].copy_from_slice(axis.as_slice());
+                }
                 JointType::Fixed => {}
             }
-            current = self.joint_parents[joint_index];
         }
         Ok(target_frame)
     }
@@ -489,19 +505,27 @@ impl Robot {
         tool: &Frame,
         frames: &mut [Frame],
         jacobian: &mut [f64],
+        path: &mut [usize],
     ) -> Result<Twist> {
+        self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
-        let end = self.forward_kinematics_and_jacobian_kernel(q, target_index, frames, jacobian)?;
+        if target_index == 0 {
+            return Ok(Twist::zeros());
+        }
+        let depth = self.prepare_ancestor_path(target_index, path);
+        let path = &path[..depth];
+        self.target_frames_kernel(q, path, frames)?;
+        let end = self.jacobian_kernel(frames, target_index, path, jacobian, true)?;
         let offset_world = end.rotation * tool.translation.vector;
         let mut angular = Vector3::zeros();
         let mut linear = Vector3::zeros();
-        for i in 0..self.joint_count() {
-            let column = &jacobian[6 * i..6 * i + 6];
+        for &joint_index in path {
+            let column = &jacobian[6 * joint_index..6 * joint_index + 6];
             let column_angular = Vector3::new(column[0], column[1], column[2]);
             let column_linear =
                 Vector3::new(column[3], column[4], column[5]) + column_angular.cross(&offset_world);
-            angular += column_angular * qd[i];
-            linear += column_linear * qd[i];
+            angular += column_angular * qd[joint_index];
+            linear += column_linear * qd[joint_index];
         }
         Ok(Twist::new(base.rotation * angular, base.rotation * linear))
     }
@@ -512,74 +536,61 @@ impl Robot {
         qd: &[f64],
         qdd: &[f64],
         target_index: usize,
-        scratch: AccelerationScratch<'_>,
+        path: &mut [usize],
     ) -> Result<Twist> {
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
         self.validate_slice("qdd", qdd)?;
-        self.validate_slice_length("frame workspace", scratch.frames.len(), self.joint_count())?;
-        self.validate_slice_length(
-            "angular velocity workspace",
-            scratch.angular_velocities.len(),
-            self.joint_count(),
-        )?;
-        self.validate_slice_length(
-            "angular acceleration workspace",
-            scratch.angular_accelerations.len(),
-            self.joint_count(),
-        )?;
-        self.validate_slice_length(
-            "linear acceleration workspace",
-            scratch.linear_accelerations.len(),
-            self.joint_count(),
-        )?;
         if target_index == 0 {
             return Ok(Twist::zeros());
         }
-        for i in 0..self.joint_count() {
-            let parent = self.joint_parents[i];
-            let (parent_frame, omega, alpha, linear) = if parent == 0 {
-                (
-                    Frame::identity(),
-                    Vector3::zeros(),
-                    Vector3::zeros(),
-                    Vector3::zeros(),
-                )
-            } else {
-                (
-                    scratch.frames[parent - 1],
-                    scratch.angular_velocities[parent - 1],
-                    scratch.angular_accelerations[parent - 1],
-                    scratch.linear_accelerations[parent - 1],
-                )
-            };
-            let frame = parent_frame * self.joints[i].frame(q[i]);
+        let target_depth = self.link_depths[target_index];
+        if target_depth == target_index {
+            return Ok(self.acceleration_for_joints(q, qd, qdd, 0..target_depth));
+        }
+        let depth = self.prepare_ancestor_path(target_index, path);
+        let path = &path[..depth];
+        Ok(self.acceleration_for_joints(q, qd, qdd, path.iter().rev().copied()))
+    }
+
+    #[inline]
+    fn acceleration_for_joints(
+        &self,
+        q: &[f64],
+        qd: &[f64],
+        qdd: &[f64],
+        joint_indices: impl Iterator<Item = usize>,
+    ) -> Twist {
+        let mut frame = Frame::identity();
+        let mut omega = Vector3::zeros();
+        let mut alpha = Vector3::zeros();
+        let mut linear = Vector3::zeros();
+        for joint_index in joint_indices {
+            let parent_frame = frame;
+            frame *= self.joints[joint_index].frame(q[joint_index]);
             let offset = frame.translation.vector - parent_frame.translation.vector;
-            let axis = frame.rotation * self.joints[i].axis().as_ref();
             let mut child_omega = omega;
             let mut child_alpha = alpha;
             let mut child_linear =
                 linear + alpha.cross(&offset) + omega.cross(&omega.cross(&offset));
-            match self.joints[i].joint_type() {
+            match self.joints[joint_index].joint_type() {
                 JointType::Revolute => {
-                    child_alpha += axis * qdd[i] + omega.cross(&axis) * qd[i];
-                    child_omega += axis * qd[i];
+                    let axis = frame.rotation * self.joints[joint_index].axis().as_ref();
+                    child_alpha += axis * qdd[joint_index] + omega.cross(&axis) * qd[joint_index];
+                    child_omega += axis * qd[joint_index];
                 }
                 JointType::Prismatic => {
-                    child_linear += axis * qdd[i] + 2.0 * qd[i] * omega.cross(&axis);
+                    let axis = frame.rotation * self.joints[joint_index].axis().as_ref();
+                    child_linear +=
+                        axis * qdd[joint_index] + 2.0 * qd[joint_index] * omega.cross(&axis);
                 }
                 JointType::Fixed => {}
             }
-            scratch.frames[i] = frame;
-            scratch.angular_velocities[i] = child_omega;
-            scratch.angular_accelerations[i] = child_alpha;
-            scratch.linear_accelerations[i] = child_linear;
+            omega = child_omega;
+            alpha = child_alpha;
+            linear = child_linear;
         }
-        let index = target_index - 1;
-        Ok(Twist::new(
-            scratch.angular_accelerations[index],
-            scratch.linear_accelerations[index],
-        ))
+        Twist::new(alpha, linear)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -652,7 +663,6 @@ impl Robot {
             scratch.transforms[i] = transform;
         }
 
-        output.fill(0.0);
         for i in (0..self.joint_count()).rev() {
             let joint = &self.joints[i];
             let link = &self.links[i + 1];
@@ -711,7 +721,6 @@ impl Robot {
             };
             scratch.gravity_at_link[i] = scratch.transforms[i].rotation.inverse() * parent_gravity;
         }
-        output.fill(0.0);
         for i in (0..self.joint_count()).rev() {
             let joint = &self.joints[i];
             let link = &self.links[i + 1];
@@ -740,6 +749,7 @@ impl Robot {
         jacobian: &mut [f64],
         q_work: &mut [f64],
         step: &mut [f64],
+        path: &mut [usize],
     ) -> Result<()> {
         self.validate_slice("initial_q", initial_q)?;
         self.validate_output("IK joint workspace", q_work)?;
@@ -762,14 +772,13 @@ impl Robot {
             });
         }
         q_work.copy_from_slice(initial_q);
+        let depth = self.prepare_ancestor_path(target_index, path);
+        let path = &path[..depth];
+        jacobian.fill(0.0);
         let damping_squared = options.damping * options.damping;
         for iteration in 0..=options.max_iterations {
-            let current = self.forward_kinematics_and_jacobian_kernel(
-                q_work,
-                target_index,
-                frames,
-                jacobian,
-            )?;
+            self.target_frames_kernel(q_work, path, frames)?;
+            let current = self.jacobian_kernel(frames, target_index, path, jacobian, false)?;
             let translation_error = desired.translation.vector - current.translation.vector;
             let rotation_error = (desired.rotation * current.rotation.inverse()).scaled_axis();
             let translation_error_norm = translation_error.norm();
@@ -794,13 +803,18 @@ impl Robot {
                     .copied(),
             );
             let mut regularized = SMatrix::<f64, 6, 6>::identity() * damping_squared;
-            for column in jacobian.chunks_exact(6) {
+            for &joint_index in path.iter().rev() {
+                if self.joints[joint_index].joint_type() == JointType::Fixed {
+                    continue;
+                }
+                let column = &jacobian[6 * joint_index..6 * joint_index + 6];
                 for row in 0..6 {
-                    for col in 0..6 {
+                    for col in 0..=row {
                         regularized[(row, col)] += column[row] * column[col];
                     }
                 }
             }
+            // nalgebra's Cholesky decomposition reads only the lower triangle.
             let Some(weighted_error) = regularized.cholesky().map(|factor| factor.solve(&error))
             else {
                 return Err(Error::NumericalFailure {
@@ -808,13 +822,17 @@ impl Robot {
                 });
             };
             let mut step_norm_squared = 0.0;
-            for (joint, column) in jacobian.chunks_exact(6).enumerate() {
-                step[joint] = column
+            for &joint_index in path.iter().rev() {
+                if self.joints[joint_index].joint_type() == JointType::Fixed {
+                    continue;
+                }
+                let column = &jacobian[6 * joint_index..6 * joint_index + 6];
+                step[joint_index] = column
                     .iter()
                     .zip(weighted_error.iter())
                     .map(|(lhs, rhs)| lhs * rhs)
                     .sum();
-                step_norm_squared += step[joint] * step[joint];
+                step_norm_squared += step[joint_index] * step[joint_index];
             }
             let step_norm = step_norm_squared.sqrt();
             if !step_norm.is_finite() {
@@ -827,8 +845,10 @@ impl Robot {
             } else {
                 1.0
             };
-            for i in 0..self.joint_count() {
-                q_work[i] += scale * step[i];
+            for &joint_index in path.iter().rev() {
+                if self.joints[joint_index].joint_type() != JointType::Fixed {
+                    q_work[joint_index] += scale * step[joint_index];
+                }
             }
         }
         unreachable!("inverse-kinematics loop always returns")
