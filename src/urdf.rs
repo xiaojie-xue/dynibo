@@ -161,19 +161,27 @@ fn robot_joint(joint: &urdf_rs::Joint) -> Result<Joint> {
 /// Converts one URDF link and its inertial block into a [`Link`].
 fn robot_link(link: &urdf_rs::Link) -> Link {
     let inertial = &link.inertial;
-    // Preserve the compatibility convention: URDF products of inertia are
-    // stored with a negative sign in Link.
-    let inertia = Matrix3::new(
+    // URDF stores the entries of the symmetric inertia tensor directly.
+    let inertia_in_inertial_frame = Matrix3::new(
         inertial.inertia.ixx,
-        -inertial.inertia.ixy,
-        -inertial.inertia.ixz,
-        -inertial.inertia.ixy,
+        inertial.inertia.ixy,
+        inertial.inertia.ixz,
+        inertial.inertia.ixy,
         inertial.inertia.iyy,
-        -inertial.inertia.iyz,
-        -inertial.inertia.ixz,
-        -inertial.inertia.iyz,
+        inertial.inertia.iyz,
+        inertial.inertia.ixz,
+        inertial.inertia.iyz,
         inertial.inertia.izz,
     );
+    let inertial_rotation = UnitQuaternion::from_euler_angles(
+        inertial.origin.rpy[0],
+        inertial.origin.rpy[1],
+        inertial.origin.rpy[2],
+    )
+    .to_rotation_matrix();
+    let inertia = inertial_rotation.matrix()
+        * inertia_in_inertial_frame
+        * inertial_rotation.matrix().transpose();
     Link::new(
         link.name.clone(),
         inertial.mass.value,
@@ -188,6 +196,8 @@ fn robot_link(link: &urdf_rs::Link) -> Link {
 
 #[cfg(test)]
 mod tests {
+    use approx::assert_relative_eq;
+    use nalgebra::Matrix3;
     use urdf_rs::{JointType as UrdfJointType, read_from_string};
 
     use super::tree_model;
@@ -294,5 +304,33 @@ mod tests {
         assert_eq!(model.joints[0].joint_type(), JointType::Revolute);
         assert_eq!(model.joints[0].lower_limit(), f64::NEG_INFINITY);
         assert_eq!(model.joints[0].upper_limit(), f64::INFINITY);
+    }
+
+    #[test]
+    fn rotates_urdf_inertia_from_the_inertial_frame_into_the_link_frame() {
+        let robot = read_from_string(
+            r#"
+            <robot name="rotated_inertia">
+              <link name="base"/>
+              <link name="body">
+                <inertial>
+                  <origin xyz="0 0 0" rpy="0 0 1.5707963267948966"/>
+                  <mass value="1"/>
+                  <inertia ixx="1" ixy="0" ixz="0" iyy="2" iyz="0" izz="3"/>
+                </inertial>
+              </link>
+              <joint name="mount" type="fixed">
+                <parent link="base"/><child link="body"/>
+              </joint>
+            </robot>
+            "#,
+        )
+        .unwrap();
+        let model = tree_model(&robot).unwrap();
+        assert_relative_eq!(
+            model.links[1].inertia(),
+            &Matrix3::from_diagonal(&nalgebra::Vector3::new(2.0, 1.0, 3.0)),
+            epsilon = 2.0e-12
+        );
     }
 }

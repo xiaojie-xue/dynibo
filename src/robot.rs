@@ -650,7 +650,7 @@ impl Robot {
                     rotated_alpha,
                     translated_acceleration
                         + qdd[i] * axis
-                        + 2.0 * qd[i] * parent_omega.cross(&(transform.rotation * axis)),
+                        + 2.0 * qd[i] * rotated_omega.cross(axis),
                 ),
                 JointType::Fixed => (rotated_omega, rotated_alpha, translated_acceleration),
             };
