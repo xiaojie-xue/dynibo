@@ -141,8 +141,8 @@ prismatic 和 fixed joint。
 关节 slice 当前按全部 URDF joint 排列，fixed joint 仍占一个元素，但不贡献运动或主动
 关节力。根 link 保存在 `links()` 中，但兼容动力学不把根 link 自身惯性计入关节力。
 
-兼容动力学保留已有正 Z 重力方向和惯量积符号约定。Pinocchio 桥接测试会转换这些约定后
-逐元素比较结果。
+动力学使用正 Z 重力方向。加载模型时，URDF 惯量张量及非零 inertial-origin rotation
+会统一转换到对应 link 坐标系。Pinocchio 桥接测试会逐元素比较结果。
 
 IK 使用阻尼最小二乘
 `J^T (J J^T + lambda^2 I)^-1`。迭代过程不主动施加关节限位，只在收敛后验证 URDF
@@ -200,6 +200,19 @@ cargo clippy --all-targets -- -D warnings
 cargo test --workspace --all-targets
 cargo +nightly llvm-cov --branch --workspace --all-targets
 cargo bench --features core-bench --bench core
+```
+
+也可以通过统一入口运行格式化、静态检查、默认与 Pinocchio 测试，以及 Rust、C、C++、
+Python 安装包测试：
+
+```bash
+bash ci/test-all.sh
+```
+
+如果 `pkg-config` 能找到 Pinocchio，可运行独立数值参考测试：
+
+```bash
+cargo test -p dyno --features pinocchio-tests --tests
 ```
 
 本地单元测试只运行 Rust workspace 源码。GitHub Package CI 才会分别测试解包后的 Rust

@@ -123,8 +123,9 @@ components, missing links, and links reached by multiple joints. Revolute,
 continuous, prismatic, and fixed joints are supported.
 
 Joint slices contain every URDF joint. Fixed joints still occupy an element but
-contribute no motion or active joint force. Compatibility dynamics preserve the
-existing positive-Z gravity and product-of-inertia conventions.
+contribute no motion or active joint force. Dynamics use positive-Z gravity.
+URDF inertia tensors, including a non-zero inertial-origin rotation, are
+converted into the corresponding link frame when the model is loaded.
 
 IK uses the damped inverse `J^T (J J^T + lambda^2 I)^-1`. Iterations are
 unconstrained; a converged solution is checked against URDF joint limits.
@@ -176,6 +177,20 @@ cargo clippy --all-targets -- -D warnings
 cargo test --workspace --all-targets
 cargo +nightly llvm-cov --branch --workspace --all-targets
 cargo bench --features core-bench --bench core
+```
+
+Run formatting, lints, the default and optional Pinocchio suites, and all Rust,
+C, C++, and Python package tests through one entry point:
+
+```bash
+bash ci/test-all.sh
+```
+
+When Pinocchio is available through `pkg-config`, run the independent numerical
+reference suite with:
+
+```bash
+cargo test -p dyno --features pinocchio-tests --tests
 ```
 
 Local unit tests cover only the Rust source workspace. GitHub Package CI tests

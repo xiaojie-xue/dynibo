@@ -207,6 +207,12 @@ cargo test --workspace --all-targets
 cargo +nightly llvm-cov --branch --workspace --all-targets
 ```
 
+本地完整验证可统一运行：
+
+```bash
+bash ci/test-all.sh
+```
+
 覆盖率 CI 会对 LLVM JSON 汇总执行 `ci/check-coverage.py`，要求行覆盖率至少为 85%、
 分支覆盖率至少为 75%。
 
