@@ -1,4 +1,4 @@
-#[cfg(feature = "pinocchio-bench")]
+#[cfg(feature = "pinocchio-tests")]
 fn main() {
     println!("cargo:rerun-if-changed=benches/pinocchio_bridge.cpp");
     println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
@@ -27,5 +27,5 @@ fn main() {
     bridge.compile("dyno_pinocchio_bench_bridge");
 }
 
-#[cfg(not(feature = "pinocchio-bench"))]
+#[cfg(not(feature = "pinocchio-tests"))]
 fn main() {}

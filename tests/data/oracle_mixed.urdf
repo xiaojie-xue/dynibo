@@ -1,0 +1,66 @@
+<?xml version="1.0"?>
+<robot name="oracle_mixed">
+  <link name="base"/>
+
+  <link name="link_a">
+    <inertial>
+      <origin xyz="0.11 -0.04 0.07" rpy="0.35 -0.22 0.17"/>
+      <mass value="1.7"/>
+      <inertia ixx="0.081" ixy="0.006" ixz="-0.004"
+               iyy="0.094" iyz="0.005" izz="0.103"/>
+    </inertial>
+  </link>
+  <joint name="shoulder" type="revolute">
+    <parent link="base"/>
+    <child link="link_a"/>
+    <origin xyz="0.12 -0.08 0.21" rpy="0.20 -0.15 0.31"/>
+    <axis xyz="1 2 -1"/>
+    <limit effort="200" lower="-2.4" upper="2.1" velocity="8"/>
+  </joint>
+
+  <link name="mounted_link">
+    <inertial>
+      <origin xyz="-0.03 0.06 0.02" rpy="-0.18 0.27 -0.11"/>
+      <mass value="0.6"/>
+      <inertia ixx="0.031" ixy="-0.002" ixz="0.001"
+               iyy="0.037" iyz="0.003" izz="0.042"/>
+    </inertial>
+  </link>
+  <joint name="rigid_mount" type="fixed">
+    <parent link="link_a"/>
+    <child link="mounted_link"/>
+    <origin xyz="0.24 0.03 -0.05" rpy="-0.32 0.28 0.19"/>
+  </joint>
+
+  <link name="slider_link">
+    <inertial>
+      <origin xyz="0.05 0.02 -0.04" rpy="0.41 0.13 -0.29"/>
+      <mass value="1.1"/>
+      <inertia ixx="0.052" ixy="0.004" ixz="0.003"
+               iyy="0.061" iyz="-0.005" izz="0.073"/>
+    </inertial>
+  </link>
+  <joint name="slider" type="prismatic">
+    <parent link="mounted_link"/>
+    <child link="slider_link"/>
+    <origin xyz="0.17 -0.02 0.09" rpy="0.48 -0.36 0.23"/>
+    <axis xyz="0.3 1 0.2"/>
+    <limit effort="150" lower="-0.35" upper="0.55" velocity="2"/>
+  </joint>
+
+  <link name="tool">
+    <inertial>
+      <origin xyz="0.08 -0.03 0.06" rpy="-0.26 0.34 0.21"/>
+      <mass value="0.9"/>
+      <inertia ixx="0.044" ixy="-0.003" ixz="0.002"
+               iyy="0.057" iyz="0.004" izz="0.066"/>
+    </inertial>
+  </link>
+  <joint name="wrist" type="continuous">
+    <parent link="slider_link"/>
+    <child link="tool"/>
+    <origin xyz="0.19 0.07 -0.03" rpy="-0.21 0.17 -0.38"/>
+    <axis xyz="-1 0.4 0.7"/>
+    <limit effort="100" velocity="6"/>
+  </joint>
+</robot>

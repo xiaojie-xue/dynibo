@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use approx::assert_relative_eq;
 use dyno::{Error, Frame, IndexedLoad, InverseKinematicsOptions, Robot, Twist, Wrench};
-use nalgebra::{SMatrix, SVector, Translation3, UnitQuaternion, Vector3};
+use nalgebra::{Matrix3, SMatrix, SVector, Translation3, UnitQuaternion, Vector3};
 
 fn urdf_path(file_name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -44,7 +44,7 @@ fn assert_invalid_link<T: std::fmt::Debug>(result: dyno::Result<T>) {
 }
 
 #[test]
-fn all_dynamic_calculations_share_consistent_results() {
+fn all_dynamic_calculations_match_pinocchio_references() {
     let robot = test_arm();
     let target_id = robot.link_id("test_link_4").unwrap();
     let mut workspace = robot.workspace();
@@ -53,6 +53,8 @@ fn all_dynamic_calculations_share_consistent_results() {
     let q = [0.2, 1.0, -0.7, 0.4];
     let qd = [-0.3, 0.5, -0.2, 0.8];
     let qdd = [0.7, -0.4, 0.1, 0.3];
+    // These references are also checked directly against Pinocchio in
+    // `pinocchio_oracle::serial_arm_calculations_match_pinocchio`.
     let base = Frame::from_parts(
         Translation3::new(0.3, -0.2, 0.5),
         UnitQuaternion::from_euler_angles(0.2, -0.4, 0.1),
@@ -62,23 +64,68 @@ fn all_dynamic_calculations_share_consistent_results() {
     let frame = robot
         .forward_kinematics(&q, target_id, &mut workspace)
         .unwrap();
-    assert!(
-        frame
-            .translation
-            .vector
-            .iter()
-            .all(|value| value.is_finite())
+    let expected_rotation = Matrix3::from_column_slice(&[
+        0.7495962650805186,
+        0.15195068551164034,
+        0.6442176872376912,
+        -0.6313762241158434,
+        -0.127986296809854,
+        0.7648421872844885,
+        0.19866933079506122,
+        -0.9800665778412416,
+        2.220446049250313e-16,
+    ]);
+    assert_relative_eq!(
+        frame.rotation.to_rotation_matrix().matrix(),
+        &expected_rotation,
+        epsilon = 2.0e-12
+    );
+    assert_relative_eq!(
+        frame.translation.vector,
+        Vector3::new(0.450338323287074, 0.09128809750443889, 0.46592677713692876,),
+        epsilon = 2.0e-12
     );
 
     let mut jacobian = vec![f64::NAN; 24];
     robot
         .jacobian(&q, target_id, &mut workspace, &mut jacobian)
         .unwrap();
+    let expected_jacobian = SMatrix::<f64, 6, 4>::from_column_slice(&[
+        0.0,
+        0.0,
+        1.0,
+        -0.09128809750443889,
+        0.450338323287074,
+        0.0,
+        0.19866933079506122,
+        -0.9800665778412416,
+        2.220446049250313e-16,
+        -0.3507920715863345,
+        -0.07110907328742656,
+        0.45949768461548657,
+        0.19866933079506122,
+        -0.9800665778412416,
+        2.220446049250313e-16,
+        -0.08688884328765467,
+        -0.0176132405081479,
+        0.2866009467376818,
+        0.19866933079506122,
+        -0.9800665778412416,
+        2.220446049250313e-16,
+        0.0,
+        0.0,
+        0.0,
+    ]);
+    assert_relative_eq!(
+        SMatrix::<f64, 6, 4>::from_column_slice(&jacobian),
+        expected_jacobian,
+        epsilon = 2.0e-12
+    );
 
     let velocity = robot
         .forward_velocity_kinematics(&q, &qd, target_id, &base, &tool, &mut workspace)
         .unwrap();
-    let mut tool_jacobian = SMatrix::<f64, 6, 4>::from_column_slice(&jacobian);
+    let mut tool_jacobian = expected_jacobian;
     let offset_world = frame.rotation * tool.translation.vector;
     for column in 0..4 {
         let angular = tool_jacobian.fixed_view::<3, 1>(0, column).into_owned();
@@ -103,23 +150,33 @@ fn all_dynamic_calculations_share_consistent_results() {
     let acceleration = robot
         .forward_acceleration_kinematics(&q, &qd, &qdd, target_id, &mut workspace)
         .unwrap();
-    assert!(
-        acceleration
-            .to_vector()
-            .iter()
-            .all(|value| value.is_finite())
+    assert_relative_eq!(
+        acceleration.to_vector(),
+        SVector::<f64, 6>::new(
+            -0.32342197068760986,
+            -0.06556087916237024,
+            0.7000000000000001,
+            -0.05966580553815265,
+            0.4148023496219572,
+            -0.2304357035369144,
+        ),
+        epsilon = 2.0e-12
     );
 
-    let wrench = Wrench::new(Vector3::new(0.3, -0.2, 0.4), Vector3::new(1.0, 0.5, -0.7));
-    let indexed_load = [IndexedLoad {
-        link: target_id,
-        wrench,
-    }];
     let mut gravity = vec![f64::NAN; 4];
     robot
-        .gravity(&q, &base, &indexed_load, &mut workspace, &mut gravity)
+        .gravity(&q, &Frame::identity(), &[], &mut workspace, &mut gravity)
         .unwrap();
-    assert!(gravity.iter().all(|value| value.is_finite()));
+    assert_relative_eq!(
+        SVector::<f64, 4>::from_column_slice(&gravity),
+        SVector::<f64, 4>::new(
+            1.7763568394002505e-15,
+            39.629058959145354,
+            17.60815765611755,
+            0.053134179784508524,
+        ),
+        epsilon = 2.0e-11
+    );
 
     let mut dynamics = vec![f64::NAN; 4];
     robot
@@ -127,15 +184,24 @@ fn all_dynamic_calculations_share_consistent_results() {
             &q,
             &qd,
             &qdd,
-            &base,
-            Twist::new(Vector3::new(0.1, -0.2, 0.3), Vector3::new(-0.2, 0.4, 0.1)),
-            Twist::new(Vector3::new(-0.3, 0.2, 0.1), Vector3::new(0.5, -0.2, 0.4)),
-            &indexed_load,
+            &Frame::identity(),
+            Twist::zeros(),
+            Twist::zeros(),
+            &[],
             &mut workspace,
             &mut dynamics,
         )
         .unwrap();
-    assert!(dynamics.iter().all(|value| value.is_finite()));
+    assert_relative_eq!(
+        SVector::<f64, 4>::from_column_slice(&dynamics),
+        SVector::<f64, 4>::new(
+            1.7649236924309104,
+            38.319908179086525,
+            17.136450444507805,
+            0.05169960944426318,
+        ),
+        epsilon = 2.0e-11
+    );
 
     let desired_q = [0.2, 1.0, -1.2, 0.45];
     let desired = robot

@@ -29,7 +29,8 @@ resolver = "3"
 [features]
 default = []
 core-bench = ["dep:criterion"]
-pinocchio-bench = ["dep:cc", "dep:criterion", "dep:pkg-config"]
+pinocchio-tests = ["dep:cc", "dep:pkg-config"]
+pinocchio-bench = ["pinocchio-tests", "dep:criterion"]
 
 [dependencies]
 criterion = { version = "0.7.0", optional = true }

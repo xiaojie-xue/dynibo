@@ -2,13 +2,18 @@ use std::path::PathBuf;
 
 use approx::assert_relative_eq;
 use dyno::{Frame, IndexedLoad, Robot, Twist, Wrench};
-use nalgebra::Vector3;
+use nalgebra::{DMatrix, Vector3};
 
 fn tree_arm() -> Robot {
     Robot::from_urdf(
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benches/data/test_tree_7.urdf"),
     )
     .expect("tree fixture must load")
+}
+
+fn mixed_oracle_arm() -> Robot {
+    Robot::from_urdf(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/oracle_mixed.urdf"))
+        .expect("mixed oracle fixture must load")
 }
 
 fn deterministic_state(sample: usize, phase: f64, amplitude: f64) -> [f64; 7] {
@@ -131,5 +136,73 @@ fn deterministic_dynamics_preserve_gravity_and_load_invariants() {
         let expected: [f64; 7] =
             std::array::from_fn(|joint| left_only[joint] + right_only[joint] - gravity[joint]);
         assert_slice_close(&both, &expected, 4.0e-12);
+    }
+}
+
+#[test]
+fn mixed_joint_mass_matrix_is_symmetric_and_positive_on_moving_coordinates() {
+    let robot = mixed_oracle_arm();
+    let mut workspace = robot.workspace();
+    let zero = [0.0; 4];
+
+    for sample in 0..16 {
+        let q = [
+            1.4 * ((sample + 1) as f64 * 0.71).sin(),
+            3.0 * ((sample + 1) as f64 * 0.53).sin(),
+            0.3 * ((sample + 1) as f64 * 0.37).sin(),
+            2.5 * ((sample + 1) as f64 * 0.29).sin(),
+        ];
+        let mut bias = [0.0; 4];
+        robot
+            .inverse_dynamics(
+                &q,
+                &zero,
+                &zero,
+                &Frame::identity(),
+                Twist::zeros(),
+                Twist::zeros(),
+                &[],
+                &mut workspace,
+                &mut bias,
+            )
+            .unwrap();
+
+        let mut mass = DMatrix::<f64>::zeros(4, 4);
+        for column in 0..4 {
+            let mut unit_acceleration = [0.0; 4];
+            unit_acceleration[column] = 1.0;
+            let mut torque = [0.0; 4];
+            robot
+                .inverse_dynamics(
+                    &q,
+                    &zero,
+                    &unit_acceleration,
+                    &Frame::identity(),
+                    Twist::zeros(),
+                    Twist::zeros(),
+                    &[],
+                    &mut workspace,
+                    &mut torque,
+                )
+                .unwrap();
+            for row in 0..4 {
+                mass[(row, column)] = torque[row] - bias[row];
+            }
+        }
+
+        assert_relative_eq!(mass, mass.transpose(), epsilon = 2.0e-11);
+        // Joint 1 is fixed and intentionally occupies a zero row and column.
+        for direction in [
+            [1.0, 0.0, -0.4, 0.7],
+            [-0.3, 0.0, 1.2, -0.8],
+            [0.6, 0.0, 0.2, 1.4],
+        ] {
+            let direction = nalgebra::DVector::from_column_slice(&direction);
+            let energy = direction.dot(&(&mass * &direction));
+            assert!(
+                energy > 1.0e-8,
+                "mass matrix is not positive on moving coordinates: sample={sample}, energy={energy}, mass={mass:?}"
+            );
+        }
     }
 }

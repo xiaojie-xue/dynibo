@@ -71,6 +71,27 @@ jobs:
             codecov.json
           if-no-files-found: error
 
+  pinocchio-reference:
+    name: Pinocchio numerical reference tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: pinocchio-reference
+          create-args: >-
+            pinocchio=3.9.0
+            pkg-config
+          init-shell: bash
+      - name: Compare kinematics and dynamics with Pinocchio
+        shell: micromamba-shell {0}
+        run: |
+          export PKG_CONFIG_PATH="${CONDA_PREFIX}/lib/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
+          cargo test -p dyno --locked --features pinocchio-tests --tests
+
   rust-package:
     name: Rust crate package tests
     runs-on: ubuntu-latest
