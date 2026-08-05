@@ -90,6 +90,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
           export PKG_CONFIG_PATH="${CONDA_PREFIX}/lib/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
+          export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
           cargo test -p dynibo --locked --features pinocchio-tests --tests
 
   rust-package:
