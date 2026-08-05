@@ -49,9 +49,7 @@ Dynibo 专注于最常用的机器人运动学与动力学接口：
 - `inverse_dynamics` — 递归 Newton–Euler 逆动力学
 
 API 围绕少量核心类型构建：`Robot`、`Workspace`、`LinkId`、`Frame`、`Twist` 和
-`Wrench`。数值计算基于 [`nalgebra`](https://nalgebra.rs/)，URDF 解析基于
-[`urdf-rs`](https://github.com/openrr/urdf-rs)。Rust、Python、C 和 C++ 接口共用同一套
-Rust 实现。
+`Wrench`。Rust、Python、C 和 C++ 接口共用同一套 Rust 实现。
 
 ### 可靠
 
@@ -61,6 +59,15 @@ oracle 还会在确定性机器人状态下完整对比 FK、Jacobian、gravity 
 
 Rust 核心不包含项目自身的 `unsafe` 代码。CI 要求 Rust workspace 的行覆盖率不低于
 85%，分支覆盖率不低于 75%。
+
+## 依赖
+
+Rust 核心只有两个直接运行时依赖：
+
+- [`nalgebra`](https://nalgebra.rs/) — 线性代数与数值类型
+- [`urdf-rs`](https://github.com/openrr/urdf-rs) — URDF 解析
+
+Python wheel 已包含原生库，无需额外的 Python 运行时依赖。
 
 ## 快速开始
 
@@ -92,8 +99,7 @@ cmake --build build/c --parallel
 cmake --install build/c --prefix /opt/dynibo
 ```
 
-CMake 项目可使用安装后的 `dynibo::dynibo` target。package 与链接配置详见
-[安装指南](docs/RELEASING.zh.md)。
+CMake 项目可使用安装后的 `dynibo::dynibo` target。
 
 ## 示例
 
@@ -120,8 +126,8 @@ bash ci/test-all.sh
 
 ## 贡献
 
-欢迎参与贡献。你可以通过 issue 反馈问题或提出建议，也可以提交 pull request 改进项目。
-如果你对改进项目有任何想法，欢迎随时联系我。
+Dynibo 目前仍处于早期阶段，欢迎大家一起参与构建和完善。你可以通过 issue 反馈问题
+或提出建议，也可以提交 pull request；如果你对项目的发展有任何想法，欢迎随时联系我。
 
 ## 引用
 

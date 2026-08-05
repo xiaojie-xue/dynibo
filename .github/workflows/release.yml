@@ -1,3 +1,8 @@
+# Maintainer release checklist:
+# 1. Synchronize all package versions and run ci/check-release-version.py.
+# 2. Run ci/test-all.sh, then commit and tag the release as vMAJOR.MINOR.PATCH.
+# 3. Publish a non-prerelease GitHub Release for that tag to trigger this workflow.
+
 name: Publish release
 
 on:

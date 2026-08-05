@@ -56,10 +56,8 @@ dynamics interfaces:
 - `inverse_dynamics` — recursive Newton–Euler inverse dynamics
 
 The API is built around a small set of types: `Robot`, `Workspace`, `LinkId`,
-`Frame`, `Twist`, and `Wrench`. Numerical types come from
-[`nalgebra`](https://nalgebra.rs/), while URDF parsing uses
-[`urdf-rs`](https://github.com/openrr/urdf-rs). Rust, Python, C, and C++
-interfaces share the same Rust implementation.
+`Frame`, `Twist`, and `Wrench`. Rust, Python, C, and C++ interfaces share the
+same Rust implementation.
 
 ### Reliable
 
@@ -71,6 +69,15 @@ and RNEA outputs over deterministic robot states.
 
 The Rust core contains no project-owned `unsafe` code. CI requires at least 85%
 line coverage and 75% branch coverage across the Rust workspace.
+
+## Dependencies
+
+The Rust core has two direct runtime dependencies:
+
+- [`nalgebra`](https://nalgebra.rs/) — linear algebra and numerical types
+- [`urdf-rs`](https://github.com/openrr/urdf-rs) — URDF parsing
+
+Python wheels bundle the native library and have no runtime Python dependencies.
 
 ## Quick start
 
@@ -102,8 +109,7 @@ cmake --build build/c --parallel
 cmake --install build/c --prefix /opt/dynibo
 ```
 
-CMake consumers can use the installed `dynibo::dynibo` target. See the
-[installation guide](docs/RELEASING.md) for package and linker details.
+CMake consumers can use the installed `dynibo::dynibo` target.
 
 ## Examples
 
@@ -132,9 +138,9 @@ bash ci/test-all.sh
 
 ## Contributing
 
-Contributions are welcome. Feel free to open an issue for bugs or ideas, or
-submit a pull request with improvements. If you have any ideas about improving
-the project, feel free to contact me anytime.
+Dynibo is still at an early stage, and we welcome you to help shape and build it
+with us. Feel free to open an issue for bugs or ideas, submit a pull request with
+improvements, or contact me anytime to discuss how the project could evolve.
 
 ## Citation
 
