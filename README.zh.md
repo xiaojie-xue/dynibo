@@ -7,7 +7,7 @@
 [English](README.md) | 简体中文
 
 `dynibo` 是一个快速、轻量且可靠的 Rust 机器人运动学与动力学库。它在运行时从 URDF
-加载树状机器人拓扑，并通过可复用的 Workspace 提供计算期零分配的接口；同时基于同一
+加载机器人，并通过可复用的 Workspace 提供计算期零分配的接口；同时基于同一
 套 Rust 核心开放 Python 与 C/C++ 接口。
 
 ## 特性
@@ -29,8 +29,7 @@ Workspace、Pinocchio `Data` 和输出 buffer 的创建均不计入耗时。加�
 | 串联模型（40 关节） | 1.24× | 1.72× | 1.63× | 1.91× |
 | 双末端树状模型（7 关节） | 2.08× | 2.70× | 1.89× | 1.91× |
 
-测试环境为 Intel Core i9-14900K、rustc 1.97.1 和 Pinocchio 3.9.0。以上数据用于展示
-当前机器上的性能趋势，不构成跨平台性能承诺。确保 `pkg-config` 能找到 Pinocchio 后，
+测试环境为 Intel Core i9-14900K、rustc 1.97.1 和 Pinocchio 3.9.0。确保 `pkg-config` 能找到 Pinocchio 后，
 可通过以下命令复现：
 
 ```bash
@@ -137,7 +136,7 @@ Dynibo 目前仍处于早期阶段，欢迎大家一起参与构建和完善。�
 ```bibtex
 @software{xue2026dynibo,
   author  = {Xue, Xiaojie},
-  title   = {Dynibo: Fast, Lightweight, and Reliable Robot Kinematics and Dynamics},
+  title   = {Dynibo: a Fast, Lightweight, and Reliable Robot Kinematics and Dynamics Library},
   year    = {2026},
   version = {0.1.0},
   url     = {https://github.com/xiaojie-xue/dynibo}

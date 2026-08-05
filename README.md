@@ -6,7 +6,7 @@
 
 English | [简体中文](README.zh.md)
 
-`dynibo` is a fast, lightweight, and reliable Rust library for tree-structured
+`dynibo` is a fast, lightweight, and reliable Rust library for 
 robot kinematics and dynamics. It loads robot topology from URDF at runtime and
 provides allocation-free calculations through reusable workspaces. Python and
 C/C++ interfaces are available on top of the same Rust core.
@@ -35,8 +35,7 @@ better.
 | Two-leaf tree (7 joints) | 2.08× | 2.70× | 1.89× | 1.91× |
 
 Measurements were collected on an Intel Core i9-14900K with rustc 1.97.1 and
-Pinocchio 3.9.0. They show the trend on this machine, not a cross-platform
-performance guarantee. When Pinocchio is available through `pkg-config`,
+Pinocchio 3.9.0. When Pinocchio is available through `pkg-config`,
 reproduce them with:
 
 ```bash
@@ -150,7 +149,7 @@ If Dynibo is useful in your work, please cite it as:
 ```bibtex
 @software{xue2026dynibo,
   author  = {Xue, Xiaojie},
-  title   = {Dynibo: Fast, Lightweight, and Reliable Robot Kinematics and Dynamics},
+  title   = {Dynibo: a Fast, Lightweight, and Reliable Robot Kinematics and Dynamics Library},
   year    = {2026},
   version = {0.1.0},
   url     = {https://github.com/xiaojie-xue/dynibo}
