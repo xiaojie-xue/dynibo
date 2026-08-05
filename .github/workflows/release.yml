@@ -1,0 +1,147 @@
+name: Publish release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: registry-release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: Validate release
+    if: github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Check tag and package versions
+        run: python ci/check-release-version.py "$RELEASE_TAG"
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --all-targets --locked
+
+  rust-package:
+    name: Build and test Rust crate
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.release.tag_name }}
+      - uses: dtolnay/rust-toolchain@stable
+      - run: bash ci/test-rust-package.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-rust-crate
+          path: target/package/dynibo-*.crate
+          if-no-files-found: error
+
+  python-wheel:
+    name: Build and test Python wheel (${{ matrix.os }})
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.release.tag_name }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Install wheel builder
+        run: python -m pip install cibuildwheel==3.4.1
+      - name: Build and test installed wheel
+        run: python -m cibuildwheel --output-dir wheelhouse
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-python-wheel-${{ runner.os }}-${{ runner.arch }}
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+
+  python-sdist:
+    name: Build and test Python source distribution
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.release.tag_name }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Build source distribution
+        run: |
+          python -m pip install build
+          python -m build --sdist
+      - name: Build wheel from source distribution
+        run: python -m pip wheel dist/*.tar.gz --no-deps --wheel-dir dist/from-sdist
+      - name: Test wheel built from source distribution
+        run: |
+          python -m venv target/sdist-test
+          target/sdist-test/bin/python -m pip install --no-deps dist/from-sdist/*.whl
+          target/sdist-test/bin/python tests/python/test_package.py tests/data/test_arm.urdf
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-python-sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish-crate:
+    name: Publish Rust crate to crates.io
+    needs: [rust-package, python-wheel, python-sdist]
+    runs-on: ubuntu-latest
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.release.tag_name }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish dynibo
+        run: cargo publish -p dynibo --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+
+  publish-pypi:
+    name: Publish Python distributions to PyPI
+    needs: [rust-package, python-wheel, python-sdist]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-python-*
+          path: dist
+          merge-multiple: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
