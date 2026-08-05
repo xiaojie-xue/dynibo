@@ -56,7 +56,7 @@ jobs:
       - name: Generate Codecov report
         run: >-
           cargo +nightly llvm-cov report --branch
-          -p dyno -p dyno-c --codecov --output-path codecov.json
+          -p dynibo -p dynibo-c --codecov --output-path codecov.json
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v6
         with:
@@ -90,7 +90,7 @@ jobs:
         shell: micromamba-shell {0}
         run: |
           export PKG_CONFIG_PATH="${CONDA_PREFIX}/lib/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
-          cargo test -p dyno --locked --features pinocchio-tests --tests
+          cargo test -p dynibo --locked --features pinocchio-tests --tests
 
   rust-package:
     name: Rust crate package tests
@@ -106,7 +106,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: rust-crate
-          path: target/package/dyno-*.crate
+          path: target/package/dynibo-*.crate
           if-no-files-found: error
 
   native-package:
@@ -136,7 +136,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: native-package-${{ runner.os }}-${{ runner.arch }}
-          path: build/native/dyno-*.tar.gz
+          path: build/native/dynibo-*.tar.gz
           if-no-files-found: error
 
   python-wheel:

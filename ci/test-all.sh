@@ -9,16 +9,16 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked
 
 if pkg-config --exists pinocchio; then
-    cargo clippy -p dyno --tests --locked --features pinocchio-tests -- -D warnings
-    cargo test -p dyno --locked --features pinocchio-tests --tests
-elif [[ "${DYNO_REQUIRE_PINOCCHIO:-0}" == "1" ]]; then
+    cargo clippy -p dynibo --tests --locked --features pinocchio-tests -- -D warnings
+    cargo test -p dynibo --locked --features pinocchio-tests --tests
+elif [[ "${DYNIBO_REQUIRE_PINOCCHIO:-0}" == "1" ]]; then
     echo "Pinocchio is required, but pkg-config could not find it" >&2
     exit 1
 else
-    echo "Skipping Pinocchio reference tests; set PKG_CONFIG_PATH or DYNO_REQUIRE_PINOCCHIO=1"
+    echo "Skipping Pinocchio reference tests; set PKG_CONFIG_PATH or DYNIBO_REQUIRE_PINOCCHIO=1"
 fi
 
-CARGO_NET_OFFLINE=true DYNO_ALLOW_DIRTY=1 bash ci/test-rust-package.sh
+CARGO_NET_OFFLINE=true DYNIBO_ALLOW_DIRTY=1 bash ci/test-rust-package.sh
 
 cmake -S . -B build/native -DCMAKE_BUILD_TYPE=Release
 cmake --build build/native --config Release --parallel
@@ -27,7 +27,7 @@ python_command="${PYTHON:-python3}"
 "${python_command}" ci/test-native-package.py \
     --package-dir build/native --configuration Release
 
-python_test_root="$(mktemp -d "${TMPDIR:-/tmp}/dyno-python-package-test.XXXXXX")"
+python_test_root="$(mktemp -d "${TMPDIR:-/tmp}/dynibo-python-package-test.XXXXXX")"
 cleanup() {
     rm -rf -- "${python_test_root}"
 }

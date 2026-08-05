@@ -1,4 +1,4 @@
-#include <dyno/dyno.hpp>
+#include <dynibo/dynibo.hpp>
 
 #include <cmath>
 #include <iostream>
@@ -16,9 +16,9 @@
 
 int main(int argc, char** argv) {
     CHECK(argc == 2);
-    dyno::Robot robot(argv[1]);
-    dyno::Robot moved(std::move(robot));
-    dyno::Robot assigned(argv[1]);
+    dynibo::Robot robot(argv[1]);
+    dynibo::Robot moved(std::move(robot));
+    dynibo::Robot assigned(argv[1]);
     assigned = std::move(moved);
     CHECK(assigned.native_handle() != nullptr);
     CHECK(assigned.workspace_handle() != nullptr);
@@ -60,16 +60,16 @@ int main(int argc, char** argv) {
     for (double value : acceleration.angular) CHECK(std::abs(value) < 1.0e-12);
     for (double value : acceleration.linear) CHECK(std::abs(value) < 1.0e-12);
 
-    DynoLoad load{};
+    DyniboLoad load{};
     load.link_id = target;
     load.force[1] = 1.0;
-    CHECK(assigned.gravity(q, dyno::identity_pose(), {load}) != gravity);
+    CHECK(assigned.gravity(q, dynibo::identity_pose(), {load}) != gravity);
 
     bool caught = false;
     try {
         static_cast<void>(assigned.link_id("missing"));
-    } catch (const dyno::Error& error) {
-        caught = error.status() == DYNO_STATUS_INVALID_ARGUMENT
+    } catch (const dynibo::Error& error) {
+        caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
             && std::string(error.what()).find("does not exist") != std::string::npos;
     }
     CHECK(caught);
@@ -78,24 +78,24 @@ int main(int argc, char** argv) {
     caught = false;
     try {
         static_cast<void>(assigned.forward_velocity(q, short_q, target));
-    } catch (const dyno::Error& error) {
-        caught = error.status() == DYNO_STATUS_INVALID_ARGUMENT
+    } catch (const dynibo::Error& error) {
+        caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
             && std::string(error.what()).find("same length") != std::string::npos;
     }
     CHECK(caught);
     caught = false;
     try {
         static_cast<void>(assigned.forward_acceleration(q, q, short_q, target));
-    } catch (const dyno::Error& error) {
-        caught = error.status() == DYNO_STATUS_INVALID_ARGUMENT
+    } catch (const dynibo::Error& error) {
+        caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
             && std::string(error.what()).find("same length") != std::string::npos;
     }
     CHECK(caught);
     caught = false;
     try {
         static_cast<void>(assigned.inverse_dynamics(q, short_q, q));
-    } catch (const dyno::Error& error) {
-        caught = error.status() == DYNO_STATUS_INVALID_ARGUMENT
+    } catch (const dynibo::Error& error) {
+        caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
             && std::string(error.what()).find("same length") != std::string::npos;
     }
     CHECK(caught);

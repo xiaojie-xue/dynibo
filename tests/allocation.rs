@@ -5,7 +5,7 @@ use std::{
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
-use dyno::{Frame, InverseKinematicsOptions, Robot, Twist};
+use dynibo::{Frame, InverseKinematicsOptions, Robot, Twist};
 
 struct CountingAllocator;
 

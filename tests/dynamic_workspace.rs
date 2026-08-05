@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use approx::assert_relative_eq;
-use dyno::{Error, Frame, IndexedLoad, InverseKinematicsOptions, Robot, Twist, Wrench};
+use dynibo::{Error, Frame, IndexedLoad, InverseKinematicsOptions, Robot, Twist, Wrench};
 use nalgebra::{Matrix3, SMatrix, SVector, Translation3, UnitQuaternion, Vector3};
 
 fn urdf_path(file_name: &str) -> PathBuf {
@@ -26,18 +26,21 @@ fn assert_slice_close(actual: &[f64], expected: &[f64]) {
     }
 }
 
-fn assert_wrong_length<T: std::fmt::Debug>(result: dyno::Result<T>, expected_slice: &'static str) {
+fn assert_wrong_length<T: std::fmt::Debug>(
+    result: dynibo::Result<T>,
+    expected_slice: &'static str,
+) {
     match result {
         Err(Error::WrongSliceLength { slice, .. }) => assert_eq!(slice, expected_slice),
         other => panic!("expected WrongSliceLength for {expected_slice}, found {other:?}"),
     }
 }
 
-fn assert_invalid_workspace<T: std::fmt::Debug>(result: dyno::Result<T>) {
+fn assert_invalid_workspace<T: std::fmt::Debug>(result: dynibo::Result<T>) {
     assert!(matches!(result, Err(Error::InvalidWorkspace)));
 }
 
-fn assert_invalid_link<T: std::fmt::Debug>(result: dyno::Result<T>) {
+fn assert_invalid_link<T: std::fmt::Debug>(result: dynibo::Result<T>) {
     assert!(matches!(result, Err(Error::InvalidLinkId)));
 }
 

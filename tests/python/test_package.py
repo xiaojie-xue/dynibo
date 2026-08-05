@@ -1,4 +1,4 @@
-"""Black-box tests run against an installed dyno-robotics package."""
+"""Black-box tests run against an installed dynibo package."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import sys
 import unittest
 from pathlib import Path
 
-import dyno
+import dynibo
 
 
 URDF = (
@@ -14,20 +14,20 @@ URDF = (
     if len(sys.argv) > 1
     else Path("tests/data/test_arm.urdf").resolve()
 )
-SOURCE_PACKAGE = Path(__file__).resolve().parents[2] / "bindings" / "python" / "dyno"
-if Path(dyno.__file__).resolve().parent == SOURCE_PACKAGE:
-    raise RuntimeError("package test imported bindings/python/dyno from the source tree")
+SOURCE_PACKAGE = Path(__file__).resolve().parents[2] / "bindings" / "python" / "dynibo"
+if Path(dynibo.__file__).resolve().parent == SOURCE_PACKAGE:
+    raise RuntimeError("package test imported bindings/python/dynibo from the source tree")
 
 
 class PackageTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.robot = dyno.Robot(URDF)
+        self.robot = dynibo.Robot(URDF)
         self.addCleanup(self.robot.close)
         self.target = self.robot.link_id("test_link_4")
         self.q = [0.0] * self.robot.joint_count
 
     def test_model_and_kinematics(self) -> None:
-        self.assertEqual(dyno.__version__, "0.1.0")
+        self.assertEqual(dynibo.__version__, "0.1.0")
         self.assertEqual(self.robot.name, "test_arm")
         self.assertEqual(self.robot.joint_count, 4)
         self.assertEqual(self.robot.link_count, 5)
@@ -36,9 +36,9 @@ class PackageTests(unittest.TestCase):
         self.assertAlmostEqual(pose.translation[1], 0.0)
         self.assertAlmostEqual(pose.translation[2], 0.108)
         self.assertEqual(len(self.robot.jacobian(self.q, self.target)), 24)
-        self.assertEqual(self.robot.forward_velocity(self.q, self.q, self.target), dyno.Twist())
+        self.assertEqual(self.robot.forward_velocity(self.q, self.q, self.target), dynibo.Twist())
         self.assertEqual(
-            self.robot.forward_acceleration(self.q, self.q, self.q, self.target), dyno.Twist()
+            self.robot.forward_acceleration(self.q, self.q, self.q, self.target), dynibo.Twist()
         )
 
     def test_dynamics_and_inverse_kinematics(self) -> None:
@@ -52,7 +52,7 @@ class PackageTests(unittest.TestCase):
             self.assertAlmostEqual(left, right)
 
         loaded = self.robot.gravity(
-            self.q, loads=[dyno.Load(self.target, force=(0.0, 1.0, 0.0))]
+            self.q, loads=[dynibo.Load(self.target, force=(0.0, 1.0, 0.0))]
         )
         self.assertNotEqual(loaded, gravity)
 
@@ -61,22 +61,22 @@ class PackageTests(unittest.TestCase):
             self.robot.link_id("missing")
         with self.assertRaisesRegex(ValueError, "expected 4 elements"):
             self.robot.jacobian(self.q[:-1], self.target)
-        pose = dyno.Pose(rotation_xyzw=(0.0, 0.0, 0.0, 0.0))
+        pose = dynibo.Pose(rotation_xyzw=(0.0, 0.0, 0.0, 0.0))
         with self.assertRaisesRegex(ValueError, "zero quaternion"):
             self.robot.inverse_kinematics(self.q, self.target, pose)
 
-        with self.assertRaises(dyno.ModelError):
-            dyno.Robot(URDF.with_name("missing-model.urdf"))
+        with self.assertRaises(dynibo.ModelError):
+            dynibo.Robot(URDF.with_name("missing-model.urdf"))
 
-        unreachable = dyno.Pose(translation=(100.0, 0.0, 0.0))
-        options = dyno.IkOptions(max_iterations=1)
-        with self.assertRaises(dyno.SolverError):
+        unreachable = dynibo.Pose(translation=(100.0, 0.0, 0.0))
+        options = dynibo.IkOptions(max_iterations=1)
+        with self.assertRaises(dynibo.SolverError):
             self.robot.inverse_kinematics(self.q, self.target, unreachable, options)
 
     def test_non_default_frames_options_and_loads(self) -> None:
         moving = [0.1, -0.2, 0.3, -0.4]
-        base = dyno.Pose(rotation_xyzw=(2**-0.5, 0.0, 0.0, 2**-0.5))
-        tool = dyno.Pose(translation=(0.1, -0.03, 0.2))
+        base = dynibo.Pose(rotation_xyzw=(2**-0.5, 0.0, 0.0, 2**-0.5))
+        tool = dynibo.Pose(translation=(0.1, -0.03, 0.2))
         origin_velocity = self.robot.forward_velocity(self.q, moving, self.target)
         tool_velocity = self.robot.forward_velocity(
             self.q, moving, self.target, base=base, tool=tool
@@ -85,7 +85,7 @@ class PackageTests(unittest.TestCase):
         self.assertNotEqual(self.robot.gravity(self.q, base=base), self.robot.gravity(self.q))
 
         pose = self.robot.forward_kinematics(self.q, self.target)
-        options = dyno.IkOptions(
+        options = dynibo.IkOptions(
             max_iterations=1,
             translation_tolerance=1.0e-8,
             rotation_tolerance=1.0e-8,
@@ -136,11 +136,11 @@ class PackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "q and qd must have the same length"):
             self.robot.inverse_dynamics(self.q, self.q[:-1], self.q)
         with self.assertRaisesRegex(ValueError, "pose translation must contain exactly 3"):
-            self.robot.gravity(self.q, base=dyno.Pose(translation=(0.0, 0.0)))
+            self.robot.gravity(self.q, base=dynibo.Pose(translation=(0.0, 0.0)))
         with self.assertRaisesRegex(ValueError, "load force must contain exactly 3"):
-            self.robot.gravity(self.q, loads=[dyno.Load(self.target, force=(1.0, 2.0))])
+            self.robot.gravity(self.q, loads=[dynibo.Load(self.target, force=(1.0, 2.0))])
 
-        with dyno.Robot(URDF) as managed:
+        with dynibo.Robot(URDF) as managed:
             self.assertEqual(managed.name, "test_arm")
         managed.close()
         with self.assertRaisesRegex(ValueError, "robot must not be null"):

@@ -2,71 +2,71 @@
 
 use std::{ffi::CString, path::PathBuf, ptr::NonNull};
 
-use dyno::{Frame, IndexedLoad, InverseKinematicsOptions, Robot, Twist, Wrench};
+use dynibo::{Frame, IndexedLoad, InverseKinematicsOptions, Robot, Twist, Wrench};
 use nalgebra::{Matrix3, Rotation3, Translation3, UnitQuaternion, Vector3};
 
 unsafe extern "C" {
-    fn dyno_pinocchio_create_for_frame(
+    fn dynibo_pinocchio_create_for_frame(
         urdf_path: *const std::ffi::c_char,
         frame_name: *const std::ffi::c_char,
     ) -> *mut std::ffi::c_void;
-    fn dyno_pinocchio_create_floating_for_frame(
+    fn dynibo_pinocchio_create_floating_for_frame(
         urdf_path: *const std::ffi::c_char,
         frame_name: *const std::ffi::c_char,
     ) -> *mut std::ffi::c_void;
-    fn dyno_pinocchio_destroy(context: *mut std::ffi::c_void);
-    fn dyno_pinocchio_dof(context: *const std::ffi::c_void) -> usize;
-    fn dyno_pinocchio_configuration_size(context: *const std::ffi::c_void) -> usize;
-    fn dyno_pinocchio_neutral_configuration(context: *const std::ffi::c_void, q: *mut f64);
-    fn dyno_pinocchio_joint_configuration_index(
+    fn dynibo_pinocchio_destroy(context: *mut std::ffi::c_void);
+    fn dynibo_pinocchio_dof(context: *const std::ffi::c_void) -> usize;
+    fn dynibo_pinocchio_configuration_size(context: *const std::ffi::c_void) -> usize;
+    fn dynibo_pinocchio_neutral_configuration(context: *const std::ffi::c_void, q: *mut f64);
+    fn dynibo_pinocchio_joint_configuration_index(
         context: *const std::ffi::c_void,
         joint_name: *const std::ffi::c_char,
     ) -> usize;
-    fn dyno_pinocchio_joint_configuration_dimension(
+    fn dynibo_pinocchio_joint_configuration_dimension(
         context: *const std::ffi::c_void,
         joint_name: *const std::ffi::c_char,
     ) -> usize;
-    fn dyno_pinocchio_joint_velocity_index(
+    fn dynibo_pinocchio_joint_velocity_index(
         context: *const std::ffi::c_void,
         joint_name: *const std::ffi::c_char,
     ) -> usize;
-    fn dyno_pinocchio_link_frame_values(
+    fn dynibo_pinocchio_link_frame_values(
         context: *mut std::ffi::c_void,
         q: *const f64,
         rotation: *mut f64,
         translation: *mut f64,
     );
-    fn dyno_pinocchio_link_jacobian_values(
+    fn dynibo_pinocchio_link_jacobian_values(
         context: *mut std::ffi::c_void,
         q: *const f64,
         jacobian: *mut f64,
     );
-    fn dyno_pinocchio_link_velocity_values(
+    fn dynibo_pinocchio_link_velocity_values(
         context: *mut std::ffi::c_void,
         q: *const f64,
         qd: *const f64,
         velocity: *mut f64,
     );
-    fn dyno_pinocchio_link_acceleration_values(
+    fn dynibo_pinocchio_link_acceleration_values(
         context: *mut std::ffi::c_void,
         q: *const f64,
         qd: *const f64,
         qdd: *const f64,
         acceleration: *mut f64,
     );
-    fn dyno_pinocchio_gravity_values(
+    fn dynibo_pinocchio_gravity_values(
         context: *mut std::ffi::c_void,
         q: *const f64,
         gravity: *mut f64,
     );
-    fn dyno_pinocchio_rnea_values(
+    fn dynibo_pinocchio_rnea_values(
         context: *mut std::ffi::c_void,
         q: *const f64,
         qd: *const f64,
         qdd: *const f64,
         torque: *mut f64,
     );
-    fn dyno_pinocchio_rnea_with_link_load_values(
+    fn dynibo_pinocchio_rnea_with_link_load_values(
         context: *mut std::ffi::c_void,
         q: *const f64,
         qd: *const f64,
@@ -74,7 +74,7 @@ unsafe extern "C" {
         load: *const f64,
         torque: *mut f64,
     );
-    fn dyno_pinocchio_floating_rnea_values(
+    fn dynibo_pinocchio_floating_rnea_values(
         context: *mut std::ffi::c_void,
         q: *const f64,
         qd: *const f64,
@@ -107,7 +107,7 @@ impl PinocchioContext {
         let frame_name = CString::new(frame_name).unwrap();
         // SAFETY: both C strings remain alive for the duration of the call.
         let pointer =
-            unsafe { dyno_pinocchio_create_for_frame(path.as_ptr(), frame_name.as_ptr()) };
+            unsafe { dynibo_pinocchio_create_for_frame(path.as_ptr(), frame_name.as_ptr()) };
         let pointer = NonNull::new(pointer).expect("Pinocchio must load the oracle fixture");
         Self::from_pointer(robot, pointer)
     }
@@ -116,17 +116,18 @@ impl PinocchioContext {
         let path = CString::new(path.to_string_lossy().as_bytes()).unwrap();
         let frame_name = CString::new(frame_name).unwrap();
         // SAFETY: both C strings remain alive for the duration of the call.
-        let pointer =
-            unsafe { dyno_pinocchio_create_floating_for_frame(path.as_ptr(), frame_name.as_ptr()) };
+        let pointer = unsafe {
+            dynibo_pinocchio_create_floating_for_frame(path.as_ptr(), frame_name.as_ptr())
+        };
         let pointer = NonNull::new(pointer).expect("Pinocchio must load the floating fixture");
         Self::from_pointer(robot, pointer)
     }
 
     fn from_pointer(robot: &Robot, pointer: NonNull<std::ffi::c_void>) -> Self {
         // SAFETY: `pointer` owns a live Pinocchio context.
-        let configuration_size = unsafe { dyno_pinocchio_configuration_size(pointer.as_ptr()) };
+        let configuration_size = unsafe { dynibo_pinocchio_configuration_size(pointer.as_ptr()) };
         // SAFETY: `pointer` owns a live Pinocchio context.
-        let velocity_size = unsafe { dyno_pinocchio_dof(pointer.as_ptr()) };
+        let velocity_size = unsafe { dynibo_pinocchio_dof(pointer.as_ptr()) };
         let joint_mappings = robot
             .joints()
             .iter()
@@ -134,15 +135,16 @@ impl PinocchioContext {
                 let name = CString::new(joint.name()).unwrap();
                 // SAFETY: the context and name are valid for each query.
                 let configuration_index = unsafe {
-                    dyno_pinocchio_joint_configuration_index(pointer.as_ptr(), name.as_ptr())
+                    dynibo_pinocchio_joint_configuration_index(pointer.as_ptr(), name.as_ptr())
                 };
                 // SAFETY: the context and name are valid for each query.
                 let configuration_dimension = unsafe {
-                    dyno_pinocchio_joint_configuration_dimension(pointer.as_ptr(), name.as_ptr())
+                    dynibo_pinocchio_joint_configuration_dimension(pointer.as_ptr(), name.as_ptr())
                 };
                 // SAFETY: the context and name are valid for each query.
-                let velocity_index =
-                    unsafe { dyno_pinocchio_joint_velocity_index(pointer.as_ptr(), name.as_ptr()) };
+                let velocity_index = unsafe {
+                    dynibo_pinocchio_joint_velocity_index(pointer.as_ptr(), name.as_ptr())
+                };
                 JointMapping {
                     configuration_index,
                     configuration_dimension,
@@ -165,7 +167,10 @@ impl PinocchioContext {
         let mut configuration = vec![0.0; self.configuration_size];
         // SAFETY: the output contains exactly `model.nq` scalars.
         unsafe {
-            dyno_pinocchio_neutral_configuration(self.pointer.as_ptr(), configuration.as_mut_ptr())
+            dynibo_pinocchio_neutral_configuration(
+                self.pointer.as_ptr(),
+                configuration.as_mut_ptr(),
+            )
         };
         let mut velocity = vec![0.0; self.velocity_size];
         let mut acceleration = vec![0.0; self.velocity_size];
@@ -192,7 +197,7 @@ impl PinocchioContext {
         let mut translation = [0.0; 3];
         // SAFETY: all buffers have the dimensions required by this context.
         unsafe {
-            dyno_pinocchio_link_frame_values(
+            dynibo_pinocchio_link_frame_values(
                 self.pointer.as_ptr(),
                 configuration.as_ptr(),
                 rotation.as_mut_ptr(),
@@ -209,29 +214,29 @@ impl PinocchioContext {
         let mut pinocchio = vec![0.0; 6 * self.velocity_size];
         // SAFETY: the output has `6 * model.nv` elements.
         unsafe {
-            dyno_pinocchio_link_jacobian_values(
+            dynibo_pinocchio_link_jacobian_values(
                 self.pointer.as_ptr(),
                 configuration.as_ptr(),
                 pinocchio.as_mut_ptr(),
             )
         };
-        let mut dyno_order = vec![0.0; 6 * self.joint_mappings.len()];
+        let mut dynibo_order = vec![0.0; 6 * self.joint_mappings.len()];
         for (joint, mapping) in self.joint_mappings.iter().enumerate() {
             if let Some(column) = mapping.velocity_index {
                 for row in 0..6 {
                     let pinocchio_row = if row < 3 { row + 3 } else { row - 3 };
-                    dyno_order[6 * joint + row] = pinocchio[6 * column + pinocchio_row];
+                    dynibo_order[6 * joint + row] = pinocchio[6 * column + pinocchio_row];
                 }
             }
         }
-        dyno_order
+        dynibo_order
     }
 
     fn velocity(&mut self, configuration: &[f64], velocity: &[f64]) -> [f64; 6] {
         let mut output = [0.0; 6];
         // SAFETY: input and output sizes match the context dimensions.
         unsafe {
-            dyno_pinocchio_link_velocity_values(
+            dynibo_pinocchio_link_velocity_values(
                 self.pointer.as_ptr(),
                 configuration.as_ptr(),
                 velocity.as_ptr(),
@@ -250,7 +255,7 @@ impl PinocchioContext {
         let mut output = [0.0; 6];
         // SAFETY: input and output sizes match the context dimensions.
         unsafe {
-            dyno_pinocchio_link_acceleration_values(
+            dynibo_pinocchio_link_acceleration_values(
                 self.pointer.as_ptr(),
                 configuration.as_ptr(),
                 velocity.as_ptr(),
@@ -265,20 +270,20 @@ impl PinocchioContext {
         let mut pinocchio = vec![0.0; self.velocity_size];
         // SAFETY: the output has one value per Pinocchio velocity coordinate.
         unsafe {
-            dyno_pinocchio_gravity_values(
+            dynibo_pinocchio_gravity_values(
                 self.pointer.as_ptr(),
                 configuration.as_ptr(),
                 pinocchio.as_mut_ptr(),
             )
         };
-        self.dyno_joint_order(&pinocchio)
+        self.dynibo_joint_order(&pinocchio)
     }
 
     fn rnea(&mut self, configuration: &[f64], velocity: &[f64], acceleration: &[f64]) -> Vec<f64> {
         let mut pinocchio = vec![0.0; self.velocity_size];
         // SAFETY: all buffers match the context dimensions.
         unsafe {
-            dyno_pinocchio_rnea_values(
+            dynibo_pinocchio_rnea_values(
                 self.pointer.as_ptr(),
                 configuration.as_ptr(),
                 velocity.as_ptr(),
@@ -286,7 +291,7 @@ impl PinocchioContext {
                 pinocchio.as_mut_ptr(),
             )
         };
-        self.dyno_joint_order(&pinocchio)
+        self.dynibo_joint_order(&pinocchio)
     }
 
     fn rnea_with_link_load(
@@ -307,7 +312,7 @@ impl PinocchioContext {
         let mut pinocchio = vec![0.0; self.velocity_size];
         // SAFETY: all buffers match the context dimensions, and the load has six elements.
         unsafe {
-            dyno_pinocchio_rnea_with_link_load_values(
+            dynibo_pinocchio_rnea_with_link_load_values(
                 self.pointer.as_ptr(),
                 configuration.as_ptr(),
                 velocity.as_ptr(),
@@ -316,7 +321,7 @@ impl PinocchioContext {
                 pinocchio.as_mut_ptr(),
             )
         };
-        self.dyno_joint_order(&pinocchio)
+        self.dynibo_joint_order(&pinocchio)
     }
 
     fn floating_rnea(
@@ -348,7 +353,7 @@ impl PinocchioContext {
         let mut pinocchio = vec![0.0; self.velocity_size];
         // SAFETY: all state and pose buffers match the free-flyer context dimensions.
         unsafe {
-            dyno_pinocchio_floating_rnea_values(
+            dynibo_pinocchio_floating_rnea_values(
                 self.pointer.as_ptr(),
                 configuration.as_ptr(),
                 velocity.as_ptr(),
@@ -360,10 +365,10 @@ impl PinocchioContext {
                 pinocchio.as_mut_ptr(),
             )
         };
-        self.dyno_joint_order(&pinocchio)
+        self.dynibo_joint_order(&pinocchio)
     }
 
-    fn dyno_joint_order(&self, pinocchio: &[f64]) -> Vec<f64> {
+    fn dynibo_joint_order(&self, pinocchio: &[f64]) -> Vec<f64> {
         self.joint_mappings
             .iter()
             .map(|mapping| mapping.velocity_index.map_or(0.0, |index| pinocchio[index]))
@@ -374,7 +379,7 @@ impl PinocchioContext {
 impl Drop for PinocchioContext {
     fn drop(&mut self) {
         // SAFETY: this context is owned here and destroyed exactly once.
-        unsafe { dyno_pinocchio_destroy(self.pointer.as_ptr()) };
+        unsafe { dynibo_pinocchio_destroy(self.pointer.as_ptr()) };
     }
 }
 

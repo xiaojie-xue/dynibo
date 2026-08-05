@@ -8,7 +8,7 @@ use std::{
 };
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
-use dyno::{
+use dynibo::{
     Error, Frame, IndexedLoad, InverseKinematicsOptions, Joint, JointType, Link, Robot, Twist,
     Wrench,
 };
@@ -30,19 +30,19 @@ trait DynamicTestApi {
         &self,
         q: &JointVector<N>,
         target: &Link,
-    ) -> dyno::Result<Frame>;
+    ) -> dynibo::Result<Frame>;
     fn test_jacobian<const N: usize>(
         &self,
         q: &JointVector<N>,
         target: &Link,
-    ) -> dyno::Result<Jacobian<N>>;
+    ) -> dynibo::Result<Jacobian<N>>;
     fn test_inverse_kinematics<const N: usize>(
         &self,
         initial_q: &JointVector<N>,
         target: &Link,
         desired: &Frame,
         options: InverseKinematicsOptions,
-    ) -> dyno::Result<JointVector<N>>;
+    ) -> dynibo::Result<JointVector<N>>;
     fn test_forward_velocity_kinematics<const N: usize>(
         &self,
         q: &JointVector<N>,
@@ -50,20 +50,20 @@ trait DynamicTestApi {
         target: &Link,
         base: &Frame,
         tool: &Frame,
-    ) -> dyno::Result<Twist>;
+    ) -> dynibo::Result<Twist>;
     fn test_forward_acceleration_kinematics<const N: usize>(
         &self,
         q: &JointVector<N>,
         qd: &JointVector<N>,
         qdd: &JointVector<N>,
         target: &Link,
-    ) -> dyno::Result<Twist>;
+    ) -> dynibo::Result<Twist>;
     fn test_gravity<const N: usize>(
         &self,
         q: &JointVector<N>,
         base: &Frame,
         loads: &[Load<'_>],
-    ) -> dyno::Result<JointVector<N>>;
+    ) -> dynibo::Result<JointVector<N>>;
     #[allow(clippy::too_many_arguments)]
     fn test_inverse_dynamics<const N: usize>(
         &self,
@@ -74,7 +74,7 @@ trait DynamicTestApi {
         base_velocity: Twist,
         base_acceleration: Twist,
         loads: &[Load<'_>],
-    ) -> dyno::Result<JointVector<N>>;
+    ) -> dynibo::Result<JointVector<N>>;
 }
 
 impl DynamicTestApi for Robot {
@@ -82,7 +82,7 @@ impl DynamicTestApi for Robot {
         &self,
         q: &JointVector<N>,
         target: &Link,
-    ) -> dyno::Result<Frame> {
+    ) -> dynibo::Result<Frame> {
         let mut workspace = self.workspace();
         self.forward_kinematics(q.as_slice(), self.link_id(target.name())?, &mut workspace)
     }
@@ -91,7 +91,7 @@ impl DynamicTestApi for Robot {
         &self,
         q: &JointVector<N>,
         target: &Link,
-    ) -> dyno::Result<Jacobian<N>> {
+    ) -> dynibo::Result<Jacobian<N>> {
         let mut workspace = self.workspace();
         let mut output = Jacobian::<N>::zeros();
         self.jacobian(
@@ -109,7 +109,7 @@ impl DynamicTestApi for Robot {
         target: &Link,
         desired: &Frame,
         options: InverseKinematicsOptions,
-    ) -> dyno::Result<JointVector<N>> {
+    ) -> dynibo::Result<JointVector<N>> {
         let mut workspace = self.workspace();
         let mut output = JointVector::<N>::zeros();
         self.inverse_kinematics(
@@ -130,7 +130,7 @@ impl DynamicTestApi for Robot {
         target: &Link,
         base: &Frame,
         tool: &Frame,
-    ) -> dyno::Result<Twist> {
+    ) -> dynibo::Result<Twist> {
         let mut workspace = self.workspace();
         self.forward_velocity_kinematics(
             q.as_slice(),
@@ -148,7 +148,7 @@ impl DynamicTestApi for Robot {
         qd: &JointVector<N>,
         qdd: &JointVector<N>,
         target: &Link,
-    ) -> dyno::Result<Twist> {
+    ) -> dynibo::Result<Twist> {
         let mut workspace = self.workspace();
         self.forward_acceleration_kinematics(
             q.as_slice(),
@@ -164,7 +164,7 @@ impl DynamicTestApi for Robot {
         q: &JointVector<N>,
         base: &Frame,
         loads: &[Load<'_>],
-    ) -> dyno::Result<JointVector<N>> {
+    ) -> dynibo::Result<JointVector<N>> {
         let loads = loads
             .iter()
             .map(|load| {
@@ -173,7 +173,7 @@ impl DynamicTestApi for Robot {
                     wrench: load.wrench,
                 })
             })
-            .collect::<dyno::Result<Vec<_>>>()?;
+            .collect::<dynibo::Result<Vec<_>>>()?;
         let mut workspace = self.workspace();
         let mut output = JointVector::<N>::zeros();
         self.gravity(
@@ -195,7 +195,7 @@ impl DynamicTestApi for Robot {
         base_velocity: Twist,
         base_acceleration: Twist,
         loads: &[Load<'_>],
-    ) -> dyno::Result<JointVector<N>> {
+    ) -> dynibo::Result<JointVector<N>> {
         let loads = loads
             .iter()
             .map(|load| {
@@ -204,7 +204,7 @@ impl DynamicTestApi for Robot {
                     wrench: load.wrench,
                 })
             })
-            .collect::<dyno::Result<Vec<_>>>()?;
+            .collect::<dynibo::Result<Vec<_>>>()?;
         let mut workspace = self.workspace();
         let mut output = JointVector::<N>::zeros();
         self.inverse_dynamics(

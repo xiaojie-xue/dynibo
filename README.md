@@ -1,11 +1,11 @@
-# dyno
+# dynibo
 
-[![Package CI](https://github.com/xiaojie-xue/dyno/actions/workflows/package-ci.yml/badge.svg?branch=main)](https://github.com/xiaojie-xue/dyno/actions/workflows/package-ci.yml)
-[![codecov](https://codecov.io/gh/xiaojie-xue/dyno/branch/main/graph/badge.svg)](https://codecov.io/gh/xiaojie-xue/dyno)
+[![Package CI](https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml/badge.svg?branch=main)](https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml)
+[![codecov](https://codecov.io/gh/xiaojie-xue/dynibo/branch/main/graph/badge.svg)](https://codecov.io/gh/xiaojie-xue/dynibo)
 
 English | [简体中文](README.zh.md)
 
-`dyno` is a fast, lightweight, and reliable Rust library for tree-structured
+`dynibo` is a fast, lightweight, and reliable Rust library for tree-structured
 robot kinematics and dynamics. It loads robot topology from URDF at runtime and
 provides allocation-free calculations through reusable workspaces. Python and
 C/C++ interfaces are available on top of the same Rust core.
@@ -14,17 +14,17 @@ C/C++ interfaces are available on top of the same Rust core.
 
 ### Fast
 
-Dyno is written in Rust and keeps allocation outside the calculation loop.
+Dynibo is written in Rust and keeps allocation outside the calculation loop.
 After a `Workspace` and output buffers are created, the main kinematics and
 dynamics routines reuse that memory without allocating or resizing.
 
-The following Criterion results compare Dyno with Pinocchio using the same URDF
+The following Criterion results compare Dynibo with Pinocchio using the same URDF
 models and joint states. Model construction, workspaces, Pinocchio `Data`, and
 output allocation are excluded from the timed region. Speedups are calculated
 from quick-mode interval medians after subtracting the measured 0.882 ns fixed
 C ABI overhead from the Pinocchio times.
 
-Across these benchmarks, Dyno is 1.17–2.70× as fast as Pinocchio. Higher is
+Across these benchmarks, Dynibo is 1.17–2.70× as fast as Pinocchio. Higher is
 better.
 
 | Model | FK | Jacobian | Gravity | RNEA |
@@ -44,7 +44,7 @@ cargo bench --features pinocchio-bench --bench pinocchio -- --quick
 
 ### Lightweight
 
-Dyno intentionally focuses on the most commonly used robot kinematics and
+Dynibo intentionally focuses on the most commonly used robot kinematics and
 dynamics interfaces:
 
 - `forward_kinematics` — target-link pose
@@ -63,7 +63,7 @@ interfaces share the same Rust implementation.
 
 ### Reliable
 
-Dyno is thoroughly unit-tested. Tests cover finite-difference kinematics,
+Dynibo is thoroughly unit-tested. Tests cover finite-difference kinematics,
 dynamics regressions, branched robots and external loads, inverse kinematics,
 invalid inputs, workspace ownership and reuse, and allocation-free calculation.
 An independent Pinocchio oracle also compares complete FK, Jacobian, gravity,
@@ -79,7 +79,7 @@ line coverage and 75% branch coverage across the Rust workspace.
 Add the Cargo package:
 
 ```bash
-cargo add dyno
+cargo add dynibo
 ```
 
 ### Python
@@ -87,10 +87,10 @@ cargo add dyno
 Install the Python package from PyPI:
 
 ```bash
-python -m pip install dyno-robotics
+python -m pip install dynibo
 ```
 
-The package is imported as `dyno`.
+The package is imported as `dynibo`.
 
 ### C/C++
 
@@ -99,10 +99,10 @@ Build and install the CMake package:
 ```bash
 cmake -S . -B build/c -DCMAKE_BUILD_TYPE=Release
 cmake --build build/c --parallel
-cmake --install build/c --prefix /opt/dyno
+cmake --install build/c --prefix /opt/dynibo
 ```
 
-CMake consumers can use the installed `dyno::dyno` target. See the
+CMake consumers can use the installed `dynibo::dynibo` target. See the
 [installation guide](docs/RELEASING.md) for package and linker details.
 
 ## Examples
@@ -112,7 +112,7 @@ directory.
 
 ## Supported models
 
-Dyno supports runtime-sized tree URDFs with revolute, continuous, prismatic,
+Dynibo supports runtime-sized tree URDFs with revolute, continuous, prismatic,
 and fixed joints. It rejects invalid topology and reports structured errors for
 bad input lengths, model-mismatched handles, and solver failures.
 
@@ -138,18 +138,18 @@ the project, feel free to contact me anytime.
 
 ## Citation
 
-If Dyno is useful in your work, please cite it as:
+If Dynibo is useful in your work, please cite it as:
 
 ```bibtex
-@software{xue2026dyno,
+@software{xue2026dynibo,
   author  = {Xue, Xiaojie},
-  title   = {Dyno: Fast, Lightweight, and Reliable Robot Kinematics and Dynamics},
+  title   = {Dynibo: Fast, Lightweight, and Reliable Robot Kinematics and Dynamics},
   year    = {2026},
   version = {0.1.0},
-  url     = {https://github.com/xiaojie-xue/dyno}
+  url     = {https://github.com/xiaojie-xue/dynibo}
 }
 ```
 
 ## License
 
-Dyno is available under the [MIT License](LICENSE).
+Dynibo is available under the [MIT License](LICENSE).

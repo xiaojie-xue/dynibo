@@ -1,7 +1,7 @@
 use std::{hint::black_box, path::PathBuf};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use dyno::{Frame, IndexedLoad, InverseKinematicsOptions, LinkId, Robot, Twist, Wrench};
+use dynibo::{Frame, IndexedLoad, InverseKinematicsOptions, LinkId, Robot, Twist, Wrench};
 use nalgebra::Vector3;
 
 struct BenchmarkCase {
@@ -16,7 +16,7 @@ struct BenchmarkCase {
 impl BenchmarkCase {
     fn new(relative_urdf_path: &str) -> Self {
         let urdf_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_urdf_path);
-        let arm = Robot::from_urdf(urdf_path).expect("Dyno must load the benchmark URDF");
+        let arm = Robot::from_urdf(urdf_path).expect("Dynibo must load the benchmark URDF");
         let target_name = arm
             .leaf_links()
             .next()
@@ -49,7 +49,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
     let mut fk = c.benchmark_group(format!("forward_kinematics/{size}"));
     fk.throughput(Throughput::Elements(1));
     let mut workspace = case.arm.workspace();
-    fk.bench_function("dyno", |b| {
+    fk.bench_function("dynibo", |b| {
         b.iter(|| {
             black_box(
                 case.arm
@@ -64,7 +64,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
     jacobian.throughput(Throughput::Elements(1));
     let mut workspace = case.arm.workspace();
     let mut jacobian_output = vec![0.0; 6 * n];
-    jacobian.bench_function("dyno", |b| {
+    jacobian.bench_function("dynibo", |b| {
         b.iter(|| {
             case.arm
                 .jacobian(
@@ -82,7 +82,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
     let mut velocity = c.benchmark_group(format!("forward_velocity/{size}"));
     velocity.throughput(Throughput::Elements(1));
     let mut workspace = case.arm.workspace();
-    velocity.bench_function("dyno", |b| {
+    velocity.bench_function("dynibo", |b| {
         b.iter(|| {
             black_box(
                 case.arm
@@ -103,7 +103,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
     let mut acceleration = c.benchmark_group(format!("forward_acceleration/{size}"));
     acceleration.throughput(Throughput::Elements(1));
     let mut workspace = case.arm.workspace();
-    acceleration.bench_function("dyno", |b| {
+    acceleration.bench_function("dynibo", |b| {
         b.iter(|| {
             black_box(
                 case.arm
@@ -124,7 +124,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
     gravity.throughput(Throughput::Elements(1));
     let mut workspace = case.arm.workspace();
     let mut output = vec![0.0; n];
-    gravity.bench_function("dyno", |b| {
+    gravity.bench_function("dynibo", |b| {
         b.iter(|| {
             case.arm
                 .gravity(
@@ -144,7 +144,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
     rnea.throughput(Throughput::Elements(1));
     let mut workspace = case.arm.workspace();
     let mut output = vec![0.0; n];
-    rnea.bench_function("dyno", |b| {
+    rnea.bench_function("dynibo", |b| {
         b.iter(|| {
             case.arm
                 .inverse_dynamics(
@@ -356,7 +356,7 @@ fn benchmark_inverse_kinematics(c: &mut Criterion, case: &BenchmarkCase) {
     let mut workspace = case.arm.workspace();
     let mut ik = c.benchmark_group("inverse_kinematics/4joint");
     ik.throughput(Throughput::Elements(1));
-    ik.bench_function("dyno", |b| {
+    ik.bench_function("dynibo", |b| {
         b.iter(|| {
             case.arm
                 .inverse_kinematics(

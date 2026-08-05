@@ -1,7 +1,7 @@
-"""Python interface to the dyno robot kinematics and dynamics library."""
+"""Python interface to the dynibo robot kinematics and dynamics library."""
 
 from ._native import (
-    DynoError,
+    DyniboError,
     IkOptions,
     Load,
     ModelError,
@@ -13,7 +13,7 @@ from ._native import (
 )
 
 __all__ = [
-    "DynoError",
+    "DyniboError",
     "IkOptions",
     "Load",
     "ModelError",

@@ -1,0 +1,14 @@
+@PACKAGE_INIT@
+
+if(NOT TARGET dynibo::dynibo)
+    add_library(dynibo::dynibo SHARED IMPORTED)
+    set_target_properties(dynibo::dynibo PROPERTIES
+        IMPORTED_LOCATION "${PACKAGE_PREFIX_DIR}/@DYNIBO_LIBRARY_INSTALL_DIR@/@DYNIBO_LIBRARY_FILE@"
+        INTERFACE_INCLUDE_DIRECTORIES "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_INCLUDEDIR@")
+    if(WIN32)
+        set_target_properties(dynibo::dynibo PROPERTIES
+            IMPORTED_IMPLIB "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_LIBDIR@/@DYNIBO_IMPLIB_FILE@")
+    endif()
+endif()
+
+check_required_components(dynibo)

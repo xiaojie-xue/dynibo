@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use approx::assert_relative_eq;
-use dyno::{Frame, IndexedLoad, Robot, Twist, Wrench};
+use dynibo::{Frame, IndexedLoad, Robot, Twist, Wrench};
 use nalgebra::{DMatrix, Vector3};
 
 fn tree_arm() -> Robot {

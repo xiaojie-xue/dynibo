@@ -1,4 +1,4 @@
-"""Dependency-free ctypes wrapper around dyno's stable C ABI."""
+"""Dependency-free ctypes wrapper around dynibo's stable C ABI."""
 
 from __future__ import annotations
 
@@ -13,19 +13,19 @@ from typing import Iterable, Sequence
 
 def _library_name() -> str:
     if sys.platform == "win32":
-        return "dyno_c.dll"
+        return "dynibo_c.dll"
     if sys.platform == "darwin":
-        return "libdyno_c.dylib"
-    return "libdyno_c.so"
+        return "libdynibo_c.dylib"
+    return "libdynibo_c.so"
 
 
 def _load_library() -> ct.CDLL:
     candidates = []
-    override = os.environ.get("DYNO_LIBRARY_PATH")
+    override = os.environ.get("DYNIBO_LIBRARY_PATH")
     if override:
         candidates.append(override)
     candidates.append(str(Path(__file__).with_name(_library_name())))
-    system = ctypes.util.find_library("dyno_c")
+    system = ctypes.util.find_library("dynibo_c")
     if system:
         candidates.append(system)
     errors = []
@@ -34,7 +34,7 @@ def _load_library() -> ct.CDLL:
             return ct.CDLL(candidate)
         except OSError as error:
             errors.append(f"{candidate}: {error}")
-    raise ImportError("could not load dyno native library:\n" + "\n".join(errors))
+    raise ImportError("could not load dynibo native library:\n" + "\n".join(errors))
 
 
 class _Pose(ct.Structure):
@@ -99,19 +99,19 @@ class IkOptions:
     max_step_norm: float = 0.5
 
 
-class DynoError(RuntimeError):
-    """Base class for native dyno model and calculation errors."""
+class DyniboError(RuntimeError):
+    """Base class for native dynibo model and calculation errors."""
 
 
-class ModelError(DynoError):
+class ModelError(DyniboError):
     """A robot description could not be loaded or represented."""
 
 
-class SolverError(DynoError):
+class SolverError(DyniboError):
     """An iterative numerical calculation did not produce a valid result."""
 
 
-class PanicError(DynoError):
+class PanicError(DyniboError):
     """The native library caught an unexpected internal panic."""
 
 
@@ -120,63 +120,63 @@ _robot_p = ct.c_void_p
 _workspace_p = ct.c_void_p
 _double_p = ct.POINTER(ct.c_double)
 
-_lib.dyno_last_error_message.restype = ct.c_char_p
-_lib.dyno_version.restype = ct.c_char_p
-_lib.dyno_robot_load_urdf.argtypes = [ct.c_char_p, ct.POINTER(_robot_p)]
-_lib.dyno_robot_load_urdf.restype = ct.c_int
-_lib.dyno_robot_destroy.argtypes = [_robot_p]
-_lib.dyno_robot_name.argtypes = [_robot_p]
-_lib.dyno_robot_name.restype = ct.c_char_p
-_lib.dyno_robot_joint_count.argtypes = [_robot_p]
-_lib.dyno_robot_joint_count.restype = ct.c_size_t
-_lib.dyno_robot_link_count.argtypes = [_robot_p]
-_lib.dyno_robot_link_count.restype = ct.c_size_t
-_lib.dyno_robot_link_id.argtypes = [_robot_p, ct.c_char_p, ct.POINTER(ct.c_size_t)]
-_lib.dyno_robot_link_id.restype = ct.c_int
-_lib.dyno_workspace_create.argtypes = [_robot_p, ct.POINTER(_workspace_p)]
-_lib.dyno_workspace_create.restype = ct.c_int
-_lib.dyno_workspace_destroy.argtypes = [_workspace_p]
-_lib.dyno_forward_kinematics.argtypes = [
+_lib.dynibo_last_error_message.restype = ct.c_char_p
+_lib.dynibo_version.restype = ct.c_char_p
+_lib.dynibo_robot_load_urdf.argtypes = [ct.c_char_p, ct.POINTER(_robot_p)]
+_lib.dynibo_robot_load_urdf.restype = ct.c_int
+_lib.dynibo_robot_destroy.argtypes = [_robot_p]
+_lib.dynibo_robot_name.argtypes = [_robot_p]
+_lib.dynibo_robot_name.restype = ct.c_char_p
+_lib.dynibo_robot_joint_count.argtypes = [_robot_p]
+_lib.dynibo_robot_joint_count.restype = ct.c_size_t
+_lib.dynibo_robot_link_count.argtypes = [_robot_p]
+_lib.dynibo_robot_link_count.restype = ct.c_size_t
+_lib.dynibo_robot_link_id.argtypes = [_robot_p, ct.c_char_p, ct.POINTER(ct.c_size_t)]
+_lib.dynibo_robot_link_id.restype = ct.c_int
+_lib.dynibo_workspace_create.argtypes = [_robot_p, ct.POINTER(_workspace_p)]
+_lib.dynibo_workspace_create.restype = ct.c_int
+_lib.dynibo_workspace_destroy.argtypes = [_workspace_p]
+_lib.dynibo_forward_kinematics.argtypes = [
     _robot_p, _workspace_p, _double_p, ct.c_size_t, ct.c_size_t, ct.POINTER(_Pose)
 ]
-_lib.dyno_forward_kinematics.restype = ct.c_int
-_lib.dyno_jacobian.argtypes = [
+_lib.dynibo_forward_kinematics.restype = ct.c_int
+_lib.dynibo_jacobian.argtypes = [
     _robot_p, _workspace_p, _double_p, ct.c_size_t, ct.c_size_t,
     _double_p, ct.c_size_t,
 ]
-_lib.dyno_jacobian.restype = ct.c_int
-_lib.dyno_inverse_kinematics.argtypes = [
+_lib.dynibo_jacobian.restype = ct.c_int
+_lib.dynibo_inverse_kinematics.argtypes = [
     _robot_p, _workspace_p, _double_p, ct.c_size_t, ct.c_size_t,
     ct.POINTER(_Pose), _IkOptions, _double_p, ct.c_size_t,
 ]
-_lib.dyno_inverse_kinematics.restype = ct.c_int
-_lib.dyno_forward_velocity.argtypes = [
+_lib.dynibo_inverse_kinematics.restype = ct.c_int
+_lib.dynibo_forward_velocity.argtypes = [
     _robot_p, _workspace_p, _double_p, _double_p, ct.c_size_t, ct.c_size_t,
     ct.POINTER(_Pose), ct.POINTER(_Pose), ct.POINTER(_Twist),
 ]
-_lib.dyno_forward_velocity.restype = ct.c_int
-_lib.dyno_forward_acceleration.argtypes = [
+_lib.dynibo_forward_velocity.restype = ct.c_int
+_lib.dynibo_forward_acceleration.argtypes = [
     _robot_p, _workspace_p, _double_p, _double_p, _double_p,
     ct.c_size_t, ct.c_size_t, ct.POINTER(_Twist),
 ]
-_lib.dyno_forward_acceleration.restype = ct.c_int
-_lib.dyno_gravity.argtypes = [
+_lib.dynibo_forward_acceleration.restype = ct.c_int
+_lib.dynibo_gravity.argtypes = [
     _robot_p, _workspace_p, _double_p, ct.c_size_t, ct.POINTER(_Pose),
     ct.POINTER(_Load), ct.c_size_t, _double_p, ct.c_size_t,
 ]
-_lib.dyno_gravity.restype = ct.c_int
-_lib.dyno_inverse_dynamics.argtypes = [
+_lib.dynibo_gravity.restype = ct.c_int
+_lib.dynibo_inverse_dynamics.argtypes = [
     _robot_p, _workspace_p, _double_p, _double_p, _double_p, ct.c_size_t,
     ct.POINTER(_Pose), _Twist, _Twist, ct.POINTER(_Load), ct.c_size_t,
     _double_p, ct.c_size_t,
 ]
-_lib.dyno_inverse_dynamics.restype = ct.c_int
+_lib.dynibo_inverse_dynamics.restype = ct.c_int
 
 
 def _check(status: int) -> None:
     if status != 0:
-        raw_message = _lib.dyno_last_error_message()
-        message = raw_message.decode("utf-8", "replace") if raw_message else "unknown dyno error"
+        raw_message = _lib.dynibo_last_error_message()
+        message = raw_message.decode("utf-8", "replace") if raw_message else "unknown dynibo error"
         if status == 1:
             raise ValueError(message)
         if status == 2:
@@ -185,7 +185,7 @@ def _check(status: int) -> None:
             raise PanicError(message)
         if status == 4:
             raise SolverError(message)
-        raise DynoError(message)
+        raise DyniboError(message)
 
 
 def _array(values: Sequence[float], name: str) -> ct.Array[ct.c_double]:
@@ -239,21 +239,21 @@ class Robot:
     def __init__(self, urdf_path: str | os.PathLike[str]):
         self._robot = _robot_p()
         self._workspace = _workspace_p()
-        _check(_lib.dyno_robot_load_urdf(os.fsencode(urdf_path), ct.byref(self._robot)))
+        _check(_lib.dynibo_robot_load_urdf(os.fsencode(urdf_path), ct.byref(self._robot)))
         try:
-            _check(_lib.dyno_workspace_create(self._robot, ct.byref(self._workspace)))
+            _check(_lib.dynibo_workspace_create(self._robot, ct.byref(self._workspace)))
         except Exception:
-            _lib.dyno_robot_destroy(self._robot)
+            _lib.dynibo_robot_destroy(self._robot)
             self._robot = _robot_p()
             raise
 
     def close(self) -> None:
         """Release native resources; calling this more than once is safe."""
         if self._workspace:
-            _lib.dyno_workspace_destroy(self._workspace)
+            _lib.dynibo_workspace_destroy(self._workspace)
             self._workspace = _workspace_p()
         if self._robot:
-            _lib.dyno_robot_destroy(self._robot)
+            _lib.dynibo_robot_destroy(self._robot)
             self._robot = _robot_p()
 
     def __enter__(self) -> "Robot":
@@ -267,28 +267,28 @@ class Robot:
 
     @property
     def name(self) -> str:
-        value = _lib.dyno_robot_name(self._robot)
+        value = _lib.dynibo_robot_name(self._robot)
         if value is None:
             raise RuntimeError("robot is closed")
         return value.decode("utf-8")
 
     @property
     def joint_count(self) -> int:
-        return int(_lib.dyno_robot_joint_count(self._robot))
+        return int(_lib.dynibo_robot_joint_count(self._robot))
 
     @property
     def link_count(self) -> int:
-        return int(_lib.dyno_robot_link_count(self._robot))
+        return int(_lib.dynibo_robot_link_count(self._robot))
 
     def link_id(self, name: str) -> int:
         result = ct.c_size_t()
-        _check(_lib.dyno_robot_link_id(self._robot, name.encode(), ct.byref(result)))
+        _check(_lib.dynibo_robot_link_id(self._robot, name.encode(), ct.byref(result)))
         return int(result.value)
 
     def forward_kinematics(self, q: Sequence[float], target: int) -> Pose:
         q_array = _array(q, "q")
         output = _Pose()
-        _check(_lib.dyno_forward_kinematics(
+        _check(_lib.dynibo_forward_kinematics(
             self._robot, self._workspace, q_array, len(q), target, ct.byref(output)
         ))
         return Pose(tuple(output.translation), tuple(output.rotation_xyzw))
@@ -297,7 +297,7 @@ class Robot:
         """Return a flat, column-major `6 x joint_count` Jacobian."""
         q_array = _array(q, "q")
         output = (ct.c_double * (6 * self.joint_count))()
-        _check(_lib.dyno_jacobian(
+        _check(_lib.dynibo_jacobian(
             self._robot, self._workspace, q_array, len(q), target,
             output, len(output),
         ))
@@ -314,7 +314,7 @@ class Robot:
             options.rotation_tolerance, options.damping, options.max_step_norm,
         )
         output = (ct.c_double * self.joint_count)()
-        _check(_lib.dyno_inverse_kinematics(
+        _check(_lib.dynibo_inverse_kinematics(
             self._robot, self._workspace, q_array, len(initial_q), target,
             ct.byref(desired_c), options_c, output, len(output),
         ))
@@ -327,7 +327,7 @@ class Robot:
         _require_same_length(q, qd=qd)
         q_array, qd_array = _array(q, "q"), _array(qd, "qd")
         base_c, tool_c, output = _pose(base), _pose(tool), _Twist()
-        _check(_lib.dyno_forward_velocity(
+        _check(_lib.dynibo_forward_velocity(
             self._robot, self._workspace, q_array, qd_array, len(q), target,
             ct.byref(base_c), ct.byref(tool_c), ct.byref(output),
         ))
@@ -342,7 +342,7 @@ class Robot:
         qd_array = _array(qd, "qd")
         qdd_array = _array(qdd, "qdd")
         output = _Twist()
-        _check(_lib.dyno_forward_acceleration(
+        _check(_lib.dynibo_forward_acceleration(
             self._robot, self._workspace, q_array, qd_array, qdd_array,
             len(q), target, ct.byref(output),
         ))
@@ -354,7 +354,7 @@ class Robot:
     ) -> tuple[float, ...]:
         q_array, base_c, loads_c = _array(q, "q"), _pose(base), _loads(loads)
         output = (ct.c_double * self.joint_count)()
-        _check(_lib.dyno_gravity(
+        _check(_lib.dynibo_gravity(
             self._robot, self._workspace, q_array, len(q), ct.byref(base_c),
             loads_c, len(loads_c), output, len(output),
         ))
@@ -371,7 +371,7 @@ class Robot:
         qdd_array = _array(qdd, "qdd")
         base_c, loads_c = _pose(base), _loads(loads)
         output = (ct.c_double * self.joint_count)()
-        _check(_lib.dyno_inverse_dynamics(
+        _check(_lib.dynibo_inverse_dynamics(
             self._robot, self._workspace, q_array, qd_array, qdd_array, len(q),
             ct.byref(base_c), _twist(base_velocity), _twist(base_acceleration),
             loads_c, len(loads_c), output, len(output),

@@ -5,7 +5,7 @@
   https://github.com/frankarobotics/franka_description
 
   Visual, collision, transmission, and ros2_control elements are intentionally
-  omitted because dyno only consumes kinematic and inertial data.
+  omitted because dynibo only consumes kinematic and inertial data.
 -->
 <robot name="franka_fer">
   <link name="fer_link0">

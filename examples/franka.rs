@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
-use dyno::{Frame, Robot};
+use dynibo::{Frame, Robot};
 use nalgebra::{DMatrixView, DVectorView};
 
-fn main() -> dyno::Result<()> {
+fn main() -> dynibo::Result<()> {
     let urdf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/data/franka_fer.urdf");
     let robot = Robot::from_urdf(urdf)?;
     let flange = robot.link_id("fer_link8")?;

@@ -43,7 +43,7 @@ using ConfigMap = Eigen::Map<const Eigen::VectorXd>;
 
 extern "C" {
 
-void* dyno_pinocchio_create(const char* urdf_path) noexcept {
+void* dynibo_pinocchio_create(const char* urdf_path) noexcept {
   try {
     pinocchio::Model model;
     pinocchio::urdf::buildModel(urdf_path, model);
@@ -54,7 +54,7 @@ void* dyno_pinocchio_create(const char* urdf_path) noexcept {
   }
 }
 
-void* dyno_pinocchio_create_for_joint(const char* urdf_path,
+void* dynibo_pinocchio_create_for_joint(const char* urdf_path,
                                       const char* end_joint_name) noexcept {
   try {
     pinocchio::Model model;
@@ -69,7 +69,7 @@ void* dyno_pinocchio_create_for_joint(const char* urdf_path,
   }
 }
 
-void* dyno_pinocchio_create_for_frame(const char* urdf_path,
+void* dynibo_pinocchio_create_for_frame(const char* urdf_path,
                                       const char* frame_name) noexcept {
   try {
     pinocchio::Model model;
@@ -85,7 +85,7 @@ void* dyno_pinocchio_create_for_frame(const char* urdf_path,
   }
 }
 
-void* dyno_pinocchio_create_floating_for_frame(
+void* dynibo_pinocchio_create_floating_for_frame(
     const char* urdf_path, const char* frame_name) noexcept {
   try {
     pinocchio::Model model;
@@ -102,28 +102,28 @@ void* dyno_pinocchio_create_floating_for_frame(
   }
 }
 
-void dyno_pinocchio_destroy(void* raw_context) noexcept {
+void dynibo_pinocchio_destroy(void* raw_context) noexcept {
   delete static_cast<PinocchioBenchContext*>(raw_context);
 }
 
-std::size_t dyno_pinocchio_dof(const void* raw_context) noexcept {
+std::size_t dynibo_pinocchio_dof(const void* raw_context) noexcept {
   const auto* context = static_cast<const PinocchioBenchContext*>(raw_context);
   return context->model.nv;
 }
 
-std::size_t dyno_pinocchio_configuration_size(const void* raw_context) noexcept {
+std::size_t dynibo_pinocchio_configuration_size(const void* raw_context) noexcept {
   const auto* context = static_cast<const PinocchioBenchContext*>(raw_context);
   return context->model.nq;
 }
 
-void dyno_pinocchio_neutral_configuration(const void* raw_context,
+void dynibo_pinocchio_neutral_configuration(const void* raw_context,
                                           double* q) noexcept {
   const auto* context = static_cast<const PinocchioBenchContext*>(raw_context);
   Eigen::Map<Eigen::VectorXd> configuration(q, context->model.nq);
   configuration = pinocchio::neutral(context->model);
 }
 
-std::size_t dyno_pinocchio_joint_configuration_index(
+std::size_t dynibo_pinocchio_joint_configuration_index(
     const void* raw_context, const char* joint_name) noexcept {
   try {
     const auto* context = static_cast<const PinocchioBenchContext*>(raw_context);
@@ -137,7 +137,7 @@ std::size_t dyno_pinocchio_joint_configuration_index(
   }
 }
 
-std::size_t dyno_pinocchio_joint_configuration_dimension(
+std::size_t dynibo_pinocchio_joint_configuration_dimension(
     const void* raw_context, const char* joint_name) noexcept {
   try {
     const auto* context = static_cast<const PinocchioBenchContext*>(raw_context);
@@ -151,7 +151,7 @@ std::size_t dyno_pinocchio_joint_configuration_dimension(
   }
 }
 
-std::size_t dyno_pinocchio_joint_velocity_index(const void* raw_context,
+std::size_t dynibo_pinocchio_joint_velocity_index(const void* raw_context,
                                                 const char* joint_name) noexcept {
   try {
     const auto* context = static_cast<const PinocchioBenchContext*>(raw_context);
@@ -165,9 +165,9 @@ std::size_t dyno_pinocchio_joint_velocity_index(const void* raw_context,
   }
 }
 
-double dyno_pinocchio_noop(const void*, const double* q) noexcept { return q[0]; }
+double dynibo_pinocchio_noop(const void*, const double* q) noexcept { return q[0]; }
 
-double dyno_pinocchio_forward_kinematics(void* raw_context, const double* q) noexcept {
+double dynibo_pinocchio_forward_kinematics(void* raw_context, const double* q) noexcept {
   auto* context = static_cast<PinocchioBenchContext*>(raw_context);
   const ConfigMap configuration(q, context->model.nq);
   pinocchio::forwardKinematics(context->model, context->data, configuration);
@@ -175,7 +175,7 @@ double dyno_pinocchio_forward_kinematics(void* raw_context, const double* q) noe
   return placement.translation().sum() + placement.rotation()(0, 0);
 }
 
-double dyno_pinocchio_jacobian(void* raw_context, const double* q) noexcept {
+double dynibo_pinocchio_jacobian(void* raw_context, const double* q) noexcept {
   auto* context = static_cast<PinocchioBenchContext*>(raw_context);
   const ConfigMap configuration(q, context->model.nq);
   pinocchio::computeJointJacobians(context->model, context->data, configuration);
@@ -185,13 +185,13 @@ double dyno_pinocchio_jacobian(void* raw_context, const double* q) noexcept {
   return context->jacobian.sum();
 }
 
-double dyno_pinocchio_gravity(void* raw_context, const double* q) noexcept {
+double dynibo_pinocchio_gravity(void* raw_context, const double* q) noexcept {
   auto* context = static_cast<PinocchioBenchContext*>(raw_context);
   const ConfigMap configuration(q, context->model.nq);
   return pinocchio::computeGeneralizedGravity(context->model, context->data, configuration).sum();
 }
 
-double dyno_pinocchio_rnea(void* raw_context, const double* q, const double* qd,
+double dynibo_pinocchio_rnea(void* raw_context, const double* q, const double* qd,
                            const double* qdd) noexcept {
   auto* context = static_cast<PinocchioBenchContext*>(raw_context);
   const ConfigMap configuration(q, context->model.nq);
@@ -200,7 +200,7 @@ double dyno_pinocchio_rnea(void* raw_context, const double* q, const double* qd,
   return pinocchio::rnea(context->model, context->data, configuration, velocity, acceleration).sum();
 }
 
-void dyno_pinocchio_gravity_values(void* raw_context, const double* q,
+void dynibo_pinocchio_gravity_values(void* raw_context, const double* q,
                                    double* gravity) noexcept {
   auto* context = static_cast<PinocchioBenchContext*>(raw_context);
   const ConfigMap configuration(q, context->model.nq);
@@ -209,7 +209,7 @@ void dyno_pinocchio_gravity_values(void* raw_context, const double* q,
       pinocchio::computeGeneralizedGravity(context->model, context->data, configuration);
 }
 
-void dyno_pinocchio_rnea_values(void* raw_context, const double* q, const double* qd,
+void dynibo_pinocchio_rnea_values(void* raw_context, const double* q, const double* qd,
                                 const double* qdd, double* torque) noexcept {
   auto* context = static_cast<PinocchioBenchContext*>(raw_context);
   const ConfigMap configuration(q, context->model.nq);
@@ -220,7 +220,7 @@ void dyno_pinocchio_rnea_values(void* raw_context, const double* q, const double
       pinocchio::rnea(context->model, context->data, configuration, velocity, acceleration);
 }
 
-void dyno_pinocchio_link_frame_values(void* raw_context, const double* q,
+void dynibo_pinocchio_link_frame_values(void* raw_context, const double* q,
                                       double* rotation,
                                       double* translation) noexcept {
   auto* context = static_cast<PinocchioBenchContext*>(raw_context);
@@ -234,7 +234,7 @@ void dyno_pinocchio_link_frame_values(void* raw_context, const double* q,
   translation_map = placement.translation();
 }
 
-void dyno_pinocchio_link_jacobian_values(void* raw_context, const double* q,
+void dynibo_pinocchio_link_jacobian_values(void* raw_context, const double* q,
                                          double* jacobian) noexcept {
   auto* context = static_cast<PinocchioBenchContext*>(raw_context);
   const ConfigMap configuration(q, context->model.nq);
@@ -247,7 +247,7 @@ void dyno_pinocchio_link_jacobian_values(void* raw_context, const double* q,
   jacobian_map = context->jacobian;
 }
 
-void dyno_pinocchio_link_velocity_values(void* raw_context, const double* q,
+void dynibo_pinocchio_link_velocity_values(void* raw_context, const double* q,
                                          const double* qd,
                                          double* velocity) noexcept {
   auto* context = static_cast<PinocchioBenchContext*>(raw_context);
@@ -263,7 +263,7 @@ void dyno_pinocchio_link_velocity_values(void* raw_context, const double* q,
   velocity_map.tail<3>() = spatial_velocity.linear();
 }
 
-void dyno_pinocchio_link_acceleration_values(
+void dynibo_pinocchio_link_acceleration_values(
     void* raw_context, const double* q, const double* qd, const double* qdd,
     double* acceleration) noexcept {
   auto* context = static_cast<PinocchioBenchContext*>(raw_context);
@@ -280,7 +280,7 @@ void dyno_pinocchio_link_acceleration_values(
   acceleration_map.tail<3>() = classical_acceleration.linear();
 }
 
-void dyno_pinocchio_rnea_with_link_load_values(
+void dynibo_pinocchio_rnea_with_link_load_values(
     void* raw_context, const double* q, const double* qd, const double* qdd,
     const double* load, double* torque) noexcept {
   auto* context = static_cast<PinocchioBenchContext*>(raw_context);
@@ -293,7 +293,7 @@ void dyno_pinocchio_rnea_with_link_load_values(
   pinocchio::container::aligned_vector<pinocchio::Force> external_forces(
       context->model.njoints, pinocchio::Force::Zero());
   const auto& frame = context->model.frames[context->target_frame];
-  // Dyno's load is a generalized resistance added to the required joint
+  // Dynibo's load is a generalized resistance added to the required joint
   // effort. Pinocchio's fext is a physical force subtracted by RNEA.
   external_forces[frame.parentJoint] = frame.placement.act(-frame_load);
   Eigen::Map<Eigen::VectorXd> torque_map(torque, context->model.nv);
@@ -301,7 +301,7 @@ void dyno_pinocchio_rnea_with_link_load_values(
                               velocity, acceleration, external_forces);
 }
 
-void dyno_pinocchio_floating_rnea_values(
+void dynibo_pinocchio_floating_rnea_values(
     void* raw_context, const double* q, const double* qd, const double* qdd,
     const double* base_translation, const double* base_rotation_xyzw,
     const double* base_velocity, const double* base_acceleration,
@@ -323,7 +323,7 @@ void dyno_pinocchio_floating_rnea_values(
       world_to_base * Eigen::Map<const Eigen::Vector3d>(base_velocity);
   velocity.head<3>() = base_linear_velocity;
   velocity.segment<3>(3) = base_angular_velocity;
-  // Pinocchio accepts spatial acceleration, while Dyno's public base input is
+  // Pinocchio accepts spatial acceleration, while Dynibo's public base input is
   // classical acceleration at the base origin.
   acceleration.head<3>() =
       world_to_base * Eigen::Map<const Eigen::Vector3d>(base_acceleration + 3)

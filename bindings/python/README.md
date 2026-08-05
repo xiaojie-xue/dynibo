@@ -1,11 +1,11 @@
-# dyno-robotics
+# dynibo
 
-Python bindings for the `dyno` tree-structured robot kinematics and dynamics
+Python bindings for the `dynibo` tree-structured robot kinematics and dynamics
 library. The wheel bundles the Rust native library and has no runtime Python
 dependencies.
 
 ```python
-from dyno import Robot
+from dynibo import Robot
 
 with Robot("robot.urdf") as robot:
     tool = robot.link_id("tool")

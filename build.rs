@@ -24,7 +24,7 @@ fn main() {
     for include in pinocchio.include_paths {
         bridge.include(include);
     }
-    bridge.compile("dyno_pinocchio_bridge");
+    bridge.compile("dynibo_pinocchio_bridge");
 }
 
 #[cfg(not(feature = "pinocchio-tests"))]

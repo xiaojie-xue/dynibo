@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dyno-robotics"
+name = "dynibo"
 version = "0.1.0"
 description = "Python bindings for tree-structured robot kinematics and dynamics"
 readme = "bindings/python/README.md"
@@ -20,16 +20,16 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/xiaojie-xue/dyno"
-Repository = "https://github.com/xiaojie-xue/dyno"
+Homepage = "https://github.com/xiaojie-xue/dynibo"
+Repository = "https://github.com/xiaojie-xue/dynibo"
 
 [tool.setuptools]
 package-dir = { "" = "bindings/python" }
-packages = ["dyno"]
+packages = ["dynibo"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-dyno = ["*.so", "*.dylib", "*.dll"]
+dynibo = ["*.so", "*.dylib", "*.dll"]
 
 [tool.cibuildwheel]
 build = "cp39-*"

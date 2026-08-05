@@ -18,10 +18,10 @@ ROOT = Path(__file__).resolve().parent
 
 def native_library_name() -> str:
     if sys.platform == "win32":
-        return "dyno_c.dll"
+        return "dynibo_c.dll"
     if sys.platform == "darwin":
-        return "libdyno_c.dylib"
-    return "libdyno_c.so"
+        return "libdynibo_c.dylib"
+    return "libdynibo_c.so"
 
 
 class BinaryDistribution(Distribution):
@@ -32,15 +32,15 @@ class BinaryDistribution(Distribution):
 class BuildPy(build_py):
     def run(self) -> None:
         super().run()
-        profile = os.environ.get("DYNO_CARGO_PROFILE", "release")
-        command = ["cargo", "build", "-p", "dyno-c", "--locked"]
+        profile = os.environ.get("DYNIBO_CARGO_PROFILE", "release")
+        command = ["cargo", "build", "-p", "dynibo-c", "--locked"]
         if profile == "release":
             command.append("--release")
         else:
             command.extend(("--profile", profile))
         subprocess.run(command, cwd=ROOT, check=True)
         source = ROOT / "target" / profile / native_library_name()
-        destination = Path(self.build_lib) / "dyno" / native_library_name()
+        destination = Path(self.build_lib) / "dynibo" / native_library_name()
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
 
@@ -54,18 +54,18 @@ class PlatformWheel(bdist_wheel):
 
 
 setup(
-    name="dyno-robotics",
+    name="dynibo",
     version="0.1.0",
     description="Python bindings for tree-structured robot kinematics and dynamics",
     author="Xiaojie Xue",
     long_description=(ROOT / "bindings/python/README.md").read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
     license="MIT",
-    url="https://github.com/xiaojie-xue/dyno",
+    url="https://github.com/xiaojie-xue/dynibo",
     python_requires=">=3.9",
     package_dir={"": "bindings/python"},
     packages=find_packages("bindings/python"),
-    package_data={"dyno": ["*.so", "*.dylib", "*.dll"]},
+    package_data={"dynibo": ["*.so", "*.dylib", "*.dll"]},
     include_package_data=True,
     cmdclass={"build_py": BuildPy, "bdist_wheel": PlatformWheel},
     distclass=BinaryDistribution,

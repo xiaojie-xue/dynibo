@@ -1,13 +1,13 @@
 [package]
-name = "dyno"
+name = "dynibo"
 version = "0.1.0"
 edition = "2024"
 description = "Tree-structured robot kinematics and dynamics with runtime-size workspace APIs"
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/xiaojie-xue/dyno"
-homepage = "https://github.com/xiaojie-xue/dyno"
-documentation = "https://docs.rs/dyno"
+repository = "https://github.com/xiaojie-xue/dynibo"
+homepage = "https://github.com/xiaojie-xue/dynibo"
+documentation = "https://docs.rs/dynibo"
 keywords = ["robotics", "kinematics", "dynamics", "urdf"]
 categories = ["science::robotics", "simulation"]
 exclude = [

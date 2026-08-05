@@ -24,7 +24,7 @@ def main() -> None:
     args = parser.parse_args()
 
     project = Path(__file__).resolve().parents[1]
-    archives = sorted(args.package_dir.resolve().glob("dyno-*.tar.gz"))
+    archives = sorted(args.package_dir.resolve().glob("dynibo-*.tar.gz"))
     if len(archives) != 1:
         raise SystemExit(f"expected exactly one CPack archive, found: {archives}")
 
@@ -37,9 +37,9 @@ def main() -> None:
     with tarfile.open(archives[0], "r:gz") as archive:
         archive.extractall(extract, filter="data")
 
-    configs = list(extract.rglob("dyno-config.cmake"))
+    configs = list(extract.rglob("dynibo-config.cmake"))
     if len(configs) != 1:
-        raise SystemExit(f"expected exactly one dyno-config.cmake, found: {configs}")
+        raise SystemExit(f"expected exactly one dynibo-config.cmake, found: {configs}")
     prefix = configs[0].parents[3]
     urdf = (project / "tests" / "data" / "test_arm.urdf").resolve()
 
@@ -47,7 +47,7 @@ def main() -> None:
         "cmake", "-S", str(project / "tests" / "native"),
         "-B", str(build),
         f"-DCMAKE_PREFIX_PATH={prefix}",
-        f"-DDYNO_TEST_URDF={urdf}",
+        f"-DDYNIBO_TEST_URDF={urdf}",
         f"-DCMAKE_BUILD_TYPE={args.configuration}",
     ])
     run(["cmake", "--build", str(build), "--config", args.configuration, "--parallel"])

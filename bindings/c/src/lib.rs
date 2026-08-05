@@ -1,8 +1,8 @@
-//! Stable C ABI for `dyno`.
+//! Stable C ABI for `dynibo`.
 
 #![allow(
     clippy::missing_safety_doc,
-    reason = "pointer ownership and validity contracts are documented in dyno.h"
+    reason = "pointer ownership and validity contracts are documented in dynibo.h"
 )]
 
 use std::{
@@ -12,7 +12,7 @@ use std::{
     ptr,
 };
 
-use dyno::{
+use dynibo::{
     ErrorCategory, Frame, IndexedLoad, InverseKinematicsOptions, LinkId, Robot, Twist, Workspace,
     Wrench,
 };
@@ -25,7 +25,7 @@ thread_local! {
 /// Status returned by every fallible C function.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DynoStatus {
+pub enum DyniboStatus {
     /// The operation succeeded.
     Ok = 0,
     /// A pointer, length, UTF-8 string, or quaternion was invalid.
@@ -41,14 +41,14 @@ pub enum DynoStatus {
 /// Translation plus an `(x, y, z, w)` unit quaternion.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct DynoPose {
+pub struct DyniboPose {
     /// Translation in metres.
     pub translation: [f64; 3],
     /// Quaternion ordered `(x, y, z, w)`.
     pub rotation_xyzw: [f64; 4],
 }
 
-impl Default for DynoPose {
+impl Default for DyniboPose {
     fn default() -> Self {
         Self {
             translation: [0.0; 3],
@@ -60,7 +60,7 @@ impl Default for DynoPose {
 /// Angular-first spatial vector.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-pub struct DynoTwist {
+pub struct DyniboTwist {
     /// Angular component.
     pub angular: [f64; 3],
     /// Linear component.
@@ -70,8 +70,8 @@ pub struct DynoTwist {
 /// External wrench applied at a link origin and expressed in that link frame.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-pub struct DynoLoad {
-    /// Model-scoped link handle returned by `dyno_robot_link_id`.
+pub struct DyniboLoad {
+    /// Model-scoped link handle returned by `dynibo_robot_link_id`.
     pub link_id: usize,
     /// Torque component.
     pub torque: [f64; 3],
@@ -82,7 +82,7 @@ pub struct DynoLoad {
 /// Damped-least-squares inverse-kinematics configuration.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct DynoIkOptions {
+pub struct DyniboIkOptions {
     /// Maximum number of updates.
     pub max_iterations: usize,
     /// Translation tolerance in metres.
@@ -95,7 +95,7 @@ pub struct DynoIkOptions {
     pub max_step_norm: f64,
 }
 
-impl Default for DynoIkOptions {
+impl Default for DyniboIkOptions {
     fn default() -> Self {
         let value = InverseKinematicsOptions::default();
         Self {
@@ -109,14 +109,14 @@ impl Default for DynoIkOptions {
 }
 
 /// Opaque robot model.
-pub struct DynoRobot {
+pub struct DyniboRobot {
     inner: Robot,
     link_ids: Vec<LinkId>,
     name: CString,
 }
 
 /// Opaque reusable calculation workspace.
-pub struct DynoWorkspace {
+pub struct DyniboWorkspace {
     inner: Workspace,
 }
 
@@ -127,42 +127,42 @@ fn set_error(message: impl Into<String>) {
     });
 }
 
-fn call(function: impl FnOnce() -> Result<(), (DynoStatus, String)>) -> DynoStatus {
+fn call(function: impl FnOnce() -> Result<(), (DyniboStatus, String)>) -> DyniboStatus {
     LAST_ERROR.with(|slot| *slot.borrow_mut() = CString::default());
     match catch_unwind(AssertUnwindSafe(function)) {
-        Ok(Ok(())) => DynoStatus::Ok,
+        Ok(Ok(())) => DyniboStatus::Ok,
         Ok(Err((status, message))) => {
             set_error(message);
             status
         }
         Err(_) => {
-            set_error("panic caught at dyno C ABI boundary");
-            DynoStatus::Panic
+            set_error("panic caught at dynibo C ABI boundary");
+            DyniboStatus::Panic
         }
     }
 }
 
-fn invalid(message: impl Into<String>) -> (DynoStatus, String) {
-    (DynoStatus::InvalidArgument, message.into())
+fn invalid(message: impl Into<String>) -> (DyniboStatus, String) {
+    (DyniboStatus::InvalidArgument, message.into())
 }
 
-fn core_error(error: dyno::Error) -> (DynoStatus, String) {
+fn core_error(error: dynibo::Error) -> (DyniboStatus, String) {
     let status = match error.category() {
-        ErrorCategory::InvalidInput => DynoStatus::InvalidArgument,
-        ErrorCategory::Model => DynoStatus::ModelError,
-        ErrorCategory::Solver => DynoStatus::SolverError,
+        ErrorCategory::InvalidInput => DyniboStatus::InvalidArgument,
+        ErrorCategory::Model => DyniboStatus::ModelError,
+        ErrorCategory::Solver => DyniboStatus::SolverError,
     };
     (status, error.to_string())
 }
 
-fn model_error(message: impl Into<String>) -> (DynoStatus, String) {
-    (DynoStatus::ModelError, message.into())
+fn model_error(message: impl Into<String>) -> (DyniboStatus, String) {
+    (DyniboStatus::ModelError, message.into())
 }
 
 unsafe fn required_ref<'a, T>(
     pointer: *const T,
     name: &str,
-) -> Result<&'a T, (DynoStatus, String)> {
+) -> Result<&'a T, (DyniboStatus, String)> {
     // SAFETY: The caller of the C ABI promises that non-null pointers are valid.
     unsafe { pointer.as_ref() }.ok_or_else(|| invalid(format!("{name} must not be null")))
 }
@@ -170,7 +170,7 @@ unsafe fn required_ref<'a, T>(
 unsafe fn required_mut<'a, T>(
     pointer: *mut T,
     name: &str,
-) -> Result<&'a mut T, (DynoStatus, String)> {
+) -> Result<&'a mut T, (DyniboStatus, String)> {
     // SAFETY: The caller of the C ABI promises that non-null pointers are valid and unique.
     unsafe { pointer.as_mut() }.ok_or_else(|| invalid(format!("{name} must not be null")))
 }
@@ -179,7 +179,7 @@ unsafe fn input_slice<'a>(
     pointer: *const f64,
     length: usize,
     name: &str,
-) -> Result<&'a [f64], (DynoStatus, String)> {
+) -> Result<&'a [f64], (DyniboStatus, String)> {
     if length == 0 {
         return Ok(&[]);
     }
@@ -194,7 +194,7 @@ unsafe fn output_slice<'a>(
     pointer: *mut f64,
     length: usize,
     name: &str,
-) -> Result<&'a mut [f64], (DynoStatus, String)> {
+) -> Result<&'a mut [f64], (DyniboStatus, String)> {
     if length == 0 {
         return Ok(&mut []);
     }
@@ -205,7 +205,7 @@ unsafe fn output_slice<'a>(
     Ok(unsafe { std::slice::from_raw_parts_mut(pointer, length) })
 }
 
-fn frame_from_pose(pose: &DynoPose) -> Result<Frame, (DynoStatus, String)> {
+fn frame_from_pose(pose: &DyniboPose) -> Result<Frame, (DyniboStatus, String)> {
     let [x, y, z, w] = pose.rotation_xyzw;
     let norm_squared = x * x + y * y + z * z + w * w;
     if !pose.translation.iter().all(|value| value.is_finite())
@@ -222,30 +222,30 @@ fn frame_from_pose(pose: &DynoPose) -> Result<Frame, (DynoStatus, String)> {
     ))
 }
 
-fn pose_from_frame(frame: &Frame) -> DynoPose {
+fn pose_from_frame(frame: &Frame) -> DyniboPose {
     let quaternion = frame.rotation.quaternion();
-    DynoPose {
+    DyniboPose {
         translation: frame.translation.vector.into(),
         rotation_xyzw: [quaternion.i, quaternion.j, quaternion.k, quaternion.w],
     }
 }
 
-fn twist_from_c(value: DynoTwist) -> Twist {
+fn twist_from_c(value: DyniboTwist) -> Twist {
     Twist::new(Vector3::from(value.angular), Vector3::from(value.linear))
 }
 
-fn twist_to_c(value: Twist) -> DynoTwist {
-    DynoTwist {
+fn twist_to_c(value: Twist) -> DyniboTwist {
+    DyniboTwist {
         angular: value.angular.into(),
         linear: value.linear.into(),
     }
 }
 
 unsafe fn load_slice(
-    robot: &DynoRobot,
-    pointer: *const DynoLoad,
+    robot: &DyniboRobot,
+    pointer: *const DyniboLoad,
     length: usize,
-) -> Result<Vec<IndexedLoad>, (DynoStatus, String)> {
+) -> Result<Vec<IndexedLoad>, (DyniboStatus, String)> {
     let loads = if length == 0 {
         &[]
     } else {
@@ -275,28 +275,28 @@ unsafe fn load_slice(
 
 /// Returns the last error message for the calling thread.
 #[unsafe(no_mangle)]
-pub extern "C" fn dyno_last_error_message() -> *const c_char {
+pub extern "C" fn dynibo_last_error_message() -> *const c_char {
     LAST_ERROR.with(|slot| slot.borrow().as_ptr())
 }
 
 /// Returns the linked ABI version string.
 #[unsafe(no_mangle)]
-pub extern "C" fn dyno_version() -> *const c_char {
+pub extern "C" fn dynibo_version() -> *const c_char {
     c"0.1.0".as_ptr()
 }
 
 /// Returns default inverse-kinematics options.
 #[unsafe(no_mangle)]
-pub extern "C" fn dyno_ik_options_default() -> DynoIkOptions {
-    DynoIkOptions::default()
+pub extern "C" fn dynibo_ik_options_default() -> DyniboIkOptions {
+    DyniboIkOptions::default()
 }
 
 /// Loads a URDF and allocates a robot handle.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dyno_robot_load_urdf(
+pub unsafe extern "C" fn dynibo_robot_load_urdf(
     path: *const c_char,
-    output: *mut *mut DynoRobot,
-) -> DynoStatus {
+    output: *mut *mut DyniboRobot,
+) -> DyniboStatus {
     call(|| {
         // SAFETY: Pointer validation is performed by the helper.
         let output = unsafe { required_mut(output, "output") }?;
@@ -316,7 +316,7 @@ pub unsafe extern "C" fn dyno_robot_load_urdf(
             .collect();
         let name =
             CString::new(inner.name()).map_err(|_| model_error("robot name contains NUL"))?;
-        *output = Box::into_raw(Box::new(DynoRobot {
+        *output = Box::into_raw(Box::new(DyniboRobot {
             inner,
             link_ids,
             name,
@@ -327,7 +327,7 @@ pub unsafe extern "C" fn dyno_robot_load_urdf(
 
 /// Destroys a robot handle. Passing null is allowed.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dyno_robot_destroy(robot: *mut DynoRobot) {
+pub unsafe extern "C" fn dynibo_robot_destroy(robot: *mut DyniboRobot) {
     if !robot.is_null() {
         // SAFETY: The pointer was returned by `Box::into_raw` and is owned by the caller.
         drop(unsafe { Box::from_raw(robot) });
@@ -336,32 +336,32 @@ pub unsafe extern "C" fn dyno_robot_destroy(robot: *mut DynoRobot) {
 
 /// Returns the URDF robot name, valid until the robot is destroyed.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dyno_robot_name(robot: *const DynoRobot) -> *const c_char {
+pub unsafe extern "C" fn dynibo_robot_name(robot: *const DyniboRobot) -> *const c_char {
     // SAFETY: Reading a valid opaque handle is part of the C contract.
     unsafe { robot.as_ref() }.map_or(ptr::null(), |robot| robot.name.as_ptr())
 }
 
 /// Returns the number of joints, or zero for a null handle.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dyno_robot_joint_count(robot: *const DynoRobot) -> usize {
+pub unsafe extern "C" fn dynibo_robot_joint_count(robot: *const DyniboRobot) -> usize {
     // SAFETY: Reading a valid opaque handle is part of the C contract.
     unsafe { robot.as_ref() }.map_or(0, |robot| robot.inner.joint_count())
 }
 
 /// Returns the number of links, or zero for a null handle.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dyno_robot_link_count(robot: *const DynoRobot) -> usize {
+pub unsafe extern "C" fn dynibo_robot_link_count(robot: *const DyniboRobot) -> usize {
     // SAFETY: Reading a valid opaque handle is part of the C contract.
     unsafe { robot.as_ref() }.map_or(0, |robot| robot.inner.link_count())
 }
 
 /// Resolves a link name to a model-scoped handle.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dyno_robot_link_id(
-    robot: *const DynoRobot,
+pub unsafe extern "C" fn dynibo_robot_link_id(
+    robot: *const DyniboRobot,
     name: *const c_char,
     output: *mut usize,
-) -> DynoStatus {
+) -> DyniboStatus {
     call(|| {
         // SAFETY: Pointer validation is performed by the helpers.
         let robot = unsafe { required_ref(robot, "robot") }?;
@@ -386,16 +386,16 @@ pub unsafe extern "C" fn dyno_robot_link_id(
 
 /// Allocates a reusable workspace for a robot.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dyno_workspace_create(
-    robot: *const DynoRobot,
-    output: *mut *mut DynoWorkspace,
-) -> DynoStatus {
+pub unsafe extern "C" fn dynibo_workspace_create(
+    robot: *const DyniboRobot,
+    output: *mut *mut DyniboWorkspace,
+) -> DyniboStatus {
     call(|| {
         // SAFETY: Pointer validation is performed by the helpers.
         let robot = unsafe { required_ref(robot, "robot") }?;
         // SAFETY: Pointer validation is performed by the helper.
         let output = unsafe { required_mut(output, "output") }?;
-        *output = Box::into_raw(Box::new(DynoWorkspace {
+        *output = Box::into_raw(Box::new(DyniboWorkspace {
             inner: robot.inner.workspace(),
         }));
         Ok(())
@@ -404,7 +404,7 @@ pub unsafe extern "C" fn dyno_workspace_create(
 
 /// Destroys a workspace handle. Passing null is allowed.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dyno_workspace_destroy(workspace: *mut DynoWorkspace) {
+pub unsafe extern "C" fn dynibo_workspace_destroy(workspace: *mut DyniboWorkspace) {
     if !workspace.is_null() {
         // SAFETY: The pointer was returned by `Box::into_raw` and is owned by the caller.
         drop(unsafe { Box::from_raw(workspace) });
@@ -413,14 +413,14 @@ pub unsafe extern "C" fn dyno_workspace_destroy(workspace: *mut DynoWorkspace) {
 
 /// Computes forward kinematics for one link.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dyno_forward_kinematics(
-    robot: *const DynoRobot,
-    workspace: *mut DynoWorkspace,
+pub unsafe extern "C" fn dynibo_forward_kinematics(
+    robot: *const DyniboRobot,
+    workspace: *mut DyniboWorkspace,
     q: *const f64,
     q_len: usize,
     target: usize,
-    output: *mut DynoPose,
-) -> DynoStatus {
+    output: *mut DyniboPose,
+) -> DyniboStatus {
     call(|| {
         // SAFETY: Pointer validation is performed by the helpers.
         let robot = unsafe { required_ref(robot, "robot") }?;
@@ -446,15 +446,15 @@ pub unsafe extern "C" fn dyno_forward_kinematics(
 
 /// Writes the column-major `6 x joint_count` geometric Jacobian.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dyno_jacobian(
-    robot: *const DynoRobot,
-    workspace: *mut DynoWorkspace,
+pub unsafe extern "C" fn dynibo_jacobian(
+    robot: *const DyniboRobot,
+    workspace: *mut DyniboWorkspace,
     q: *const f64,
     q_len: usize,
     target: usize,
     output: *mut f64,
     output_len: usize,
-) -> DynoStatus {
+) -> DyniboStatus {
     call(|| {
         // SAFETY: Pointer validation is performed by the helpers.
         let robot = unsafe { required_ref(robot, "robot") }?;
@@ -478,17 +478,17 @@ pub unsafe extern "C" fn dyno_jacobian(
 
 /// Solves inverse kinematics for one link.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dyno_inverse_kinematics(
-    robot: *const DynoRobot,
-    workspace: *mut DynoWorkspace,
+pub unsafe extern "C" fn dynibo_inverse_kinematics(
+    robot: *const DyniboRobot,
+    workspace: *mut DyniboWorkspace,
     initial_q: *const f64,
     q_len: usize,
     target: usize,
-    desired: *const DynoPose,
-    options: DynoIkOptions,
+    desired: *const DyniboPose,
+    options: DyniboIkOptions,
     output: *mut f64,
     output_len: usize,
-) -> DynoStatus {
+) -> DyniboStatus {
     call(|| {
         // SAFETY: Pointer validation is performed by the helpers.
         let robot = unsafe { required_ref(robot, "robot") }?;
@@ -527,17 +527,17 @@ pub unsafe extern "C" fn dyno_inverse_kinematics(
 
 /// Computes target-link/tool spatial velocity.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dyno_forward_velocity(
-    robot: *const DynoRobot,
-    workspace: *mut DynoWorkspace,
+pub unsafe extern "C" fn dynibo_forward_velocity(
+    robot: *const DyniboRobot,
+    workspace: *mut DyniboWorkspace,
     q: *const f64,
     qd: *const f64,
     state_len: usize,
     target: usize,
-    base: *const DynoPose,
-    tool: *const DynoPose,
-    output: *mut DynoTwist,
-) -> DynoStatus {
+    base: *const DyniboPose,
+    tool: *const DyniboPose,
+    output: *mut DyniboTwist,
+) -> DyniboStatus {
     call(|| {
         // SAFETY: Pointer validation is performed by the helpers.
         let robot = unsafe { required_ref(robot, "robot") }?;
@@ -569,16 +569,16 @@ pub unsafe extern "C" fn dyno_forward_velocity(
 
 /// Computes target-link-origin spatial acceleration.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dyno_forward_acceleration(
-    robot: *const DynoRobot,
-    workspace: *mut DynoWorkspace,
+pub unsafe extern "C" fn dynibo_forward_acceleration(
+    robot: *const DyniboRobot,
+    workspace: *mut DyniboWorkspace,
     q: *const f64,
     qd: *const f64,
     qdd: *const f64,
     state_len: usize,
     target: usize,
-    output: *mut DynoTwist,
-) -> DynoStatus {
+    output: *mut DyniboTwist,
+) -> DyniboStatus {
     call(|| {
         // SAFETY: Pointer validation is performed by the helpers.
         let robot = unsafe { required_ref(robot, "robot") }?;
@@ -608,17 +608,17 @@ pub unsafe extern "C" fn dyno_forward_acceleration(
 
 /// Writes gravity and external-load joint forces.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dyno_gravity(
-    robot: *const DynoRobot,
-    workspace: *mut DynoWorkspace,
+pub unsafe extern "C" fn dynibo_gravity(
+    robot: *const DyniboRobot,
+    workspace: *mut DyniboWorkspace,
     q: *const f64,
     q_len: usize,
-    base: *const DynoPose,
-    loads: *const DynoLoad,
+    base: *const DyniboPose,
+    loads: *const DyniboLoad,
     load_count: usize,
     output: *mut f64,
     output_len: usize,
-) -> DynoStatus {
+) -> DyniboStatus {
     call(|| {
         // SAFETY: Pointer validation is performed by the helpers.
         let robot = unsafe { required_ref(robot, "robot") }?;
@@ -642,21 +642,21 @@ pub unsafe extern "C" fn dyno_gravity(
 /// Writes Newton-Euler inverse-dynamics joint forces.
 #[unsafe(no_mangle)]
 #[allow(clippy::too_many_arguments)]
-pub unsafe extern "C" fn dyno_inverse_dynamics(
-    robot: *const DynoRobot,
-    workspace: *mut DynoWorkspace,
+pub unsafe extern "C" fn dynibo_inverse_dynamics(
+    robot: *const DyniboRobot,
+    workspace: *mut DyniboWorkspace,
     q: *const f64,
     qd: *const f64,
     qdd: *const f64,
     state_len: usize,
-    base: *const DynoPose,
-    base_velocity: DynoTwist,
-    base_acceleration: DynoTwist,
-    loads: *const DynoLoad,
+    base: *const DyniboPose,
+    base_velocity: DyniboTwist,
+    base_acceleration: DyniboTwist,
+    loads: *const DyniboLoad,
     load_count: usize,
     output: *mut f64,
     output_len: usize,
-) -> DynoStatus {
+) -> DyniboStatus {
     call(|| {
         // SAFETY: Pointer validation is performed by the helpers.
         let robot = unsafe { required_ref(robot, "robot") }?;
@@ -710,30 +710,30 @@ mod tests {
     fn last_error() -> String {
         // SAFETY: the function always returns a valid thread-local C string.
         unsafe {
-            CStr::from_ptr(dyno_last_error_message())
+            CStr::from_ptr(dynibo_last_error_message())
                 .to_string_lossy()
                 .into_owned()
         }
     }
 
-    unsafe fn create_handles() -> (*mut DynoRobot, *mut DynoWorkspace, usize) {
+    unsafe fn create_handles() -> (*mut DyniboRobot, *mut DyniboWorkspace, usize) {
         let mut robot = ptr::null_mut();
         // SAFETY: all pointers refer to live local storage or a valid C string.
         assert_eq!(
-            unsafe { dyno_robot_load_urdf(fixture_path().as_ptr(), &mut robot) },
-            DynoStatus::Ok
+            unsafe { dynibo_robot_load_urdf(fixture_path().as_ptr(), &mut robot) },
+            DyniboStatus::Ok
         );
         let mut workspace = ptr::null_mut();
         // SAFETY: `robot` was created above and output is writable.
         assert_eq!(
-            unsafe { dyno_workspace_create(robot, &mut workspace) },
-            DynoStatus::Ok
+            unsafe { dynibo_workspace_create(robot, &mut workspace) },
+            DyniboStatus::Ok
         );
         let mut target = usize::MAX;
         // SAFETY: handles, string, and output are valid.
         assert_eq!(
-            unsafe { dyno_robot_link_id(robot, c"test_link_4".as_ptr(), &mut target) },
-            DynoStatus::Ok
+            unsafe { dynibo_robot_link_id(robot, c"test_link_4".as_ptr(), &mut target) },
+            DyniboStatus::Ok
         );
         (robot, workspace, target)
     }
@@ -742,32 +742,32 @@ mod tests {
     fn metadata_and_construction_reject_invalid_arguments() {
         // SAFETY: null is explicitly supported by the metadata/destructor functions.
         unsafe {
-            assert_eq!(CStr::from_ptr(dyno_version()), c"0.1.0");
-            assert!(dyno_robot_name(ptr::null()).is_null());
-            assert_eq!(dyno_robot_joint_count(ptr::null()), 0);
-            assert_eq!(dyno_robot_link_count(ptr::null()), 0);
-            dyno_robot_destroy(ptr::null_mut());
-            dyno_workspace_destroy(ptr::null_mut());
+            assert_eq!(CStr::from_ptr(dynibo_version()), c"0.1.0");
+            assert!(dynibo_robot_name(ptr::null()).is_null());
+            assert_eq!(dynibo_robot_joint_count(ptr::null()), 0);
+            assert_eq!(dynibo_robot_link_count(ptr::null()), 0);
+            dynibo_robot_destroy(ptr::null_mut());
+            dynibo_workspace_destroy(ptr::null_mut());
 
             let path = fixture_path();
             assert_eq!(
-                dyno_robot_load_urdf(path.as_ptr(), ptr::null_mut()),
-                DynoStatus::InvalidArgument
+                dynibo_robot_load_urdf(path.as_ptr(), ptr::null_mut()),
+                DyniboStatus::InvalidArgument
             );
-            let mut robot = ptr::dangling_mut::<DynoRobot>();
+            let mut robot = ptr::dangling_mut::<DyniboRobot>();
             assert_eq!(
-                dyno_robot_load_urdf(ptr::null(), &mut robot),
-                DynoStatus::InvalidArgument
+                dynibo_robot_load_urdf(ptr::null(), &mut robot),
+                DyniboStatus::InvalidArgument
             );
             assert!(robot.is_null());
             let invalid_utf8 = [0xff_u8, 0];
             assert_eq!(
-                dyno_robot_load_urdf(invalid_utf8.as_ptr().cast(), &mut robot),
-                DynoStatus::InvalidArgument
+                dynibo_robot_load_urdf(invalid_utf8.as_ptr().cast(), &mut robot),
+                DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dyno_workspace_create(ptr::null(), ptr::null_mut()),
-                DynoStatus::InvalidArgument
+                dynibo_workspace_create(ptr::null(), ptr::null_mut()),
+                DyniboStatus::InvalidArgument
             );
         }
     }
@@ -780,32 +780,32 @@ mod tests {
             let (robot, workspace, _) = create_handles();
             let mut target = 0;
             assert_eq!(
-                dyno_robot_link_id(ptr::null(), c"test_link_4".as_ptr(), &mut target),
-                DynoStatus::InvalidArgument
+                dynibo_robot_link_id(ptr::null(), c"test_link_4".as_ptr(), &mut target),
+                DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dyno_robot_link_id(robot, ptr::null(), &mut target),
-                DynoStatus::InvalidArgument
+                dynibo_robot_link_id(robot, ptr::null(), &mut target),
+                DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dyno_robot_link_id(robot, c"test_link_4".as_ptr(), ptr::null_mut()),
-                DynoStatus::InvalidArgument
+                dynibo_robot_link_id(robot, c"test_link_4".as_ptr(), ptr::null_mut()),
+                DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dyno_robot_link_id(robot, c"missing".as_ptr(), &mut target),
-                DynoStatus::InvalidArgument
+                dynibo_robot_link_id(robot, c"missing".as_ptr(), &mut target),
+                DyniboStatus::InvalidArgument
             );
             let invalid_utf8 = [0xff_u8, 0];
             assert_eq!(
-                dyno_robot_link_id(robot, invalid_utf8.as_ptr().cast(), &mut target),
-                DynoStatus::InvalidArgument
+                dynibo_robot_link_id(robot, invalid_utf8.as_ptr().cast(), &mut target),
+                DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dyno_workspace_create(robot, ptr::null_mut()),
-                DynoStatus::InvalidArgument
+                dynibo_workspace_create(robot, ptr::null_mut()),
+                DyniboStatus::InvalidArgument
             );
-            dyno_workspace_destroy(workspace);
-            dyno_robot_destroy(robot);
+            dynibo_workspace_destroy(workspace);
+            dynibo_robot_destroy(robot);
         }
     }
 
@@ -816,17 +816,17 @@ mod tests {
         unsafe {
             let (robot, workspace, target) = create_handles();
             let q = [0.0; 4];
-            let mut pose = DynoPose::default();
-            let mut twist = DynoTwist::default();
+            let mut pose = DyniboPose::default();
+            let mut twist = DyniboTwist::default();
             let mut jacobian = [0.0; 24];
             let mut output = [0.0; 4];
 
             assert_eq!(
-                dyno_forward_kinematics(robot, workspace, q.as_ptr(), 4, target, &mut pose),
-                DynoStatus::Ok
+                dynibo_forward_kinematics(robot, workspace, q.as_ptr(), 4, target, &mut pose),
+                DyniboStatus::Ok
             );
             assert_eq!(
-                dyno_jacobian(
+                dynibo_jacobian(
                     robot,
                     workspace,
                     q.as_ptr(),
@@ -835,38 +835,38 @@ mod tests {
                     jacobian.as_mut_ptr(),
                     24,
                 ),
-                DynoStatus::Ok
+                DyniboStatus::Ok
             );
             assert_eq!(
-                dyno_inverse_kinematics(
+                dynibo_inverse_kinematics(
                     robot,
                     workspace,
                     q.as_ptr(),
                     4,
                     target,
                     &pose,
-                    dyno_ik_options_default(),
+                    dynibo_ik_options_default(),
                     output.as_mut_ptr(),
                     4,
                 ),
-                DynoStatus::Ok
+                DyniboStatus::Ok
             );
             assert_eq!(
-                dyno_forward_velocity(
+                dynibo_forward_velocity(
                     robot,
                     workspace,
                     q.as_ptr(),
                     q.as_ptr(),
                     4,
                     target,
-                    &DynoPose::default(),
-                    &DynoPose::default(),
+                    &DyniboPose::default(),
+                    &DyniboPose::default(),
                     &mut twist,
                 ),
-                DynoStatus::Ok
+                DyniboStatus::Ok
             );
             assert_eq!(
-                dyno_forward_acceleration(
+                dynibo_forward_acceleration(
                     robot,
                     workspace,
                     q.as_ptr(),
@@ -876,88 +876,88 @@ mod tests {
                     target,
                     &mut twist,
                 ),
-                DynoStatus::Ok
+                DyniboStatus::Ok
             );
             assert_eq!(
-                dyno_gravity(
+                dynibo_gravity(
                     robot,
                     workspace,
                     q.as_ptr(),
                     4,
-                    &DynoPose::default(),
+                    &DyniboPose::default(),
                     ptr::null(),
                     0,
                     output.as_mut_ptr(),
                     4,
                 ),
-                DynoStatus::Ok
+                DyniboStatus::Ok
             );
             let gravity = output;
-            let load = DynoLoad {
+            let load = DyniboLoad {
                 link_id: target,
                 force: [0.0, 1.0, 0.0],
                 torque: [0.0, 0.0, 0.5],
             };
             assert_eq!(
-                dyno_gravity(
+                dynibo_gravity(
                     robot,
                     workspace,
                     q.as_ptr(),
                     4,
-                    &DynoPose::default(),
+                    &DyniboPose::default(),
                     &load,
                     1,
                     output.as_mut_ptr(),
                     4,
                 ),
-                DynoStatus::Ok
+                DyniboStatus::Ok
             );
             assert_ne!(output, gravity);
             assert_eq!(
-                dyno_inverse_dynamics(
+                dynibo_inverse_dynamics(
                     robot,
                     workspace,
                     q.as_ptr(),
                     q.as_ptr(),
                     q.as_ptr(),
                     4,
-                    &DynoPose::default(),
-                    DynoTwist::default(),
-                    DynoTwist::default(),
+                    &DyniboPose::default(),
+                    DyniboTwist::default(),
+                    DyniboTwist::default(),
                     ptr::null(),
                     0,
                     output.as_mut_ptr(),
                     4,
                 ),
-                DynoStatus::Ok
+                DyniboStatus::Ok
             );
 
             assert_eq!(
-                dyno_forward_kinematics(ptr::null(), workspace, q.as_ptr(), 4, target, &mut pose,),
-                DynoStatus::InvalidArgument
+                dynibo_forward_kinematics(ptr::null(), workspace, q.as_ptr(), 4, target, &mut pose,),
+                DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dyno_forward_kinematics(robot, ptr::null_mut(), q.as_ptr(), 4, target, &mut pose),
-                DynoStatus::InvalidArgument
+                dynibo_forward_kinematics(robot, ptr::null_mut(), q.as_ptr(), 4, target, &mut pose),
+                DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dyno_forward_kinematics(robot, workspace, ptr::null(), 4, target, &mut pose),
-                DynoStatus::InvalidArgument
+                dynibo_forward_kinematics(robot, workspace, ptr::null(), 4, target, &mut pose),
+                DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dyno_forward_kinematics(robot, workspace, q.as_ptr(), 4, usize::MAX, &mut pose,),
-                DynoStatus::InvalidArgument
+                dynibo_forward_kinematics(robot, workspace, q.as_ptr(), 4, usize::MAX, &mut pose,),
+                DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dyno_forward_kinematics(robot, workspace, q.as_ptr(), 4, target, ptr::null_mut(),),
-                DynoStatus::InvalidArgument
+                dynibo_forward_kinematics(robot, workspace, q.as_ptr(), 4, target, ptr::null_mut(),),
+                DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dyno_jacobian(robot, workspace, q.as_ptr(), 4, target, ptr::null_mut(), 24,),
-                DynoStatus::InvalidArgument
+                dynibo_jacobian(robot, workspace, q.as_ptr(), 4, target, ptr::null_mut(), 24,),
+                DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dyno_jacobian(
+                dynibo_jacobian(
                     robot,
                     workspace,
                     q.as_ptr(),
@@ -966,10 +966,10 @@ mod tests {
                     jacobian.as_mut_ptr(),
                     23,
                 ),
-                DynoStatus::InvalidArgument
+                DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dyno_jacobian(
+                dynibo_jacobian(
                     robot,
                     workspace,
                     ptr::null(),
@@ -978,69 +978,69 @@ mod tests {
                     jacobian.as_mut_ptr(),
                     24,
                 ),
-                DynoStatus::InvalidArgument
+                DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dyno_jacobian(robot, workspace, q.as_ptr(), 4, target, ptr::null_mut(), 0,),
-                DynoStatus::InvalidArgument
+                dynibo_jacobian(robot, workspace, q.as_ptr(), 4, target, ptr::null_mut(), 0,),
+                DyniboStatus::InvalidArgument
             );
 
-            let zero_quaternion = DynoPose {
+            let zero_quaternion = DyniboPose {
                 rotation_xyzw: [0.0; 4],
-                ..DynoPose::default()
+                ..DyniboPose::default()
             };
             assert_eq!(
-                dyno_inverse_kinematics(
+                dynibo_inverse_kinematics(
                     robot,
                     workspace,
                     q.as_ptr(),
                     4,
                     target,
                     &zero_quaternion,
-                    dyno_ik_options_default(),
+                    dynibo_ik_options_default(),
                     output.as_mut_ptr(),
                     4,
                 ),
-                DynoStatus::InvalidArgument
+                DyniboStatus::InvalidArgument
             );
-            let non_finite_translation = DynoPose {
+            let non_finite_translation = DyniboPose {
                 translation: [f64::NAN, 0.0, 0.0],
-                ..DynoPose::default()
+                ..DyniboPose::default()
             };
             assert_eq!(
-                dyno_inverse_kinematics(
+                dynibo_inverse_kinematics(
                     robot,
                     workspace,
                     q.as_ptr(),
                     4,
                     target,
                     &non_finite_translation,
-                    dyno_ik_options_default(),
+                    dynibo_ik_options_default(),
                     output.as_mut_ptr(),
                     4,
                 ),
-                DynoStatus::InvalidArgument
+                DyniboStatus::InvalidArgument
             );
-            let non_finite_quaternion = DynoPose {
+            let non_finite_quaternion = DyniboPose {
                 rotation_xyzw: [f64::INFINITY, 0.0, 0.0, 1.0],
-                ..DynoPose::default()
+                ..DyniboPose::default()
             };
             assert_eq!(
-                dyno_inverse_kinematics(
+                dynibo_inverse_kinematics(
                     robot,
                     workspace,
                     q.as_ptr(),
                     4,
                     target,
                     &non_finite_quaternion,
-                    dyno_ik_options_default(),
+                    dynibo_ik_options_default(),
                     output.as_mut_ptr(),
                     4,
                 ),
-                DynoStatus::InvalidArgument
+                DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dyno_forward_velocity(
+                dynibo_forward_velocity(
                     robot,
                     workspace,
                     q.as_ptr(),
@@ -1048,13 +1048,13 @@ mod tests {
                     4,
                     target,
                     ptr::null(),
-                    &DynoPose::default(),
+                    &DyniboPose::default(),
                     &mut twist,
                 ),
-                DynoStatus::InvalidArgument
+                DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dyno_forward_acceleration(
+                dynibo_forward_acceleration(
                     robot,
                     workspace,
                     q.as_ptr(),
@@ -1064,59 +1064,59 @@ mod tests {
                     target,
                     &mut twist,
                 ),
-                DynoStatus::InvalidArgument
+                DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dyno_gravity(
+                dynibo_gravity(
                     robot,
                     workspace,
                     q.as_ptr(),
                     4,
-                    &DynoPose::default(),
+                    &DyniboPose::default(),
                     ptr::null(),
                     1,
                     output.as_mut_ptr(),
                     4,
                 ),
-                DynoStatus::InvalidArgument
+                DyniboStatus::InvalidArgument
             );
-            let invalid_load = DynoLoad {
+            let invalid_load = DyniboLoad {
                 link_id: usize::MAX,
-                ..DynoLoad::default()
+                ..DyniboLoad::default()
             };
             assert_eq!(
-                dyno_inverse_dynamics(
+                dynibo_inverse_dynamics(
                     robot,
                     workspace,
                     q.as_ptr(),
                     q.as_ptr(),
                     q.as_ptr(),
                     4,
-                    &DynoPose::default(),
-                    DynoTwist::default(),
-                    DynoTwist::default(),
+                    &DyniboPose::default(),
+                    DyniboTwist::default(),
+                    DyniboTwist::default(),
                     &invalid_load,
                     1,
                     output.as_mut_ptr(),
                     4,
                 ),
-                DynoStatus::InvalidArgument
+                DyniboStatus::InvalidArgument
             );
 
-            dyno_workspace_destroy(workspace);
-            dyno_robot_destroy(robot);
+            dynibo_workspace_destroy(workspace);
+            dynibo_robot_destroy(robot);
         }
     }
 
     #[test]
     fn abi_catches_panics_clears_errors_and_keeps_them_thread_local() {
         let status = call(|| panic!("intentional test panic"));
-        assert_eq!(status, DynoStatus::Panic);
+        assert_eq!(status, DyniboStatus::Panic);
         assert!(last_error().contains("panic caught"));
 
         // A successful call clears the previous error.
-        assert_eq!(dyno_ik_options_default().max_iterations, 100);
-        assert_eq!(call(|| Ok(())), DynoStatus::Ok);
+        assert_eq!(dynibo_ik_options_default().max_iterations, 100);
+        assert_eq!(call(|| Ok(())), DyniboStatus::Ok);
         assert!(last_error().is_empty());
 
         set_error("main thread");
@@ -1132,24 +1132,24 @@ mod tests {
     #[test]
     fn core_errors_map_to_stable_abi_categories() {
         assert_eq!(
-            core_error(dyno::Error::InvalidModel("broken tree".to_owned())).0,
-            DynoStatus::ModelError
+            core_error(dynibo::Error::InvalidModel("broken tree".to_owned())).0,
+            DyniboStatus::ModelError
         );
         assert_eq!(
-            core_error(dyno::Error::UnknownLink {
+            core_error(dynibo::Error::UnknownLink {
                 name: "missing".to_owned(),
             })
             .0,
-            DynoStatus::InvalidArgument
+            DyniboStatus::InvalidArgument
         );
         assert_eq!(
-            core_error(dyno::Error::IkNotConverged {
+            core_error(dynibo::Error::IkNotConverged {
                 iterations: 1,
                 translation_error: 1.0,
                 rotation_error: 0.0,
             })
             .0,
-            DynoStatus::SolverError
+            DyniboStatus::SolverError
         );
     }
 }

@@ -1,11 +1,11 @@
-# dyno
+# dynibo
 
-[![Package CI](https://github.com/xiaojie-xue/dyno/actions/workflows/package-ci.yml/badge.svg?branch=main)](https://github.com/xiaojie-xue/dyno/actions/workflows/package-ci.yml)
-[![codecov](https://codecov.io/gh/xiaojie-xue/dyno/branch/main/graph/badge.svg)](https://codecov.io/gh/xiaojie-xue/dyno)
+[![Package CI](https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml/badge.svg?branch=main)](https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml)
+[![codecov](https://codecov.io/gh/xiaojie-xue/dynibo/branch/main/graph/badge.svg)](https://codecov.io/gh/xiaojie-xue/dynibo)
 
 [English](README.md) | 简体中文
 
-`dyno` 是一个快速、轻量且可靠的 Rust 机器人运动学与动力学库。它在运行时从 URDF
+`dynibo` 是一个快速、轻量且可靠的 Rust 机器人运动学与动力学库。它在运行时从 URDF
 加载树状机器人拓扑，并通过可复用的 Workspace 提供计算期零分配的接口；同时基于同一
 套 Rust 核心开放 Python 与 C/C++ 接口。
 
@@ -13,14 +13,14 @@
 
 ### 快速
 
-Dyno 基于 Rust 实现，并将内存分配移出计算循环。创建 `Workspace` 和输出 buffer 后，
+Dynibo 基于 Rust 实现，并将内存分配移出计算循环。创建 `Workspace` 和输出 buffer 后，
 主要运动学与动力学接口会复用已有内存，不再分配或调整容量。
 
-以下 Criterion 数据使用相同的 URDF 模型和关节状态对比 Dyno 与 Pinocchio。Robot、
+以下 Criterion 数据使用相同的 URDF 模型和关节状态对比 Dynibo 与 Pinocchio。Robot、
 Workspace、Pinocchio `Data` 和输出 buffer 的创建均不计入耗时。加速比根据 quick 模式
 报告区间的中值计算，并从 Pinocchio 耗时中扣除了实测的 0.882 ns 固定 C ABI 开销。
 
-在这些 benchmark 中，Dyno 相比 Pinocchio 快 1.17–2.70 倍，数值越高表示性能越好。
+在这些 benchmark 中，Dynibo 相比 Pinocchio 快 1.17–2.70 倍，数值越高表示性能越好。
 
 | 模型 | FK | Jacobian | Gravity | RNEA |
 |---|---:|---:|---:|---:|
@@ -38,7 +38,7 @@ cargo bench --features pinocchio-bench --bench pinocchio -- --quick
 
 ### 轻量
 
-Dyno 专注于最常用的机器人运动学与动力学接口：
+Dynibo 专注于最常用的机器人运动学与动力学接口：
 
 - `forward_kinematics` — 目标 link 位姿
 - `jacobian` — 目标 link 的 Jacobian
@@ -55,7 +55,7 @@ Rust 实现。
 
 ### 可靠
 
-Dyno 经过了深入的单元测试。测试覆盖有限差分运动学、动力学回归、树状机器人与外部
+Dynibo 经过了深入的单元测试。测试覆盖有限差分运动学、动力学回归、树状机器人与外部
 载荷、逆运动学、非法输入、Workspace 归属与复用，以及计算期零分配。独立的 Pinocchio
 oracle 还会在确定性机器人状态下完整对比 FK、Jacobian、gravity 和 RNEA 输出。
 
@@ -69,7 +69,7 @@ Rust 核心不包含项目自身的 `unsafe` 代码。CI 要求 Rust workspace �
 添加 Cargo package：
 
 ```bash
-cargo add dyno
+cargo add dynibo
 ```
 
 ### Python
@@ -77,10 +77,10 @@ cargo add dyno
 从 PyPI 安装 Python package：
 
 ```bash
-python -m pip install dyno-robotics
+python -m pip install dynibo
 ```
 
-安装后通过 `dyno` 导入。
+安装后通过 `dynibo` 导入。
 
 ### C/C++
 
@@ -89,10 +89,10 @@ python -m pip install dyno-robotics
 ```bash
 cmake -S . -B build/c -DCMAKE_BUILD_TYPE=Release
 cmake --build build/c --parallel
-cmake --install build/c --prefix /opt/dyno
+cmake --install build/c --prefix /opt/dynibo
 ```
 
-CMake 项目可使用安装后的 `dyno::dyno` target。package 与链接配置详见
+CMake 项目可使用安装后的 `dynibo::dynibo` target。package 与链接配置详见
 [安装指南](docs/RELEASING.zh.md)。
 
 ## 示例
@@ -101,7 +101,7 @@ CMake 项目可使用安装后的 `dyno::dyno` target。package 与链接配置�
 
 ## 支持的模型
 
-Dyno 支持运行时尺寸的树状 URDF，以及 revolute、continuous、prismatic 和 fixed joint。
+Dynibo 支持运行时尺寸的树状 URDF，以及 revolute、continuous、prismatic 和 fixed joint。
 无效拓扑、错误输入长度、模型不匹配的 handle 和求解失败都会返回结构化错误。
 
 ## 测试
@@ -125,18 +125,18 @@ bash ci/test-all.sh
 
 ## 引用
 
-如果 Dyno 对你的工作有帮助，请使用以下格式引用：
+如果 Dynibo 对你的工作有帮助，请使用以下格式引用：
 
 ```bibtex
-@software{xue2026dyno,
+@software{xue2026dynibo,
   author  = {Xue, Xiaojie},
-  title   = {Dyno: Fast, Lightweight, and Reliable Robot Kinematics and Dynamics},
+  title   = {Dynibo: Fast, Lightweight, and Reliable Robot Kinematics and Dynamics},
   year    = {2026},
   version = {0.1.0},
-  url     = {https://github.com/xiaojie-xue/dyno}
+  url     = {https://github.com/xiaojie-xue/dynibo}
 }
 ```
 
 ## 许可证
 
-Dyno 使用 [MIT License](LICENSE)。
+Dynibo 使用 [MIT License](LICENSE)。
