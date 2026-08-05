@@ -2,6 +2,7 @@
 
 [![Package CI](https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml/badge.svg?branch=main)](https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml)
 [![codecov](https://codecov.io/gh/xiaojie-xue/dynibo/branch/main/graph/badge.svg)](https://codecov.io/gh/xiaojie-xue/dynibo)
+[![GitHub Release](https://img.shields.io/github/v/release/xiaojie-xue/dynibo)](https://github.com/xiaojie-xue/dynibo/releases/latest)
 
 [English](README.md) | 简体中文
 
