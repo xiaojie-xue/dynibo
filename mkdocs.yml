@@ -12,9 +12,9 @@ theme:
     - content.code.copy
 
 nav:
-  - Python guide: index.md
-  - Python API: python-api.md
+  - Python API: index.md
   - Rust API: https://docs.rs/dynibo
+  - GitHub source code: https://github.com/xiaojie-xue/dynibo
 
 plugins:
   - search

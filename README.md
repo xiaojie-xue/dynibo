@@ -114,7 +114,7 @@ CMake consumers can use the installed `dynibo::dynibo` target.
 ## Documentation
 
 - [Rust API documentation](https://docs.rs/dynibo)
-- [Python guide and API reference](https://dynibo.readthedocs.io/)
+- [Python API documentation](https://dynibo.readthedocs.io/)
 
 ## Examples
 

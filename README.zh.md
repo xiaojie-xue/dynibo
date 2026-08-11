@@ -104,7 +104,7 @@ CMake 项目可使用安装后的 `dynibo::dynibo` target。
 ## 文档
 
 - [Rust API 文档](https://docs.rs/dynibo)
-- [Python 指南与 API 文档](https://dynibo.readthedocs.io/)
+- [Python API 文档](https://dynibo.readthedocs.io/)
 
 ## 示例
 
