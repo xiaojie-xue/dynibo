@@ -101,6 +101,11 @@ cmake --install build/c --prefix /opt/dynibo
 
 CMake 项目可使用安装后的 `dynibo::dynibo` target。
 
+## 文档
+
+- [Rust API 文档](https://docs.rs/dynibo)
+- [Python 指南与 API 文档](https://dynibo.readthedocs.io/)
+
 ## 示例
 
 完整调用示例见 [`examples/`](examples/) 目录。

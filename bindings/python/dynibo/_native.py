@@ -65,7 +65,16 @@ class _IkOptions(ct.Structure):
 
 @dataclass(frozen=True)
 class Pose:
-    """A translation and an `(x, y, z, w)` unit quaternion."""
+    """A rigid-body pose.
+
+    Attributes:
+        translation: Translation in metres as `(x, y, z)`.
+        rotation_xyzw: Unit quaternion in `(x, y, z, w)` order.
+
+    Notes:
+        The identity pose is used by default. Quaternion normalization is
+        validated by native calculations that consume the pose.
+    """
 
     translation: tuple[float, float, float] = (0.0, 0.0, 0.0)
     rotation_xyzw: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
@@ -73,7 +82,12 @@ class Pose:
 
 @dataclass(frozen=True)
 class Twist:
-    """Angular-first spatial velocity or acceleration."""
+    """An angular-first spatial velocity or acceleration.
+
+    Attributes:
+        angular: Angular component as `(x, y, z)`.
+        linear: Linear component as `(x, y, z)`.
+    """
 
     angular: tuple[float, float, float] = (0.0, 0.0, 0.0)
     linear: tuple[float, float, float] = (0.0, 0.0, 0.0)
@@ -81,7 +95,13 @@ class Twist:
 
 @dataclass(frozen=True)
 class Load:
-    """A link-local external wrench."""
+    """An external wrench applied at a link origin.
+
+    Attributes:
+        link_id: Identifier returned by `Robot.link_id()`.
+        torque: Link-local torque as `(x, y, z)`.
+        force: Link-local force as `(x, y, z)`.
+    """
 
     link_id: int
     torque: tuple[float, float, float] = (0.0, 0.0, 0.0)
@@ -90,7 +110,15 @@ class Load:
 
 @dataclass(frozen=True)
 class IkOptions:
-    """Damped-least-squares inverse-kinematics configuration."""
+    """Damped-least-squares inverse-kinematics configuration.
+
+    Attributes:
+        max_iterations: Maximum number of joint updates.
+        translation_tolerance: Accepted Euclidean position error in metres.
+        rotation_tolerance: Accepted rotation-vector norm in radians.
+        damping: Damping factor in the least-squares update.
+        max_step_norm: Maximum Euclidean norm of one joint update.
+    """
 
     max_iterations: int = 100
     translation_tolerance: float = 1.0e-6
@@ -234,7 +262,21 @@ def _loads(values: Iterable[Load]) -> ct.Array[_Load]:
 
 
 class Robot:
-    """A URDF robot with one reusable, non-thread-safe calculation workspace."""
+    """A URDF robot with a reusable calculation workspace.
+
+    Args:
+        urdf_path: Path to the URDF file to load.
+
+    Raises:
+        ModelError: If the file cannot be read, parsed, or represented as a
+            supported tree model.
+        PanicError: If the native library encounters an unexpected failure.
+
+    Notes:
+        A `Robot` is a context manager and should be closed after use. Its
+        internal workspace is not thread-safe; use distinct instances for
+        concurrent calculations.
+    """
 
     def __init__(self, urdf_path: str | os.PathLike[str]):
         self._robot = _robot_p()
@@ -267,6 +309,7 @@ class Robot:
 
     @property
     def name(self) -> str:
+        """The robot name declared in the URDF."""
         value = _lib.dynibo_robot_name(self._robot)
         if value is None:
             raise RuntimeError("robot is closed")
@@ -274,18 +317,45 @@ class Robot:
 
     @property
     def joint_count(self) -> int:
+        """The number of joints in the model."""
         return int(_lib.dynibo_robot_joint_count(self._robot))
 
     @property
     def link_count(self) -> int:
+        """The number of links in the model, including the root link."""
         return int(_lib.dynibo_robot_link_count(self._robot))
 
     def link_id(self, name: str) -> int:
+        """Look up a link identifier by its URDF name.
+
+        Args:
+            name: Link name exactly as declared in the URDF.
+
+        Returns:
+            An identifier for use as a `target` or `Load.link_id` with this
+            robot.
+
+        Raises:
+            ValueError: If the link does not exist.
+        """
         result = ct.c_size_t()
         _check(_lib.dynibo_robot_link_id(self._robot, name.encode(), ct.byref(result)))
         return int(result.value)
 
     def forward_kinematics(self, q: Sequence[float], target: int) -> Pose:
+        """Compute the pose of a target link.
+
+        Args:
+            q: Joint positions in model joint order.
+            target: Link identifier returned by `link_id()`.
+
+        Returns:
+            Target-link pose relative to the root link.
+
+        Raises:
+            ValueError: If an input length or link identifier is invalid.
+            DyniboError: If the native calculation fails.
+        """
         q_array = _array(q, "q")
         output = _Pose()
         _check(_lib.dynibo_forward_kinematics(
@@ -294,7 +364,21 @@ class Robot:
         return Pose(tuple(output.translation), tuple(output.rotation_xyzw))
 
     def jacobian(self, q: Sequence[float], target: int) -> tuple[float, ...]:
-        """Return a flat, column-major `6 x joint_count` Jacobian."""
+        """Compute the geometric Jacobian of a target link.
+
+        Args:
+            q: Joint positions in model joint order.
+            target: Link identifier returned by `link_id()`.
+
+        Returns:
+            A flat, column-major `6 x joint_count` tuple. Each column is
+            angular-first: `(angular_x, angular_y, angular_z, linear_x,
+            linear_y, linear_z)`.
+
+        Raises:
+            ValueError: If an input length or link identifier is invalid.
+            DyniboError: If the native calculation fails.
+        """
         q_array = _array(q, "q")
         output = (ct.c_double * (6 * self.joint_count))()
         _check(_lib.dynibo_jacobian(
@@ -307,6 +391,23 @@ class Robot:
         self, initial_q: Sequence[float], target: int, desired: Pose,
         options: IkOptions = IkOptions(),
     ) -> tuple[float, ...]:
+        """Solve for joint positions that reach a desired target pose.
+
+        Args:
+            initial_q: Initial joint positions in model joint order.
+            target: Link identifier returned by `link_id()`.
+            desired: Desired target-link pose relative to the root link.
+            options: Solver tolerances and iteration limits.
+
+        Returns:
+            Solved joint positions in model joint order.
+
+        Raises:
+            ValueError: If an input, pose, link identifier, or option is
+                invalid.
+            SolverError: If the solver fails numerically or does not converge.
+            DyniboError: If another native calculation failure occurs.
+        """
         q_array = _array(initial_q, "initial_q")
         desired_c = _pose(desired)
         options_c = _IkOptions(
@@ -324,6 +425,25 @@ class Robot:
         self, q: Sequence[float], qd: Sequence[float], target: int,
         base: Pose = Pose(), tool: Pose = Pose(),
     ) -> Twist:
+        """Compute spatial velocity at a point on a target link.
+
+        Args:
+            q: Joint positions in model joint order.
+            qd: Joint velocities in model joint order.
+            target: Link identifier returned by `link_id()`.
+            base: Pose of the robot base; its rotation selects the coordinates
+                in which the result is expressed.
+            tool: Target-to-tool pose; its translation selects the point whose
+                linear velocity is returned.
+
+        Returns:
+            Angular-first spatial velocity at the selected tool point.
+
+        Raises:
+            ValueError: If an input length, pose, or link identifier is
+                invalid.
+            DyniboError: If the native calculation fails.
+        """
         _require_same_length(q, qd=qd)
         q_array, qd_array = _array(q, "q"), _array(qd, "qd")
         base_c, tool_c, output = _pose(base), _pose(tool), _Twist()
@@ -337,6 +457,21 @@ class Robot:
         self, q: Sequence[float], qd: Sequence[float],
         qdd: Sequence[float], target: int,
     ) -> Twist:
+        """Compute spatial acceleration at a target-link origin.
+
+        Args:
+            q: Joint positions in model joint order.
+            qd: Joint velocities in model joint order.
+            qdd: Joint accelerations in model joint order.
+            target: Link identifier returned by `link_id()`.
+
+        Returns:
+            Angular-first spatial acceleration relative to the root link.
+
+        Raises:
+            ValueError: If an input length or link identifier is invalid.
+            DyniboError: If the native calculation fails.
+        """
         _require_same_length(q, qd=qd, qdd=qdd)
         q_array = _array(q, "q")
         qd_array = _array(qd, "qd")
@@ -352,6 +487,21 @@ class Robot:
         self, q: Sequence[float], base: Pose = Pose(),
         loads: Iterable[Load] = (),
     ) -> tuple[float, ...]:
+        """Compute gravity-compensation joint forces.
+
+        Args:
+            q: Joint positions in model joint order.
+            base: Pose of the robot base in the world frame. Its rotation
+                determines gravity's direction in the robot model.
+            loads: Optional external link-local wrenches.
+
+        Returns:
+            Joint forces or torques in model joint order.
+
+        Raises:
+            ValueError: If an input, pose, or load is invalid.
+            DyniboError: If the native calculation fails.
+        """
         q_array, base_c, loads_c = _array(q, "q"), _pose(base), _loads(loads)
         output = (ct.c_double * self.joint_count)()
         _check(_lib.dynibo_gravity(
@@ -365,6 +515,27 @@ class Robot:
         base: Pose = Pose(), base_velocity: Twist = Twist(),
         base_acceleration: Twist = Twist(), loads: Iterable[Load] = (),
     ) -> tuple[float, ...]:
+        """Compute recursive Newton-Euler inverse dynamics.
+
+        Gravity is included in the result.
+
+        Args:
+            q: Joint positions in model joint order.
+            qd: Joint velocities in model joint order.
+            qdd: Joint accelerations in model joint order.
+            base: Pose of the robot base in the world frame.
+            base_velocity: Base spatial velocity expressed in the world frame.
+            base_acceleration: Additional base spatial acceleration expressed
+                in the world frame.
+            loads: Optional external link-local wrenches.
+
+        Returns:
+            Joint forces or torques in model joint order.
+
+        Raises:
+            ValueError: If an input, pose, or load is invalid.
+            DyniboError: If the native calculation fails.
+        """
         _require_same_length(q, qd=qd, qdd=qdd)
         q_array = _array(q, "q")
         qd_array = _array(qd, "qd")

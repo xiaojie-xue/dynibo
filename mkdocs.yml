@@ -1,0 +1,51 @@
+site_name: dynibo
+site_description: Python API documentation for dynibo robot kinematics and dynamics
+site_url: !ENV READTHEDOCS_CANONICAL_URL
+repo_url: https://github.com/xiaojie-xue/dynibo
+repo_name: xiaojie-xue/dynibo
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+
+nav:
+  - Python guide: index.md
+  - Python API: python-api.md
+  - Rust API: https://docs.rs/dynibo
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths:
+            - bindings/python
+          options:
+            allow_inspection: false
+            docstring_style: google
+            filters:
+              - "!^_"
+            heading_level: 2
+            members_order: source
+            show_root_full_path: false
+            show_root_heading: true
+            show_source: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+strict: true

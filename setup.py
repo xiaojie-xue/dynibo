@@ -62,6 +62,11 @@ setup(
     long_description_content_type="text/markdown",
     license="MIT",
     url="https://github.com/xiaojie-xue/dynibo",
+    project_urls={
+        "Documentation": "https://dynibo.readthedocs.io/",
+        "Rust API": "https://docs.rs/dynibo",
+        "Source Code": "https://github.com/xiaojie-xue/dynibo",
+    },
     python_requires=">=3.9",
     package_dir={"": "bindings/python"},
     packages=find_packages("bindings/python"),

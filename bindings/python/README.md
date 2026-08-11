@@ -17,3 +17,6 @@ with Robot("robot.urdf") as robot:
 
 The Jacobian is a flat column-major `6 x N` tuple. With NumPy, convert it using
 `np.asarray(jacobian).reshape((6, robot.joint_count), order="F")`.
+
+See the [Python guide and API reference](https://dynibo.readthedocs.io/)
+for data conventions, error handling, and complete method documentation.

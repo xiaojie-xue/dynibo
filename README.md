@@ -111,6 +111,11 @@ cmake --install build/c --prefix /opt/dynibo
 
 CMake consumers can use the installed `dynibo::dynibo` target.
 
+## Documentation
+
+- [Rust API documentation](https://docs.rs/dynibo)
+- [Python guide and API reference](https://dynibo.readthedocs.io/)
+
 ## Examples
 
 Complete usage examples are available in the [`examples/`](examples/)

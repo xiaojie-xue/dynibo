@@ -10,6 +10,7 @@ __pycache__/
 /build/
 /dist/
 /wheelhouse/
+/site/
 *.egg-info/
 
 # IDE and editor state
