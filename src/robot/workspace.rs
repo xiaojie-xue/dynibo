@@ -1,4 +1,4 @@
-use nalgebra::Vector3;
+use nalgebra::{Matrix3, Vector3};
 
 use crate::{Frame, Wrench};
 
@@ -44,6 +44,9 @@ pub struct Workspace {
     pub(super) origin_accelerations: Vec<Vector3<f64>>,
     pub(super) link_accelerations: Vec<Vector3<f64>>,
     pub(super) link_loads: Vec<Wrench>,
+    pub(super) composite_masses: Vec<f64>,
+    pub(super) composite_moments: Vec<Vector3<f64>>,
+    pub(super) composite_inertias: Vec<Matrix3<f64>>,
     pub(super) jacobian: Vec<f64>,
     pub(super) q_work: Vec<f64>,
     pub(super) step: Vec<f64>,
@@ -61,6 +64,9 @@ impl Workspace {
             origin_accelerations: vec![Vector3::zeros(); joint_count],
             link_accelerations: vec![Vector3::zeros(); joint_count],
             link_loads: vec![Wrench::zeros(); joint_count],
+            composite_masses: vec![0.0; joint_count],
+            composite_moments: vec![Vector3::zeros(); joint_count],
+            composite_inertias: vec![Matrix3::zeros(); joint_count],
             jacobian: vec![0.0; 6 * joint_count],
             q_work: vec![0.0; joint_count],
             step: vec![0.0; joint_count],

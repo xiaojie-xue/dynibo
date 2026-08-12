@@ -3,7 +3,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use nalgebra::{SMatrix, SVector, Vector3};
+use nalgebra::{Matrix3, SMatrix, SVector, Vector3};
 
 use crate::{Error, Frame, Joint, JointType, Link, Result, Twist, Wrench, urdf::tree_model};
 
@@ -340,6 +340,34 @@ impl Robot {
         self.validate_slice("qdd", qdd)?;
         let target_index = self.validate_link_id(target)?;
         self.acceleration_kernel(q, qd, qdd, target_index, &mut workspace.ancestor_path)
+    }
+
+    /// Writes the runtime-sized `N x N` joint-space mass matrix in column-major
+    /// order.
+    ///
+    /// The matrix is symmetric positive semi-definite. Rows and columns of
+    /// fixed joints are zero; their subtree inertia still contributes to the
+    /// moving ancestors.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error unless `output.len() == joint_count() * joint_count()`,
+    /// or for an invalid input length or workspace.
+    pub fn mass_matrix(
+        &self,
+        q: &[f64],
+        workspace: &mut Workspace,
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.validate_workspace(workspace)?;
+        self.validate_slice("q", q)?;
+        self.validate_slice_length(
+            "mass matrix output",
+            output.len(),
+            self.joint_count() * self.joint_count(),
+        )?;
+        self.mass_matrix_kernel(q, workspace, output);
+        Ok(())
     }
 
     /// Writes runtime-sized Newton-Euler joint forces into caller-owned output.
@@ -686,6 +714,80 @@ impl Robot {
         Ok(())
     }
 
+    fn mass_matrix_kernel(&self, q: &[f64], workspace: &mut Workspace, output: &mut [f64]) {
+        let joint_count = self.joint_count();
+        output.fill(0.0);
+        for (index, joint) in self.joints.iter().enumerate() {
+            workspace.frames[index] = joint.frame(q[index]);
+            let link = &self.links[index + 1];
+            let mass = link.mass();
+            let center = *link.center_of_mass();
+            workspace.composite_masses[index] = mass;
+            workspace.composite_moments[index] = mass * center;
+            // Rotational inertia about the link origin: I_o = I_com - m[c]x[c]x.
+            workspace.composite_inertias[index] = link.inertia() - mass * skew_square(center);
+        }
+        // Composite rigid-body pass: accumulate each subtree inertia, expressed
+        // about the parent link origin, into the parent.
+        for index in (0..joint_count).rev() {
+            let parent = self.joint_parents[index];
+            if parent == 0 {
+                continue;
+            }
+            let transform = &workspace.frames[index];
+            let translation = transform.translation.vector;
+            let rotation = transform.rotation.to_rotation_matrix();
+            let rotated_moment = rotation * workspace.composite_moments[index];
+            let rotated_inertia =
+                rotation * workspace.composite_inertias[index] * rotation.transpose();
+            let mass = workspace.composite_masses[index];
+            let parent_index = parent - 1;
+            workspace.composite_masses[parent_index] += mass;
+            workspace.composite_moments[parent_index] += mass * translation + rotated_moment;
+            // R I_o R^T - m[t]x[t]x - [t]x[h]x - [h]x[t]x with h = R h_child.
+            workspace.composite_inertias[parent_index] += rotated_inertia
+                + (mass * translation.norm_squared() + 2.0 * translation.dot(&rotated_moment))
+                    * Matrix3::identity()
+                - mass * translation * translation.transpose()
+                - translation * rotated_moment.transpose()
+                - rotated_moment * translation.transpose();
+        }
+        // Mass-matrix entries: F = I^c S in the child link frame, then F is
+        // propagated up the ancestor chain while M(i, j) = S_j^T F.
+        for (index, joint) in self.joints.iter().enumerate() {
+            if joint.joint_type() == JointType::Fixed {
+                continue;
+            }
+            let axis: Vector3<f64> = *joint.axis().as_ref();
+            let mass = workspace.composite_masses[index];
+            let moment = workspace.composite_moments[index];
+            let inertia = workspace.composite_inertias[index];
+            let mut force = match joint.joint_type() {
+                JointType::Revolute => Wrench::new(inertia * axis, axis.cross(&moment)),
+                JointType::Prismatic => Wrench::new(moment.cross(&axis), mass * axis),
+                JointType::Fixed => unreachable!("fixed joints were skipped above"),
+            };
+            let mut current = index;
+            loop {
+                let current_joint = &self.joints[current];
+                let current_axis: Vector3<f64> = *current_joint.axis().as_ref();
+                let entry = match current_joint.joint_type() {
+                    JointType::Revolute => current_axis.dot(&force.torque),
+                    JointType::Prismatic => current_axis.dot(&force.force),
+                    JointType::Fixed => 0.0,
+                };
+                output[current * joint_count + index] = entry;
+                output[index * joint_count + current] = entry;
+                let parent = self.joint_parents[current];
+                if parent == 0 {
+                    break;
+                }
+                force = wrench_to_parent(&workspace.frames[current], force);
+                current = parent - 1;
+            }
+        }
+    }
+
     fn gravity_kernel(
         &self,
         q: &[f64],
@@ -948,4 +1050,9 @@ fn wrench_to_parent(transform: &Frame, wrench: Wrench) -> Wrench {
 
 fn add_wrench(lhs: Wrench, rhs: Wrench) -> Wrench {
     Wrench::new(lhs.torque + rhs.torque, lhs.force + rhs.force)
+}
+
+/// Returns the square `[v]x[v]x = v v^T - |v|^2 I` of the cross-product matrix.
+fn skew_square(vector: Vector3<f64>) -> Matrix3<f64> {
+    vector * vector.transpose() - vector.norm_squared() * Matrix3::identity()
 }

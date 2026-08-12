@@ -57,6 +57,7 @@ fn dynamic_calculations_do_not_allocate_after_workspace_creation() {
     let initial = [0.0; 4];
     let mut workspace = robot.workspace();
     let mut jacobian = [0.0; 24];
+    let mut mass = [0.0; 16];
     let mut output = [0.0; 4];
     let desired = robot
         .forward_kinematics(&q, target_id, &mut workspace)
@@ -87,6 +88,7 @@ fn dynamic_calculations_do_not_allocate_after_workspace_creation() {
         robot
             .jacobian(&q, target_id, &mut workspace, &mut jacobian)
             .unwrap();
+        robot.mass_matrix(&q, &mut workspace, &mut mass).unwrap();
         black_box(
             robot
                 .forward_velocity_kinematics(

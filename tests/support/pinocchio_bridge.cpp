@@ -1,3 +1,4 @@
+#include <pinocchio/algorithm/crba.hpp>
 #include <pinocchio/algorithm/frames.hpp>
 #include <pinocchio/algorithm/jacobian.hpp>
 #include <pinocchio/algorithm/joint-configuration.hpp>
@@ -218,6 +219,17 @@ void dynibo_pinocchio_rnea_values(void* raw_context, const double* q, const doub
   Eigen::Map<Eigen::VectorXd> torque_map(torque, context->model.nv);
   torque_map =
       pinocchio::rnea(context->model, context->data, configuration, velocity, acceleration);
+}
+
+void dynibo_pinocchio_mass_matrix_values(void* raw_context, const double* q,
+                                       double* mass) noexcept {
+  auto* context = static_cast<PinocchioBenchContext*>(raw_context);
+  const ConfigMap configuration(q, context->model.nq);
+  pinocchio::crba(context->model, context->data, configuration);
+  context->data.M.triangularView<Eigen::Lower>() =
+      context->data.M.transpose().triangularView<Eigen::Lower>();
+  Eigen::Map<Eigen::MatrixXd> mass_map(mass, context->model.nv, context->model.nv);
+  mass_map = context->data.M;
 }
 
 void dynibo_pinocchio_link_frame_values(void* raw_context, const double* q,

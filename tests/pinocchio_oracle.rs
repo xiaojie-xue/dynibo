@@ -66,6 +66,11 @@ unsafe extern "C" {
         qdd: *const f64,
         torque: *mut f64,
     );
+    fn dynibo_pinocchio_mass_matrix_values(
+        context: *mut std::ffi::c_void,
+        q: *const f64,
+        mass: *mut f64,
+    );
     fn dynibo_pinocchio_rnea_with_link_load_values(
         context: *mut std::ffi::c_void,
         q: *const f64,
@@ -292,6 +297,31 @@ impl PinocchioContext {
             )
         };
         self.dynibo_joint_order(&pinocchio)
+    }
+
+    fn mass_matrix(&mut self, configuration: &[f64]) -> Vec<f64> {
+        let mut pinocchio = vec![0.0; self.velocity_size * self.velocity_size];
+        // SAFETY: the output has `model.nv * model.nv` elements, column-major.
+        unsafe {
+            dynibo_pinocchio_mass_matrix_values(
+                self.pointer.as_ptr(),
+                configuration.as_ptr(),
+                pinocchio.as_mut_ptr(),
+            )
+        };
+        let joint_count = self.joint_mappings.len();
+        let mut dynibo_order = vec![0.0; joint_count * joint_count];
+        for (row, row_mapping) in self.joint_mappings.iter().enumerate() {
+            for (column, column_mapping) in self.joint_mappings.iter().enumerate() {
+                if let (Some(row_index), Some(column_index)) =
+                    (row_mapping.velocity_index, column_mapping.velocity_index)
+                {
+                    dynibo_order[column * joint_count + row] =
+                        pinocchio[column_index * self.velocity_size + row_index];
+                }
+            }
+        }
+        dynibo_order
     }
 
     fn rnea_with_link_load(
@@ -627,6 +657,65 @@ fn mixed_link_kinematics_match_pinocchio() {
                 &format!("acceleration for {link_name}, sample {sample}"),
             );
         }
+    }
+}
+
+#[test]
+fn mass_matrices_match_pinocchio() {
+    let path = serial_fixture();
+    let robot = Robot::from_urdf(&path).unwrap();
+    let mut workspace = robot.workspace();
+    let mut pinocchio = PinocchioContext::new(&robot, &path, "test_link_4");
+    let zero4 = [0.0; 4];
+    for sample in 0..32 {
+        let (q, _, _) = deterministic_state(sample);
+        let (pin_q, _, _) = pinocchio.state(&q, &zero4, &zero4);
+        let mut mass = vec![f64::NAN; 16];
+        robot.mass_matrix(&q, &mut workspace, &mut mass).unwrap();
+        assert_close(
+            &mass,
+            &pinocchio.mass_matrix(&pin_q),
+            1.0e-9,
+            1.0e-10,
+            &format!("serial mass matrix sample {sample}"),
+        );
+    }
+
+    let path = fixture();
+    let robot = Robot::from_urdf(&path).unwrap();
+    let mut workspace = robot.workspace();
+    let mut pinocchio = PinocchioContext::new(&robot, &path, "tool");
+    for sample in 0..64 {
+        let (q, _, _) = deterministic_state(sample);
+        let (pin_q, _, _) = pinocchio.state(&q, &zero4, &zero4);
+        let mut mass = vec![f64::NAN; 16];
+        robot.mass_matrix(&q, &mut workspace, &mut mass).unwrap();
+        assert_close(
+            &mass,
+            &pinocchio.mass_matrix(&pin_q),
+            1.0e-9,
+            1.0e-10,
+            &format!("mixed mass matrix sample {sample}"),
+        );
+    }
+
+    let path = tree_fixture();
+    let robot = Robot::from_urdf(&path).unwrap();
+    let mut workspace = robot.workspace();
+    let mut pinocchio = PinocchioContext::new(&robot, &path, "right_tool");
+    let zero7 = [0.0; 7];
+    for sample in 0..32 {
+        let (q, _, _) = deterministic_tree_state(sample);
+        let (pin_q, _, _) = pinocchio.state(&q, &zero7, &zero7);
+        let mut mass = vec![f64::NAN; 49];
+        robot.mass_matrix(&q, &mut workspace, &mut mass).unwrap();
+        assert_close(
+            &mass,
+            &pinocchio.mass_matrix(&pin_q),
+            1.0e-9,
+            1.0e-10,
+            &format!("tree mass matrix sample {sample}"),
+        );
     }
 }
 

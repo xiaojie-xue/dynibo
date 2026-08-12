@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use approx::assert_relative_eq;
-use dynibo::{Frame, IndexedLoad, Robot, Twist, Wrench};
+use dynibo::{Frame, IndexedLoad, JointType, Robot, Twist, Workspace, Wrench};
 use nalgebra::{DMatrix, Vector3};
 
 fn tree_arm() -> Robot {
@@ -25,6 +25,102 @@ fn assert_slice_close(actual: &[f64], expected: &[f64], epsilon: f64) {
     assert_eq!(actual.len(), expected.len());
     for (&actual, &expected) in actual.iter().zip(expected) {
         assert_relative_eq!(actual, expected, epsilon = epsilon);
+    }
+}
+
+/// Extracts the mass matrix column-wise from Newton-Euler evaluations:
+/// `M e_j = RNEA(q, 0, e_j) - RNEA(q, 0, 0)`.
+fn rnea_mass_matrix(robot: &Robot, q: &[f64], workspace: &mut Workspace) -> Vec<f64> {
+    let joint_count = robot.joint_count();
+    let zero = vec![0.0; joint_count];
+    let mut bias = vec![0.0; joint_count];
+    robot
+        .inverse_dynamics(
+            q,
+            &zero,
+            &zero,
+            &Frame::identity(),
+            Twist::zeros(),
+            Twist::zeros(),
+            &[],
+            workspace,
+            &mut bias,
+        )
+        .unwrap();
+    let mut mass = vec![0.0; joint_count * joint_count];
+    for column in 0..joint_count {
+        let mut unit_acceleration = vec![0.0; joint_count];
+        unit_acceleration[column] = 1.0;
+        let mut torque = vec![0.0; joint_count];
+        robot
+            .inverse_dynamics(
+                q,
+                &zero,
+                &unit_acceleration,
+                &Frame::identity(),
+                Twist::zeros(),
+                Twist::zeros(),
+                &[],
+                workspace,
+                &mut torque,
+            )
+            .unwrap();
+        for row in 0..joint_count {
+            mass[column * joint_count + row] = torque[row] - bias[row];
+        }
+    }
+    mass
+}
+
+#[test]
+fn mass_matrix_matches_rnea_columns_and_keeps_structural_guarantees() {
+    for robot in [tree_arm(), mixed_oracle_arm()] {
+        let joint_count = robot.joint_count();
+        let mut workspace = robot.workspace();
+        for sample in 0..16 {
+            let q: Vec<f64> = (0..joint_count)
+                .map(|joint| {
+                    let argument = (sample + 1) as f64 * (joint + 2) as f64 * 0.531 + 0.2;
+                    (0.9 + 0.1 * joint as f64) * argument.sin()
+                })
+                .collect();
+            let mut mass = vec![f64::NAN; joint_count * joint_count];
+            robot.mass_matrix(&q, &mut workspace, &mut mass).unwrap();
+            let expected = rnea_mass_matrix(&robot, &q, &mut workspace);
+            assert_slice_close(&mass, &expected, 2.0e-11);
+
+            for row in 0..joint_count {
+                for column in 0..joint_count {
+                    assert_relative_eq!(
+                        mass[column * joint_count + row],
+                        mass[row * joint_count + column],
+                        epsilon = 1.0e-12
+                    );
+                }
+            }
+            let mut moving = Vec::new();
+            for (index, joint) in robot.joints().iter().enumerate() {
+                if joint.joint_type() == JointType::Fixed {
+                    for other in 0..joint_count {
+                        assert_eq!(mass[index * joint_count + other], 0.0);
+                        assert_eq!(mass[other * joint_count + index], 0.0);
+                    }
+                } else {
+                    assert!(
+                        mass[index * joint_count + index] > 0.0,
+                        "mass matrix diagonal must be positive on moving joints: sample={sample}, joint={index}"
+                    );
+                    moving.push(index);
+                }
+            }
+            let moving_mass = DMatrix::from_fn(moving.len(), moving.len(), |row, column| {
+                mass[moving[column] * joint_count + moving[row]]
+            });
+            assert!(
+                moving_mass.cholesky().is_some(),
+                "moving-joint mass submatrix must be positive definite: sample={sample}"
+            );
+        }
     }
 }
 
