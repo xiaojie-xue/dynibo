@@ -41,6 +41,12 @@ unsafe extern "C" {
         q: *const f64,
         jacobian: *mut f64,
     );
+    fn dynibo_pinocchio_link_jacobian_derivative_values(
+        context: *mut std::ffi::c_void,
+        q: *const f64,
+        qd: *const f64,
+        derivative: *mut f64,
+    );
     fn dynibo_pinocchio_link_velocity_values(
         context: *mut std::ffi::c_void,
         q: *const f64,
@@ -231,16 +237,21 @@ impl PinocchioContext {
                 pinocchio.as_mut_ptr(),
             )
         };
-        let mut dynibo_order = vec![0.0; 6 * self.joint_mappings.len()];
-        for (joint, mapping) in self.joint_mappings.iter().enumerate() {
-            if let Some(column) = mapping.velocity_index {
-                for row in 0..6 {
-                    let pinocchio_row = if row < 3 { row + 3 } else { row - 3 };
-                    dynibo_order[6 * joint + row] = pinocchio[6 * column + pinocchio_row];
-                }
-            }
-        }
-        dynibo_order
+        self.dynibo_spatial_matrix_order(&pinocchio)
+    }
+
+    fn jacobian_derivative(&mut self, configuration: &[f64], velocity: &[f64]) -> Vec<f64> {
+        let mut pinocchio = vec![0.0; 6 * self.velocity_size];
+        // SAFETY: the output has `6 * model.nv` elements.
+        unsafe {
+            dynibo_pinocchio_link_jacobian_derivative_values(
+                self.pointer.as_ptr(),
+                configuration.as_ptr(),
+                velocity.as_ptr(),
+                pinocchio.as_mut_ptr(),
+            )
+        };
+        self.dynibo_spatial_matrix_order(&pinocchio)
     }
 
     fn velocity(&mut self, configuration: &[f64], velocity: &[f64]) -> [f64; 6] {
@@ -411,6 +422,22 @@ impl PinocchioContext {
             .iter()
             .map(|mapping| mapping.velocity_index.map_or(0.0, |index| pinocchio[index]))
             .collect()
+    }
+
+    /// Reorders a column-major `6 x nv` Pinocchio matrix into dynibo's joint
+    /// order, swapping the linear-first Pinocchio rows into dynibo's
+    /// angular-first layout and keeping zero columns for fixed joints.
+    fn dynibo_spatial_matrix_order(&self, pinocchio: &[f64]) -> Vec<f64> {
+        let mut dynibo_order = vec![0.0; 6 * self.joint_mappings.len()];
+        for (joint, mapping) in self.joint_mappings.iter().enumerate() {
+            if let Some(column) = mapping.velocity_index {
+                for row in 0..6 {
+                    let pinocchio_row = if row < 3 { row + 3 } else { row - 3 };
+                    dynibo_order[6 * joint + row] = pinocchio[6 * column + pinocchio_row];
+                }
+            }
+        }
+        dynibo_order
     }
 
     /// Reorders a column-major `nv x nv` Pinocchio matrix into dynibo's
@@ -807,6 +834,84 @@ fn coriolis_matrices_match_pinocchio() {
             1.0e-10,
             &format!("tree coriolis matrix sample {sample}"),
         );
+    }
+}
+
+#[test]
+fn jacobian_time_variations_match_pinocchio() {
+    let path = serial_fixture();
+    let robot = Robot::from_urdf(&path).unwrap();
+    let target = robot.link_id("test_link_4").unwrap();
+    let mut workspace = robot.workspace();
+    let mut pinocchio = PinocchioContext::new(&robot, &path, "test_link_4");
+    let zero4 = [0.0; 4];
+    for sample in 0..32 {
+        let (q, qd, _) = deterministic_state(sample);
+        let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero4);
+        let mut derivative = vec![f64::NAN; 24];
+        robot
+            .jacobian_derivative(&q, &qd, target, &mut workspace, &mut derivative)
+            .unwrap();
+        assert_close(
+            &derivative,
+            &pinocchio.jacobian_derivative(&pin_q, &pin_qd),
+            1.0e-9,
+            1.0e-10,
+            &format!("serial Jacobian derivative sample {sample}"),
+        );
+    }
+
+    let path = fixture();
+    let robot = Robot::from_urdf(&path).unwrap();
+    let mut workspace = robot.workspace();
+    for link_name in ["link_a", "mounted_link", "slider_link", "tool"] {
+        let target = robot.link_id(link_name).unwrap();
+        let mut pinocchio = PinocchioContext::new(&robot, &path, link_name);
+        for sample in 0..32 {
+            let (q, qd, _) = deterministic_state(sample);
+            let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero4);
+            let mut derivative = vec![f64::NAN; 24];
+            robot
+                .jacobian_derivative(&q, &qd, target, &mut workspace, &mut derivative)
+                .unwrap();
+            assert_close(
+                &derivative,
+                &pinocchio.jacobian_derivative(&pin_q, &pin_qd),
+                1.0e-9,
+                1.0e-10,
+                &format!("mixed Jacobian derivative for {link_name}, sample {sample}"),
+            );
+        }
+    }
+
+    let path = tree_fixture();
+    let robot = Robot::from_urdf(&path).unwrap();
+    let mut workspace = robot.workspace();
+    let zero7 = [0.0; 7];
+    for link_name in [
+        "trunk",
+        "left_lower",
+        "left_tool",
+        "right_lower",
+        "right_tool",
+    ] {
+        let target = robot.link_id(link_name).unwrap();
+        let mut pinocchio = PinocchioContext::new(&robot, &path, link_name);
+        for sample in 0..32 {
+            let (q, qd, _) = deterministic_tree_state(sample);
+            let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero7);
+            let mut derivative = vec![f64::NAN; 42];
+            robot
+                .jacobian_derivative(&q, &qd, target, &mut workspace, &mut derivative)
+                .unwrap();
+            assert_close(
+                &derivative,
+                &pinocchio.jacobian_derivative(&pin_q, &pin_qd),
+                1.0e-9,
+                1.0e-10,
+                &format!("tree Jacobian derivative for {link_name}, sample {sample}"),
+            );
+        }
     }
 }
 

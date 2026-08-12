@@ -332,6 +332,75 @@ fn coriolis_matrix_makes_mass_rate_minus_twice_c_skew_symmetric() {
 }
 
 #[test]
+fn jacobian_derivative_matches_zero_acceleration_and_finite_difference() {
+    let epsilon = 1.0e-7;
+    for robot in [tree_arm(), mixed_oracle_arm()] {
+        let joint_count = robot.joint_count();
+        let leaf_names: Vec<String> = robot
+            .leaf_links()
+            .map(|link| link.name().to_owned())
+            .collect();
+        for leaf_name in leaf_names {
+            let target = robot.link_id(&leaf_name).unwrap();
+            let mut workspace = robot.workspace();
+            for sample in 0..8 {
+                let q = sample_state(joint_count, sample, 0.3, 0.85);
+                let qd = sample_state(joint_count, sample, 1.2, 0.75);
+                let zero = vec![0.0; joint_count];
+
+                let mut derivative = vec![f64::NAN; 6 * joint_count];
+                robot
+                    .jacobian_derivative(&q, &qd, target, &mut workspace, &mut derivative)
+                    .unwrap();
+
+                // J_dot qd == forward_acceleration(q, qd, 0).
+                let acceleration = robot
+                    .forward_acceleration_kinematics(&q, &qd, &zero, target, &mut workspace)
+                    .unwrap();
+                let contracted: Vec<f64> = (0..6)
+                    .map(|row| {
+                        (0..joint_count)
+                            .map(|joint| derivative[6 * joint + row] * qd[joint])
+                            .sum()
+                    })
+                    .collect();
+                assert_slice_close(&contracted, acceleration.to_vector().as_slice(), 2.0e-11);
+
+                // Central finite difference of J along qd.
+                let plus_q: Vec<f64> = q.iter().zip(&qd).map(|(q, qd)| q + epsilon * qd).collect();
+                let minus_q: Vec<f64> = q.iter().zip(&qd).map(|(q, qd)| q - epsilon * qd).collect();
+                let mut plus = vec![0.0; 6 * joint_count];
+                let mut minus = vec![0.0; 6 * joint_count];
+                robot
+                    .jacobian(&plus_q, target, &mut workspace, &mut plus)
+                    .unwrap();
+                robot
+                    .jacobian(&minus_q, target, &mut workspace, &mut minus)
+                    .unwrap();
+                for index in 0..6 * joint_count {
+                    assert_relative_eq!(
+                        derivative[index],
+                        (plus[index] - minus[index]) / (2.0 * epsilon),
+                        epsilon = 1.0e-6
+                    );
+                }
+            }
+        }
+
+        // The root link has no moving ancestor joints.
+        let root = robot.link_id(robot.root_link().name()).unwrap();
+        let mut workspace = robot.workspace();
+        let q = sample_state(joint_count, 0, 0.3, 0.85);
+        let qd = sample_state(joint_count, 0, 1.2, 0.75);
+        let mut derivative = vec![f64::NAN; 6 * joint_count];
+        robot
+            .jacobian_derivative(&q, &qd, root, &mut workspace, &mut derivative)
+            .unwrap();
+        assert_slice_close(&derivative, &vec![0.0; 6 * joint_count], 0.0);
+    }
+}
+
+#[test]
 fn deterministic_dynamics_preserve_gravity_and_load_invariants() {
     let robot = tree_arm();
     let left = robot.link_id("left_tool").unwrap();

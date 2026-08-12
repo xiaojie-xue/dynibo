@@ -257,6 +257,93 @@ impl Robot {
         Ok(())
     }
 
+    /// Writes the runtime-sized `6 x N` time derivative of the geometric
+    /// Jacobian in column-major order.
+    ///
+    /// Each column stores `[angular_x, angular_y, angular_z, linear_x,
+    /// linear_y, linear_z]`, matching [`Robot::jacobian`]. The result
+    /// satisfies `forward_acceleration_kinematics(q, qd, 0) == J_dot * qd`.
+    /// Columns of fixed joints and of joints outside the target's ancestor
+    /// chain are zero; a root target yields an all-zero matrix.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error unless `output.len() == 6 * joint_count()`, or for an
+    /// invalid input length, link ID, or workspace.
+    pub fn jacobian_derivative(
+        &self,
+        q: &[f64],
+        qd: &[f64],
+        target: LinkId,
+        workspace: &mut Workspace,
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.validate_workspace(workspace)?;
+        self.validate_slice("q", q)?;
+        self.validate_slice("qd", qd)?;
+        self.validate_slice_length(
+            "jacobian derivative output",
+            output.len(),
+            6 * self.joint_count(),
+        )?;
+        let target_index = self.validate_link_id(target)?;
+        output.fill(0.0);
+        if target_index == 0 {
+            return Ok(());
+        }
+        let depth = self.prepare_ancestor_path(target_index, &mut workspace.ancestor_path);
+        let path = &workspace.ancestor_path[..depth];
+        self.target_frames_kernel(q, path, &mut workspace.frames)?;
+        // Forward pass: world angular velocity and origin linear velocity of
+        // each joint's child link along the ancestor chain.
+        let mut angular = Vector3::zeros();
+        let mut linear = Vector3::zeros();
+        let mut parent_frame = Frame::identity();
+        for &joint_index in path.iter().rev() {
+            let joint = &self.joints[joint_index];
+            let frame = workspace.frames[joint_index];
+            let offset = frame.translation.vector - parent_frame.translation.vector;
+            let axis: Vector3<f64> = frame.rotation * joint.axis().as_ref();
+            let mut child_angular = angular;
+            let mut child_linear = linear + angular.cross(&offset);
+            match joint.joint_type() {
+                JointType::Revolute => child_angular += axis * qd[joint_index],
+                JointType::Prismatic => child_linear += axis * qd[joint_index],
+                JointType::Fixed => {}
+            }
+            workspace.angular_velocities[joint_index] = child_angular;
+            workspace.origin_velocities[joint_index] = child_linear;
+            angular = child_angular;
+            linear = child_linear;
+            parent_frame = frame;
+        }
+        let target_frame = frame_for_target(&workspace.frames, target_index);
+        let end_position = target_frame.translation.vector;
+        let end_velocity = linear;
+        for &joint_index in path {
+            let joint = &self.joints[joint_index];
+            let frame = workspace.frames[joint_index];
+            let axis: Vector3<f64> = frame.rotation * joint.axis().as_ref();
+            let axis_rate = workspace.angular_velocities[joint_index].cross(&axis);
+            let column = &mut output[6 * joint_index..6 * joint_index + 6];
+            match joint.joint_type() {
+                JointType::Revolute => {
+                    let moment_arm = end_position - frame.translation.vector;
+                    let origin_velocity = workspace.origin_velocities[joint_index];
+                    let linear_rate = axis_rate.cross(&moment_arm)
+                        + axis.cross(&(end_velocity - origin_velocity));
+                    column[..3].copy_from_slice(axis_rate.as_slice());
+                    column[3..].copy_from_slice(linear_rate.as_slice());
+                }
+                JointType::Prismatic => {
+                    column[3..].copy_from_slice(axis_rate.as_slice());
+                }
+                JointType::Fixed => {}
+            }
+        }
+        Ok(())
+    }
+
     /// Writes a runtime-sized inverse-kinematics solution using the supplied options.
     ///
     /// # Errors

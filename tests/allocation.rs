@@ -57,6 +57,7 @@ fn dynamic_calculations_do_not_allocate_after_workspace_creation() {
     let initial = [0.0; 4];
     let mut workspace = robot.workspace();
     let mut jacobian = [0.0; 24];
+    let mut jacobian_derivative = [0.0; 24];
     let mut mass = [0.0; 16];
     let mut coriolis = [0.0; 16];
     let mut output = [0.0; 4];
@@ -92,6 +93,9 @@ fn dynamic_calculations_do_not_allocate_after_workspace_creation() {
         robot.mass_matrix(&q, &mut workspace, &mut mass).unwrap();
         robot
             .coriolis_matrix(&q, &qd, &mut workspace, &mut coriolis)
+            .unwrap();
+        robot
+            .jacobian_derivative(&q, &qd, target_id, &mut workspace, &mut jacobian_derivative)
             .unwrap();
         black_box(
             robot

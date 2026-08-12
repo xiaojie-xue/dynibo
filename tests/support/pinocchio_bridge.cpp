@@ -269,6 +269,23 @@ void dynibo_pinocchio_link_jacobian_values(void* raw_context, const double* q,
   jacobian_map = context->jacobian;
 }
 
+void dynibo_pinocchio_link_jacobian_derivative_values(void* raw_context, const double* q,
+                                                    const double* qd,
+                                                    double* derivative) noexcept {
+  auto* context = static_cast<PinocchioBenchContext*>(raw_context);
+  const ConfigMap configuration(q, context->model.nq);
+  const ConfigMap velocity(qd, context->model.nv);
+  pinocchio::computeJointJacobiansTimeVariation(context->model, context->data, configuration,
+                                               velocity);
+  pinocchio::updateFramePlacements(context->model, context->data);
+  context->jacobian.setZero();
+  pinocchio::getFrameJacobianTimeVariation(context->model, context->data, context->target_frame,
+                                          pinocchio::LOCAL_WORLD_ALIGNED, context->jacobian);
+  Eigen::Map<Eigen::Matrix<double, 6, Eigen::Dynamic>> derivative_map(derivative, 6,
+                                                                      context->model.nv);
+  derivative_map = context->jacobian;
+}
+
 void dynibo_pinocchio_link_velocity_values(void* raw_context, const double* q,
                                          const double* qd,
                                          double* velocity) noexcept {
