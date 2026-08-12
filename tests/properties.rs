@@ -166,6 +166,171 @@ fn deterministic_tree_jacobians_match_finite_difference() {
     }
 }
 
+/// Polarization extraction of the Coriolis matrix from public bias-force
+/// evaluations: `C e_j = [b(qd+e_j) - b(qd) - b(e_j) + b(0)] / 2` with
+/// `b(v) = RNEA(q, v, 0)`. Slow but obviously correct cross-check oracle.
+fn polarization_coriolis_matrix(
+    robot: &Robot,
+    q: &[f64],
+    qd: &[f64],
+    workspace: &mut Workspace,
+) -> Vec<f64> {
+    let joint_count = robot.joint_count();
+    let zero = vec![0.0; joint_count];
+    let bias = |velocity: &[f64], workspace: &mut Workspace| {
+        let mut output = vec![0.0; joint_count];
+        robot
+            .inverse_dynamics(
+                q,
+                velocity,
+                &zero,
+                &Frame::identity(),
+                Twist::zeros(),
+                Twist::zeros(),
+                &[],
+                workspace,
+                &mut output,
+            )
+            .unwrap();
+        output
+    };
+    let base = bias(qd, workspace);
+    let zero_bias = bias(&zero, workspace);
+    let mut coriolis = vec![0.0; joint_count * joint_count];
+    let mut perturbed = qd.to_vec();
+    let mut unit = vec![0.0; joint_count];
+    for column in 0..joint_count {
+        perturbed[column] += 1.0;
+        unit[column] = 1.0;
+        let plus = bias(&perturbed, workspace);
+        let unit_bias = bias(&unit, workspace);
+        perturbed[column] -= 1.0;
+        unit[column] = 0.0;
+        for row in 0..joint_count {
+            coriolis[column * joint_count + row] =
+                0.5 * (plus[row] - base[row] - unit_bias[row] + zero_bias[row]);
+        }
+    }
+    coriolis
+}
+
+fn sample_state(joint_count: usize, sample: usize, phase: f64, amplitude: f64) -> Vec<f64> {
+    (0..joint_count)
+        .map(|joint| {
+            let argument = (sample + 1) as f64 * (joint + 2) as f64 * 0.531 + phase;
+            amplitude * (1.0 + 0.1 * joint as f64) * argument.sin()
+        })
+        .collect()
+}
+
+#[test]
+fn coriolis_matrix_matches_bias_identity_and_polarization() {
+    for robot in [tree_arm(), mixed_oracle_arm()] {
+        let joint_count = robot.joint_count();
+        let mut workspace = robot.workspace();
+        for sample in 0..16 {
+            let q = sample_state(joint_count, sample, 0.2, 0.9);
+            let qd = sample_state(joint_count, sample, 0.9, 0.7);
+            let mut coriolis = vec![f64::NAN; joint_count * joint_count];
+            robot
+                .coriolis_matrix(&q, &qd, &mut workspace, &mut coriolis)
+                .unwrap();
+
+            // C(q, qd) qd + g(q) == RNEA(q, qd, 0).
+            let zero = vec![0.0; joint_count];
+            let mut gravity = vec![0.0; joint_count];
+            robot
+                .gravity(&q, &Frame::identity(), &[], &mut workspace, &mut gravity)
+                .unwrap();
+            let mut bias = vec![0.0; joint_count];
+            robot
+                .inverse_dynamics(
+                    &q,
+                    &qd,
+                    &zero,
+                    &Frame::identity(),
+                    Twist::zeros(),
+                    Twist::zeros(),
+                    &[],
+                    &mut workspace,
+                    &mut bias,
+                )
+                .unwrap();
+            let reconstructed: Vec<f64> = (0..joint_count)
+                .map(|row| {
+                    gravity[row]
+                        + (0..joint_count)
+                            .map(|column| coriolis[column * joint_count + row] * qd[column])
+                            .sum::<f64>()
+                })
+                .collect();
+            assert_slice_close(&reconstructed, &bias, 2.0e-11);
+
+            let expected = polarization_coriolis_matrix(&robot, &q, &qd, &mut workspace);
+            assert_slice_close(&coriolis, &expected, 1.0e-8);
+
+            for (index, joint) in robot.joints().iter().enumerate() {
+                if joint.joint_type() == JointType::Fixed {
+                    for other in 0..joint_count {
+                        assert_eq!(coriolis[index * joint_count + other], 0.0);
+                        assert_eq!(coriolis[other * joint_count + index], 0.0);
+                    }
+                }
+            }
+
+            let mut zero_coriolis = vec![f64::NAN; joint_count * joint_count];
+            robot
+                .coriolis_matrix(&q, &zero, &mut workspace, &mut zero_coriolis)
+                .unwrap();
+            assert_slice_close(
+                &zero_coriolis,
+                &vec![0.0; joint_count * joint_count],
+                1.0e-14,
+            );
+        }
+    }
+}
+
+#[test]
+fn coriolis_matrix_makes_mass_rate_minus_twice_c_skew_symmetric() {
+    let epsilon = 1.0e-6;
+    for robot in [tree_arm(), mixed_oracle_arm()] {
+        let joint_count = robot.joint_count();
+        let mut workspace = robot.workspace();
+        for sample in 0..8 {
+            let q = sample_state(joint_count, sample, 0.4, 0.8);
+            let qd = sample_state(joint_count, sample, 1.1, 0.6);
+            let mut coriolis = vec![0.0; joint_count * joint_count];
+            robot
+                .coriolis_matrix(&q, &qd, &mut workspace, &mut coriolis)
+                .unwrap();
+            let plus_q: Vec<f64> = q.iter().zip(&qd).map(|(q, qd)| q + epsilon * qd).collect();
+            let minus_q: Vec<f64> = q.iter().zip(&qd).map(|(q, qd)| q - epsilon * qd).collect();
+            let mut plus_mass = vec![0.0; joint_count * joint_count];
+            let mut minus_mass = vec![0.0; joint_count * joint_count];
+            robot
+                .mass_matrix(&plus_q, &mut workspace, &mut plus_mass)
+                .unwrap();
+            robot
+                .mass_matrix(&minus_q, &mut workspace, &mut minus_mass)
+                .unwrap();
+            for row in 0..joint_count {
+                for column in 0..joint_count {
+                    let mass_rate = (plus_mass[column * joint_count + row]
+                        - minus_mass[column * joint_count + row])
+                        / (2.0 * epsilon);
+                    let skew = mass_rate - 2.0 * coriolis[column * joint_count + row];
+                    let skew_transpose = (plus_mass[row * joint_count + column]
+                        - minus_mass[row * joint_count + column])
+                        / (2.0 * epsilon)
+                        - 2.0 * coriolis[row * joint_count + column];
+                    assert_relative_eq!(skew, -skew_transpose, epsilon = 1.0e-6);
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn deterministic_dynamics_preserve_gravity_and_load_invariants() {
     let robot = tree_arm();

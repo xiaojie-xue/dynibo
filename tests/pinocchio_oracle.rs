@@ -71,6 +71,12 @@ unsafe extern "C" {
         q: *const f64,
         mass: *mut f64,
     );
+    fn dynibo_pinocchio_coriolis_values(
+        context: *mut std::ffi::c_void,
+        q: *const f64,
+        qd: *const f64,
+        coriolis: *mut f64,
+    );
     fn dynibo_pinocchio_rnea_with_link_load_values(
         context: *mut std::ffi::c_void,
         q: *const f64,
@@ -309,19 +315,21 @@ impl PinocchioContext {
                 pinocchio.as_mut_ptr(),
             )
         };
-        let joint_count = self.joint_mappings.len();
-        let mut dynibo_order = vec![0.0; joint_count * joint_count];
-        for (row, row_mapping) in self.joint_mappings.iter().enumerate() {
-            for (column, column_mapping) in self.joint_mappings.iter().enumerate() {
-                if let (Some(row_index), Some(column_index)) =
-                    (row_mapping.velocity_index, column_mapping.velocity_index)
-                {
-                    dynibo_order[column * joint_count + row] =
-                        pinocchio[column_index * self.velocity_size + row_index];
-                }
-            }
-        }
-        dynibo_order
+        self.dynibo_square_order(&pinocchio)
+    }
+
+    fn coriolis_matrix(&mut self, configuration: &[f64], velocity: &[f64]) -> Vec<f64> {
+        let mut pinocchio = vec![0.0; self.velocity_size * self.velocity_size];
+        // SAFETY: the output has `model.nv * model.nv` elements, column-major.
+        unsafe {
+            dynibo_pinocchio_coriolis_values(
+                self.pointer.as_ptr(),
+                configuration.as_ptr(),
+                velocity.as_ptr(),
+                pinocchio.as_mut_ptr(),
+            )
+        };
+        self.dynibo_square_order(&pinocchio)
     }
 
     fn rnea_with_link_load(
@@ -403,6 +411,24 @@ impl PinocchioContext {
             .iter()
             .map(|mapping| mapping.velocity_index.map_or(0.0, |index| pinocchio[index]))
             .collect()
+    }
+
+    /// Reorders a column-major `nv x nv` Pinocchio matrix into dynibo's
+    /// joint order, keeping zero rows and columns for fixed joints.
+    fn dynibo_square_order(&self, pinocchio: &[f64]) -> Vec<f64> {
+        let joint_count = self.joint_mappings.len();
+        let mut dynibo_order = vec![0.0; joint_count * joint_count];
+        for (row, row_mapping) in self.joint_mappings.iter().enumerate() {
+            for (column, column_mapping) in self.joint_mappings.iter().enumerate() {
+                if let (Some(row_index), Some(column_index)) =
+                    (row_mapping.velocity_index, column_mapping.velocity_index)
+                {
+                    dynibo_order[column * joint_count + row] =
+                        pinocchio[column_index * self.velocity_size + row_index];
+                }
+            }
+        }
+        dynibo_order
     }
 }
 
@@ -715,6 +741,71 @@ fn mass_matrices_match_pinocchio() {
             1.0e-9,
             1.0e-10,
             &format!("tree mass matrix sample {sample}"),
+        );
+    }
+}
+
+#[test]
+fn coriolis_matrices_match_pinocchio() {
+    let path = serial_fixture();
+    let robot = Robot::from_urdf(&path).unwrap();
+    let mut workspace = robot.workspace();
+    let mut pinocchio = PinocchioContext::new(&robot, &path, "test_link_4");
+    let zero4 = [0.0; 4];
+    for sample in 0..32 {
+        let (q, qd, _) = deterministic_state(sample);
+        let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero4);
+        let mut coriolis = vec![f64::NAN; 16];
+        robot
+            .coriolis_matrix(&q, &qd, &mut workspace, &mut coriolis)
+            .unwrap();
+        assert_close(
+            &coriolis,
+            &pinocchio.coriolis_matrix(&pin_q, &pin_qd),
+            1.0e-9,
+            1.0e-10,
+            &format!("serial coriolis matrix sample {sample}"),
+        );
+    }
+
+    let path = fixture();
+    let robot = Robot::from_urdf(&path).unwrap();
+    let mut workspace = robot.workspace();
+    let mut pinocchio = PinocchioContext::new(&robot, &path, "tool");
+    for sample in 0..64 {
+        let (q, qd, _) = deterministic_state(sample);
+        let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero4);
+        let mut coriolis = vec![f64::NAN; 16];
+        robot
+            .coriolis_matrix(&q, &qd, &mut workspace, &mut coriolis)
+            .unwrap();
+        assert_close(
+            &coriolis,
+            &pinocchio.coriolis_matrix(&pin_q, &pin_qd),
+            1.0e-9,
+            1.0e-10,
+            &format!("mixed coriolis matrix sample {sample}"),
+        );
+    }
+
+    let path = tree_fixture();
+    let robot = Robot::from_urdf(&path).unwrap();
+    let mut workspace = robot.workspace();
+    let mut pinocchio = PinocchioContext::new(&robot, &path, "right_tool");
+    let zero7 = [0.0; 7];
+    for sample in 0..32 {
+        let (q, qd, _) = deterministic_tree_state(sample);
+        let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero7);
+        let mut coriolis = vec![f64::NAN; 49];
+        robot
+            .coriolis_matrix(&q, &qd, &mut workspace, &mut coriolis)
+            .unwrap();
+        assert_close(
+            &coriolis,
+            &pinocchio.coriolis_matrix(&pin_q, &pin_qd),
+            1.0e-9,
+            1.0e-10,
+            &format!("tree coriolis matrix sample {sample}"),
         );
     }
 }

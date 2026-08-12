@@ -370,6 +370,36 @@ impl Robot {
         Ok(())
     }
 
+    /// Writes the runtime-sized `N x N` Coriolis and centrifugal matrix in
+    /// column-major order.
+    ///
+    /// The matrix uses the Christoffel factorization, so `C(q, qd) qd + g(q)`
+    /// equals the RNEA bias `inverse_dynamics(q, qd, 0)` and `dM/dt - 2C` is
+    /// skew-symmetric. Rows and columns of fixed joints are zero.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error unless `output.len() == joint_count() * joint_count()`,
+    /// or for invalid input lengths or workspace.
+    pub fn coriolis_matrix(
+        &self,
+        q: &[f64],
+        qd: &[f64],
+        workspace: &mut Workspace,
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.validate_workspace(workspace)?;
+        self.validate_slice("q", q)?;
+        self.validate_slice("qd", qd)?;
+        self.validate_slice_length(
+            "coriolis matrix output",
+            output.len(),
+            self.joint_count() * self.joint_count(),
+        )?;
+        self.coriolis_matrix_kernel(q, qd, workspace, output);
+        Ok(())
+    }
+
     /// Writes runtime-sized Newton-Euler joint forces into caller-owned output.
     ///
     /// # Errors
@@ -784,6 +814,120 @@ impl Robot {
                 }
                 force = wrench_to_parent(&workspace.frames[current], force);
                 current = parent - 1;
+            }
+        }
+    }
+
+    /// Computes `C(q, qd)` as half the velocity-Jacobian of the RNEA bias
+    /// force: the Christoffel factorization satisfies `C = (1/2) db/dv` for
+    /// `b(q, v) = RNEA(q, v, 0)`, so one directional-derivative pass along
+    /// `e_j` produces matrix column `j`. The base pass stores each link's
+    /// local transform and angular velocity; gravity drops out because it
+    /// does not depend on velocities.
+    fn coriolis_matrix_kernel(
+        &self,
+        q: &[f64],
+        qd: &[f64],
+        workspace: &mut Workspace,
+        output: &mut [f64],
+    ) {
+        let joint_count = self.joint_count();
+        output.fill(0.0);
+        for (index, (&position, &velocity)) in q.iter().zip(qd.iter()).enumerate() {
+            let joint = &self.joints[index];
+            let transform = joint.frame(position);
+            let parent = self.joint_parents[index];
+            let parent_omega = if parent == 0 {
+                Vector3::zeros()
+            } else {
+                workspace.angular_velocities[parent - 1]
+            };
+            let rotated_omega = transform.rotation.inverse() * parent_omega;
+            workspace.frames[index] = transform;
+            workspace.angular_velocities[index] = match joint.joint_type() {
+                JointType::Revolute => rotated_omega + velocity * joint.axis().as_ref(),
+                JointType::Prismatic | JointType::Fixed => rotated_omega,
+            };
+        }
+        for column in 0..joint_count {
+            if self.joints[column].joint_type() == JointType::Fixed {
+                continue;
+            }
+            for (index, &velocity) in qd.iter().enumerate() {
+                let joint = &self.joints[index];
+                let transform = &workspace.frames[index];
+                let rotation_inverse = transform.rotation.inverse();
+                let translation = transform.translation.vector;
+                let axis: Vector3<f64> = *joint.axis().as_ref();
+                let parent = self.joint_parents[index];
+                let (parent_omega, parent_domega, parent_dalpha, parent_dacceleration) =
+                    if parent == 0 {
+                        (
+                            Vector3::zeros(),
+                            Vector3::zeros(),
+                            Vector3::zeros(),
+                            Vector3::zeros(),
+                        )
+                    } else {
+                        (
+                            workspace.angular_velocities[parent - 1],
+                            workspace.derivative_omegas[parent - 1],
+                            workspace.derivative_alphas[parent - 1],
+                            workspace.derivative_accelerations[parent - 1],
+                        )
+                    };
+                let rotated_omega = rotation_inverse * parent_omega;
+                let rotated_domega = rotation_inverse * parent_domega;
+                let source = f64::from(index == column);
+                let mut dalpha = rotation_inverse * parent_dalpha;
+                let mut dacceleration = rotation_inverse
+                    * (parent_dacceleration
+                        + parent_dalpha.cross(&translation)
+                        + parent_domega.cross(&parent_omega.cross(&translation))
+                        + parent_omega.cross(&parent_domega.cross(&translation)));
+                let domega = match joint.joint_type() {
+                    JointType::Revolute => {
+                        dalpha += rotated_domega.cross(&(velocity * axis))
+                            + source * rotated_omega.cross(&axis);
+                        rotated_domega + source * axis
+                    }
+                    JointType::Prismatic => {
+                        dacceleration += 2.0
+                            * (source * rotated_omega.cross(&axis)
+                                + velocity * rotated_domega.cross(&axis));
+                        rotated_domega
+                    }
+                    JointType::Fixed => rotated_domega,
+                };
+                workspace.derivative_omegas[index] = domega;
+                workspace.derivative_alphas[index] = dalpha;
+                workspace.derivative_accelerations[index] = dacceleration;
+                let omega = workspace.angular_velocities[index];
+                let link = &self.links[index + 1];
+                let center = *link.center_of_mass();
+                let link_acceleration_derivative = dacceleration
+                    + dalpha.cross(&center)
+                    + domega.cross(&omega.cross(&center))
+                    + omega.cross(&domega.cross(&center));
+                let inertial_force = link.mass() * link_acceleration_derivative;
+                workspace.link_loads[index] = Wrench::new(
+                    center.cross(&inertial_force)
+                        + link.inertia() * dalpha
+                        + domega.cross(&(link.inertia() * omega))
+                        + omega.cross(&(link.inertia() * domega)),
+                    inertial_force,
+                );
+            }
+            for index in (0..joint_count).rev() {
+                let joint = &self.joints[index];
+                let load = workspace.link_loads[index];
+                output[column * joint_count + index] = 0.5 * joint.active_force(load);
+                let parent = self.joint_parents[index];
+                if parent != 0 {
+                    let parent_load = wrench_to_parent(&workspace.frames[index], load);
+                    workspace.link_loads[parent - 1] =
+                        add_wrench(workspace.link_loads[parent - 1], parent_load);
+                }
             }
         }
     }

@@ -232,6 +232,16 @@ void dynibo_pinocchio_mass_matrix_values(void* raw_context, const double* q,
   mass_map = context->data.M;
 }
 
+void dynibo_pinocchio_coriolis_values(void* raw_context, const double* q, const double* qd,
+                                    double* coriolis) noexcept {
+  auto* context = static_cast<PinocchioBenchContext*>(raw_context);
+  const ConfigMap configuration(q, context->model.nq);
+  const ConfigMap velocity(qd, context->model.nv);
+  Eigen::Map<Eigen::MatrixXd> coriolis_map(coriolis, context->model.nv, context->model.nv);
+  coriolis_map =
+      pinocchio::computeCoriolisMatrix(context->model, context->data, configuration, velocity);
+}
+
 void dynibo_pinocchio_link_frame_values(void* raw_context, const double* q,
                                       double* rotation,
                                       double* translation) noexcept {
