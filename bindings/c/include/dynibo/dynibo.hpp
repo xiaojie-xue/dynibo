@@ -100,6 +100,42 @@ public:
         return result;
     }
 
+    std::vector<double> jacobian_derivative(
+        const std::vector<double>& q, const std::vector<double>& qd,
+        std::size_t target) {
+        if (q.size() != qd.size()) {
+            throw Error(DYNIBO_STATUS_INVALID_ARGUMENT,
+                        "q and qd must have the same length");
+        }
+        std::vector<double> result(6 * joint_count());
+        check(dynibo_jacobian_derivative(
+            robot_, workspace_, q.data(), qd.data(), q.size(), target,
+            result.data(), result.size()));
+        return result;
+    }
+
+    std::vector<double> mass_matrix(const std::vector<double>& q) {
+        const std::size_t n = joint_count();
+        std::vector<double> result(n * n);
+        check(dynibo_mass_matrix(
+            robot_, workspace_, q.data(), q.size(), result.data(), result.size()));
+        return result;
+    }
+
+    std::vector<double> coriolis_matrix(
+        const std::vector<double>& q, const std::vector<double>& qd) {
+        if (q.size() != qd.size()) {
+            throw Error(DYNIBO_STATUS_INVALID_ARGUMENT,
+                        "q and qd must have the same length");
+        }
+        const std::size_t n = joint_count();
+        std::vector<double> result(n * n);
+        check(dynibo_coriolis_matrix(
+            robot_, workspace_, q.data(), qd.data(), q.size(),
+            result.data(), result.size()));
+        return result;
+    }
+
     std::vector<double> inverse_kinematics(
         const std::vector<double>& initial_q, std::size_t target,
         const DyniboPose& desired,

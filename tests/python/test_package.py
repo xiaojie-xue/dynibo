@@ -56,6 +56,38 @@ class PackageTests(unittest.TestCase):
         )
         self.assertNotEqual(loaded, gravity)
 
+    def test_second_order_dynamics_apis(self) -> None:
+        q = [0.2, 1.0, -0.7, 0.4]
+        qd = [-0.3, 0.5, -0.2, 0.8]
+        zero = [0.0] * self.robot.joint_count
+        mass = self.robot.mass_matrix(q)
+        self.assertEqual(len(mass), self.robot.joint_count**2)
+        coriolis = self.robot.coriolis_matrix(q, qd)
+        self.assertEqual(len(coriolis), self.robot.joint_count**2)
+        derivative = self.robot.jacobian_derivative(q, qd, self.target)
+        self.assertEqual(len(derivative), 6 * self.robot.joint_count)
+
+        n = self.robot.joint_count
+        for row in range(n):
+            for column in range(n):
+                self.assertAlmostEqual(
+                    mass[column * n + row], mass[row * n + column], delta=1.0e-12
+                )
+
+        gravity = self.robot.gravity(q)
+        bias = self.robot.inverse_dynamics(q, qd, zero)
+        for row in range(n):
+            reconstructed = gravity[row] + sum(
+                coriolis[column * n + row] * qd[column] for column in range(n)
+            )
+            self.assertAlmostEqual(reconstructed, bias[row], delta=1.0e-10)
+
+        acceleration = self.robot.forward_acceleration(q, qd, zero, self.target)
+        expected = tuple(acceleration.angular) + tuple(acceleration.linear)
+        for row in range(6):
+            contracted = sum(derivative[column * 6 + row] * qd[column] for column in range(n))
+            self.assertAlmostEqual(contracted, expected[row], delta=1.0e-10)
+
     def test_errors_cross_the_package_boundary(self) -> None:
         with self.assertRaisesRegex(ValueError, "does not exist"):
             self.robot.link_id("missing")
@@ -135,6 +167,12 @@ class PackageTests(unittest.TestCase):
             self.robot.forward_acceleration(self.q, self.q, self.q[:-1], self.target)
         with self.assertRaisesRegex(ValueError, "q and qd must have the same length"):
             self.robot.inverse_dynamics(self.q, self.q[:-1], self.q)
+        with self.assertRaisesRegex(ValueError, "q and qd must have the same length"):
+            self.robot.coriolis_matrix(self.q, self.q[:-1])
+        with self.assertRaisesRegex(ValueError, "q and qd must have the same length"):
+            self.robot.jacobian_derivative(self.q, self.q[:-1], self.target)
+        with self.assertRaisesRegex(ValueError, "expected 4 elements"):
+            self.robot.mass_matrix(self.q[:-1])
         with self.assertRaisesRegex(ValueError, "pose translation must contain exactly 3"):
             self.robot.gravity(self.q, base=dynibo.Pose(translation=(0.0, 0.0)))
         with self.assertRaisesRegex(ValueError, "load force must contain exactly 3"):

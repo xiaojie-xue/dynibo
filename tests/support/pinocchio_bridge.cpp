@@ -201,6 +201,33 @@ double dynibo_pinocchio_rnea(void* raw_context, const double* q, const double* q
   return pinocchio::rnea(context->model, context->data, configuration, velocity, acceleration).sum();
 }
 
+double dynibo_pinocchio_crba(void* raw_context, const double* q) noexcept {
+  auto* context = static_cast<PinocchioBenchContext*>(raw_context);
+  const ConfigMap configuration(q, context->model.nq);
+  return pinocchio::crba(context->model, context->data, configuration).sum();
+}
+
+double dynibo_pinocchio_coriolis(void* raw_context, const double* q, const double* qd) noexcept {
+  auto* context = static_cast<PinocchioBenchContext*>(raw_context);
+  const ConfigMap configuration(q, context->model.nq);
+  const ConfigMap velocity(qd, context->model.nv);
+  return pinocchio::computeCoriolisMatrix(context->model, context->data, configuration, velocity)
+      .sum();
+}
+
+double dynibo_pinocchio_jacobian_time_variation(void* raw_context, const double* q,
+                                              const double* qd) noexcept {
+  auto* context = static_cast<PinocchioBenchContext*>(raw_context);
+  const ConfigMap configuration(q, context->model.nq);
+  const ConfigMap velocity(qd, context->model.nv);
+  pinocchio::computeJointJacobiansTimeVariation(context->model, context->data, configuration,
+                                               velocity);
+  context->jacobian.setZero();
+  pinocchio::getJointJacobianTimeVariation(context->model, context->data, context->end_joint,
+                                          pinocchio::LOCAL_WORLD_ALIGNED, context->jacobian);
+  return context->jacobian.sum();
+}
+
 void dynibo_pinocchio_gravity_values(void* raw_context, const double* q,
                                    double* gravity) noexcept {
   auto* context = static_cast<PinocchioBenchContext*>(raw_context);

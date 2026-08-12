@@ -173,6 +173,19 @@ _lib.dynibo_jacobian.argtypes = [
     _double_p, ct.c_size_t,
 ]
 _lib.dynibo_jacobian.restype = ct.c_int
+_lib.dynibo_jacobian_derivative.argtypes = [
+    _robot_p, _workspace_p, _double_p, _double_p, ct.c_size_t, ct.c_size_t,
+    _double_p, ct.c_size_t,
+]
+_lib.dynibo_jacobian_derivative.restype = ct.c_int
+_lib.dynibo_mass_matrix.argtypes = [
+    _robot_p, _workspace_p, _double_p, ct.c_size_t, _double_p, ct.c_size_t,
+]
+_lib.dynibo_mass_matrix.restype = ct.c_int
+_lib.dynibo_coriolis_matrix.argtypes = [
+    _robot_p, _workspace_p, _double_p, _double_p, ct.c_size_t, _double_p, ct.c_size_t,
+]
+_lib.dynibo_coriolis_matrix.restype = ct.c_int
 _lib.dynibo_inverse_kinematics.argtypes = [
     _robot_p, _workspace_p, _double_p, ct.c_size_t, ct.c_size_t,
     ct.POINTER(_Pose), _IkOptions, _double_p, ct.c_size_t,
@@ -383,6 +396,84 @@ class Robot:
         output = (ct.c_double * (6 * self.joint_count))()
         _check(_lib.dynibo_jacobian(
             self._robot, self._workspace, q_array, len(q), target,
+            output, len(output),
+        ))
+        return tuple(output)
+
+    def jacobian_derivative(
+        self, q: Sequence[float], qd: Sequence[float], target: int
+    ) -> tuple[float, ...]:
+        """Compute the time derivative of the geometric Jacobian.
+
+        Args:
+            q: Joint positions in model joint order.
+            qd: Joint velocities in model joint order.
+            target: Link identifier returned by `link_id()`.
+
+        Returns:
+            A flat, column-major `6 x joint_count` tuple with the same
+            angular-first column layout as `jacobian()`. The result satisfies
+            `forward_acceleration(q, qd, 0) == J_dot @ qd`.
+
+        Raises:
+            ValueError: If an input length or link identifier is invalid.
+            DyniboError: If the native calculation fails.
+        """
+        _require_same_length(q, qd=qd)
+        q_array = _array(q, "q")
+        qd_array = _array(qd, "qd")
+        output = (ct.c_double * (6 * self.joint_count))()
+        _check(_lib.dynibo_jacobian_derivative(
+            self._robot, self._workspace, q_array, qd_array, len(q), target,
+            output, len(output),
+        ))
+        return tuple(output)
+
+    def mass_matrix(self, q: Sequence[float]) -> tuple[float, ...]:
+        """Compute the joint-space mass matrix.
+
+        Args:
+            q: Joint positions in model joint order.
+
+        Returns:
+            A flat, column-major `joint_count x joint_count` tuple. The matrix
+            is symmetric positive semi-definite; rows and columns of fixed
+            joints are zero.
+
+        Raises:
+            ValueError: If an input length is invalid.
+            DyniboError: If the native calculation fails.
+        """
+        q_array = _array(q, "q")
+        output = (ct.c_double * (self.joint_count * self.joint_count))()
+        _check(_lib.dynibo_mass_matrix(
+            self._robot, self._workspace, q_array, len(q), output, len(output),
+        ))
+        return tuple(output)
+
+    def coriolis_matrix(self, q: Sequence[float], qd: Sequence[float]) -> tuple[float, ...]:
+        """Compute the Coriolis and centrifugal matrix.
+
+        Args:
+            q: Joint positions in model joint order.
+            qd: Joint velocities in model joint order.
+
+        Returns:
+            A flat, column-major `joint_count x joint_count` tuple using the
+            Christoffel factorization: `C(q, qd) @ qd + gravity(q)` equals the
+            zero-acceleration inverse dynamics, and `dM/dt - 2C` is
+            skew-symmetric. Rows and columns of fixed joints are zero.
+
+        Raises:
+            ValueError: If an input length is invalid.
+            DyniboError: If the native calculation fails.
+        """
+        _require_same_length(q, qd=qd)
+        q_array = _array(q, "q")
+        qd_array = _array(qd, "qd")
+        output = (ct.c_double * (self.joint_count * self.joint_count))()
+        _check(_lib.dynibo_coriolis_matrix(
+            self._robot, self._workspace, q_array, qd_array, len(q),
             output, len(output),
         ))
         return tuple(output)

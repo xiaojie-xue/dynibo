@@ -79,6 +79,26 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
     });
     jacobian.finish();
 
+    let mut jacobian_derivative = c.benchmark_group(format!("jacobian_derivative/{size}"));
+    jacobian_derivative.throughput(Throughput::Elements(1));
+    let mut workspace = case.arm.workspace();
+    let mut jacobian_derivative_output = vec![0.0; 6 * n];
+    jacobian_derivative.bench_function("dynibo", |b| {
+        b.iter(|| {
+            case.arm
+                .jacobian_derivative(
+                    black_box(&case.q),
+                    black_box(&case.qd),
+                    case.target,
+                    &mut workspace,
+                    black_box(&mut jacobian_derivative_output),
+                )
+                .unwrap();
+            black_box(&jacobian_derivative_output);
+        });
+    });
+    jacobian_derivative.finish();
+
     let mut velocity = c.benchmark_group(format!("forward_velocity/{size}"));
     velocity.throughput(Throughput::Elements(1));
     let mut workspace = case.arm.workspace();
@@ -163,6 +183,43 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
         });
     });
     rnea.finish();
+
+    let mut mass = c.benchmark_group(format!("mass_matrix/{size}"));
+    mass.throughput(Throughput::Elements(1));
+    let mut workspace = case.arm.workspace();
+    let mut mass_output = vec![0.0; n * n];
+    mass.bench_function("dynibo", |b| {
+        b.iter(|| {
+            case.arm
+                .mass_matrix(
+                    black_box(&case.q),
+                    &mut workspace,
+                    black_box(&mut mass_output),
+                )
+                .unwrap();
+            black_box(&mass_output);
+        });
+    });
+    mass.finish();
+
+    let mut coriolis = c.benchmark_group(format!("coriolis_matrix/{size}"));
+    coriolis.throughput(Throughput::Elements(1));
+    let mut workspace = case.arm.workspace();
+    let mut coriolis_output = vec![0.0; n * n];
+    coriolis.bench_function("dynibo", |b| {
+        b.iter(|| {
+            case.arm
+                .coriolis_matrix(
+                    black_box(&case.q),
+                    black_box(&case.qd),
+                    &mut workspace,
+                    black_box(&mut coriolis_output),
+                )
+                .unwrap();
+            black_box(&coriolis_output);
+        });
+    });
+    coriolis.finish();
 }
 
 fn benchmark_tree_case(c: &mut Criterion) {

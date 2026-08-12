@@ -51,8 +51,11 @@ int main(int argc, char **argv) {
     const size_t n = dynibo_robot_joint_count(robot);
     double *q = (double *)calloc(n, sizeof(double));
     double *jacobian = (double *)calloc(6 * n, sizeof(double));
+    double *jacobian_derivative = (double *)calloc(6 * n, sizeof(double));
+    double *square = (double *)calloc(n * n, sizeof(double));
     double *output = (double *)calloc(n, sizeof(double));
-    CHECK(q != NULL && jacobian != NULL && output != NULL);
+    CHECK(q != NULL && jacobian != NULL && jacobian_derivative != NULL);
+    CHECK(square != NULL && output != NULL);
 
     DyniboPose pose;
     check(dynibo_forward_kinematics(robot, workspace, q, n, target, &pose));
@@ -102,6 +105,47 @@ int main(int argc, char **argv) {
         CHECK(fabs(output[index] - expected_dynamics[index]) < 2.0e-10);
     }
 
+    const double zero_qdd[4] = {0.0, 0.0, 0.0, 0.0};
+    check(dynibo_mass_matrix(robot, workspace, reference_q, n, square, n * n));
+    for (size_t row = 0; row < n; ++row) {
+        for (size_t col = 0; col < n; ++col) {
+            CHECK(fabs(square[col * n + row] - square[row * n + col]) < 1.0e-12);
+        }
+    }
+    check(dynibo_coriolis_matrix(
+        robot, workspace, reference_q, reference_qd, n, square, n * n));
+    double gravity_vec[4];
+    double bias_vec[4];
+    check(dynibo_gravity(
+        robot, workspace, reference_q, n, &identity, NULL, 0, gravity_vec, n));
+    check(dynibo_inverse_dynamics(
+        robot, workspace, reference_q, reference_qd, zero_qdd, n,
+        &identity, zero_twist, zero_twist, NULL, 0, bias_vec, n));
+    for (size_t row = 0; row < n; ++row) {
+        double reconstructed = gravity_vec[row];
+        for (size_t col = 0; col < n; ++col) {
+            reconstructed += square[col * n + row] * reference_qd[col];
+        }
+        CHECK(fabs(reconstructed - bias_vec[row]) < 1.0e-10);
+    }
+    check(dynibo_jacobian_derivative(
+        robot, workspace, reference_q, reference_qd, n, target,
+        jacobian_derivative, 6 * n));
+    DyniboTwist origin_acceleration;
+    check(dynibo_forward_acceleration(
+        robot, workspace, reference_q, reference_qd, zero_qdd, n, target,
+        &origin_acceleration));
+    for (size_t row = 0; row < 6; ++row) {
+        const double expected = row < 3
+            ? origin_acceleration.angular[row]
+            : origin_acceleration.linear[row - 3];
+        double contracted = 0.0;
+        for (size_t col = 0; col < n; ++col) {
+            contracted += jacobian_derivative[col * 6 + row] * reference_qd[col];
+        }
+        CHECK(fabs(contracted - expected) < 1.0e-10);
+    }
+
     CHECK(dynibo_jacobian(
         robot, workspace, q, n - 1, target, jacobian, 6 * n)
         == DYNIBO_STATUS_INVALID_ARGUMENT);
@@ -132,8 +176,20 @@ int main(int argc, char **argv) {
     CHECK(dynibo_gravity(
         robot, workspace, q, n, &identity, &invalid_load, 1, output, n)
         == DYNIBO_STATUS_INVALID_ARGUMENT);
+    CHECK(dynibo_mass_matrix(
+        robot, workspace, reference_q, n, square, n * n - 1)
+        == DYNIBO_STATUS_INVALID_ARGUMENT);
+    CHECK(dynibo_coriolis_matrix(
+        robot, workspace, reference_q, reference_qd, n - 1, square, n * n)
+        == DYNIBO_STATUS_INVALID_ARGUMENT);
+    CHECK(dynibo_jacobian_derivative(
+        robot, workspace, reference_q, reference_qd, n, target,
+        jacobian_derivative, 6 * n - 1)
+        == DYNIBO_STATUS_INVALID_ARGUMENT);
 
     free(output);
+    free(square);
+    free(jacobian_derivative);
     free(jacobian);
     free(q);
     dynibo_workspace_destroy(workspace);

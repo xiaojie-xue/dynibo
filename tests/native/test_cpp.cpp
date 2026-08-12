@@ -53,6 +53,40 @@ int main(int argc, char** argv) {
         CHECK(std::abs(reference_dynamics[index] - expected_dynamics[index]) < 2.0e-10);
     }
 
+    const auto mass = assigned.mass_matrix(reference_q);
+    CHECK(mass.size() == reference_q.size() * reference_q.size());
+    for (std::size_t row = 0; row < reference_q.size(); ++row) {
+        for (std::size_t column = 0; column < reference_q.size(); ++column) {
+            CHECK(std::abs(mass[column * 4 + row] - mass[row * 4 + column]) < 1.0e-12);
+        }
+    }
+    const auto coriolis = assigned.coriolis_matrix(reference_q, reference_qd);
+    CHECK(coriolis.size() == reference_q.size() * reference_q.size());
+    const std::vector<double> zero_qdd(reference_q.size(), 0.0);
+    const auto bias = assigned.inverse_dynamics(reference_q, reference_qd, zero_qdd);
+    for (std::size_t row = 0; row < reference_q.size(); ++row) {
+        double reconstructed = reference_gravity[row];
+        for (std::size_t column = 0; column < reference_q.size(); ++column) {
+            reconstructed += coriolis[column * 4 + row] * reference_qd[column];
+        }
+        CHECK(std::abs(reconstructed - bias[row]) < 1.0e-10);
+    }
+    const auto derivative =
+        assigned.jacobian_derivative(reference_q, reference_qd, target);
+    CHECK(derivative.size() == 6 * reference_q.size());
+    const auto origin_acceleration =
+        assigned.forward_acceleration(reference_q, reference_qd, zero_qdd, target);
+    for (std::size_t row = 0; row < 6; ++row) {
+        const double expected = row < 3
+            ? origin_acceleration.angular[row]
+            : origin_acceleration.linear[row - 3];
+        double contracted = 0.0;
+        for (std::size_t column = 0; column < reference_q.size(); ++column) {
+            contracted += derivative[column * 6 + row] * reference_qd[column];
+        }
+        CHECK(std::abs(contracted - expected) < 1.0e-10);
+    }
+
     const auto velocity = assigned.forward_velocity(q, q, target);
     const auto acceleration = assigned.forward_acceleration(q, q, q, target);
     for (double value : velocity.angular) CHECK(std::abs(value) < 1.0e-12);
@@ -94,6 +128,22 @@ int main(int argc, char** argv) {
     caught = false;
     try {
         static_cast<void>(assigned.inverse_dynamics(q, short_q, q));
+    } catch (const dynibo::Error& error) {
+        caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
+            && std::string(error.what()).find("same length") != std::string::npos;
+    }
+    CHECK(caught);
+    caught = false;
+    try {
+        static_cast<void>(assigned.coriolis_matrix(q, short_q));
+    } catch (const dynibo::Error& error) {
+        caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
+            && std::string(error.what()).find("same length") != std::string::npos;
+    }
+    CHECK(caught);
+    caught = false;
+    try {
+        static_cast<void>(assigned.jacobian_derivative(q, short_q, target));
     } catch (const dynibo::Error& error) {
         caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
             && std::string(error.what()).find("same length") != std::string::npos;

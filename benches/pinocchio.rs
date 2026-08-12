@@ -26,6 +26,17 @@ unsafe extern "C" {
         qd: *const f64,
         qdd: *const f64,
     ) -> f64;
+    fn dynibo_pinocchio_crba(context: *mut std::ffi::c_void, q: *const f64) -> f64;
+    fn dynibo_pinocchio_coriolis(
+        context: *mut std::ffi::c_void,
+        q: *const f64,
+        qd: *const f64,
+    ) -> f64;
+    fn dynibo_pinocchio_jacobian_time_variation(
+        context: *mut std::ffi::c_void,
+        q: *const f64,
+        qd: *const f64,
+    ) -> f64;
 }
 
 struct PinocchioContext(NonNull<std::ffi::c_void>);
@@ -275,6 +286,90 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
         });
     });
     rnea.finish();
+
+    let mut jacobian_derivative = c.benchmark_group(format!("end_jacobian_derivative/{size}"));
+    jacobian_derivative.throughput(Throughput::Elements(1));
+    let mut workspace = case.arm.workspace();
+    let mut output = vec![0.0; 6 * N];
+    jacobian_derivative.bench_function("dynibo", |b| {
+        b.iter(|| {
+            case.arm
+                .jacobian_derivative(
+                    black_box(&case.q),
+                    black_box(&case.qd),
+                    case.target,
+                    &mut workspace,
+                    black_box(&mut output),
+                )
+                .unwrap();
+            black_box(&output);
+        })
+    });
+    jacobian_derivative.bench_function("pinocchio", |b| {
+        b.iter(|| {
+            // SAFETY: context and input vectors remain valid for the duration of every call.
+            black_box(unsafe {
+                dynibo_pinocchio_jacobian_time_variation(
+                    case.pinocchio.0.as_ptr(),
+                    black_box(case.q.as_ptr()),
+                    black_box(case.qd.as_ptr()),
+                )
+            })
+        });
+    });
+    jacobian_derivative.finish();
+
+    let mut mass = c.benchmark_group(format!("mass_matrix/{size}"));
+    mass.throughput(Throughput::Elements(1));
+    let mut workspace = case.arm.workspace();
+    let mut output = vec![0.0; N * N];
+    mass.bench_function("dynibo", |b| {
+        b.iter(|| {
+            case.arm
+                .mass_matrix(black_box(&case.q), &mut workspace, black_box(&mut output))
+                .unwrap();
+            black_box(&output);
+        })
+    });
+    mass.bench_function("pinocchio", |b| {
+        b.iter(|| {
+            // SAFETY: context and input vector remain valid for the duration of every call.
+            black_box(unsafe {
+                dynibo_pinocchio_crba(case.pinocchio.0.as_ptr(), black_box(case.q.as_ptr()))
+            })
+        });
+    });
+    mass.finish();
+
+    let mut coriolis = c.benchmark_group(format!("coriolis_matrix/{size}"));
+    coriolis.throughput(Throughput::Elements(1));
+    let mut workspace = case.arm.workspace();
+    coriolis.bench_function("dynibo", |b| {
+        b.iter(|| {
+            case.arm
+                .coriolis_matrix(
+                    black_box(&case.q),
+                    black_box(&case.qd),
+                    &mut workspace,
+                    black_box(&mut output),
+                )
+                .unwrap();
+            black_box(&output);
+        })
+    });
+    coriolis.bench_function("pinocchio", |b| {
+        b.iter(|| {
+            // SAFETY: context and input vectors remain valid for the duration of every call.
+            black_box(unsafe {
+                dynibo_pinocchio_coriolis(
+                    case.pinocchio.0.as_ptr(),
+                    black_box(case.q.as_ptr()),
+                    black_box(case.qd.as_ptr()),
+                )
+            })
+        });
+    });
+    coriolis.finish();
 }
 
 fn benchmark_tree_case<const N: usize>(c: &mut Criterion, case: &TreeBenchmarkCase<N>) {

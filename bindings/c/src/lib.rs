@@ -476,6 +476,96 @@ pub unsafe extern "C" fn dynibo_jacobian(
     })
 }
 
+/// Writes the column-major `6 x joint_count` Jacobian time derivative.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dynibo_jacobian_derivative(
+    robot: *const DyniboRobot,
+    workspace: *mut DyniboWorkspace,
+    q: *const f64,
+    qd: *const f64,
+    state_len: usize,
+    target: usize,
+    output: *mut f64,
+    output_len: usize,
+) -> DyniboStatus {
+    call(|| {
+        // SAFETY: Pointer validation is performed by the helpers.
+        let robot = unsafe { required_ref(robot, "robot") }?;
+        // SAFETY: Pointer validation is performed by the helpers.
+        let workspace = unsafe { required_mut(workspace, "workspace") }?;
+        // SAFETY: Pointer validation is performed by the helpers.
+        let q = unsafe { input_slice(q, state_len, "q") }?;
+        // SAFETY: Pointer validation is performed by the helpers.
+        let qd = unsafe { input_slice(qd, state_len, "qd") }?;
+        // SAFETY: Pointer validation is performed by the helpers.
+        let output = unsafe { output_slice(output, output_len, "output") }?;
+        let link = robot
+            .link_ids
+            .get(target)
+            .copied()
+            .ok_or_else(|| invalid(format!("invalid link id {target}")))?;
+        robot
+            .inner
+            .jacobian_derivative(q, qd, link, &mut workspace.inner, output)
+            .map_err(core_error)
+    })
+}
+
+/// Writes the column-major `joint_count x joint_count` mass matrix.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dynibo_mass_matrix(
+    robot: *const DyniboRobot,
+    workspace: *mut DyniboWorkspace,
+    q: *const f64,
+    q_len: usize,
+    output: *mut f64,
+    output_len: usize,
+) -> DyniboStatus {
+    call(|| {
+        // SAFETY: Pointer validation is performed by the helpers.
+        let robot = unsafe { required_ref(robot, "robot") }?;
+        // SAFETY: Pointer validation is performed by the helpers.
+        let workspace = unsafe { required_mut(workspace, "workspace") }?;
+        // SAFETY: Pointer validation is performed by the helpers.
+        let q = unsafe { input_slice(q, q_len, "q") }?;
+        // SAFETY: Pointer validation is performed by the helpers.
+        let output = unsafe { output_slice(output, output_len, "output") }?;
+        robot
+            .inner
+            .mass_matrix(q, &mut workspace.inner, output)
+            .map_err(core_error)
+    })
+}
+
+/// Writes the column-major `joint_count x joint_count` Coriolis matrix.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dynibo_coriolis_matrix(
+    robot: *const DyniboRobot,
+    workspace: *mut DyniboWorkspace,
+    q: *const f64,
+    qd: *const f64,
+    state_len: usize,
+    output: *mut f64,
+    output_len: usize,
+) -> DyniboStatus {
+    call(|| {
+        // SAFETY: Pointer validation is performed by the helpers.
+        let robot = unsafe { required_ref(robot, "robot") }?;
+        // SAFETY: Pointer validation is performed by the helpers.
+        let workspace = unsafe { required_mut(workspace, "workspace") }?;
+        // SAFETY: Pointer validation is performed by the helpers.
+        let q = unsafe { input_slice(q, state_len, "q") }?;
+        // SAFETY: Pointer validation is performed by the helpers.
+        let qd = unsafe { input_slice(qd, state_len, "qd") }?;
+        // SAFETY: Pointer validation is performed by the helpers.
+        let output = unsafe { output_slice(output, output_len, "output") }?;
+        robot
+            .inner
+            .coriolis_matrix(q, qd, &mut workspace.inner, output)
+            .map_err(core_error)
+    })
+}
+
 /// Solves inverse kinematics for one link.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_inverse_kinematics(
@@ -819,6 +909,8 @@ mod tests {
             let mut pose = DyniboPose::default();
             let mut twist = DyniboTwist::default();
             let mut jacobian = [0.0; 24];
+            let mut jacobian_derivative = [0.0; 24];
+            let mut square = [0.0; 16];
             let mut output = [0.0; 4];
 
             assert_eq!(
@@ -834,6 +926,35 @@ mod tests {
                     target,
                     jacobian.as_mut_ptr(),
                     24,
+                ),
+                DyniboStatus::Ok
+            );
+            assert_eq!(
+                dynibo_jacobian_derivative(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    q.as_ptr(),
+                    4,
+                    target,
+                    jacobian_derivative.as_mut_ptr(),
+                    24,
+                ),
+                DyniboStatus::Ok
+            );
+            assert_eq!(
+                dynibo_mass_matrix(robot, workspace, q.as_ptr(), 4, square.as_mut_ptr(), 16,),
+                DyniboStatus::Ok
+            );
+            assert_eq!(
+                dynibo_coriolis_matrix(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    q.as_ptr(),
+                    4,
+                    square.as_mut_ptr(),
+                    16,
                 ),
                 DyniboStatus::Ok
             );
@@ -982,6 +1103,52 @@ mod tests {
             );
             assert_eq!(
                 dynibo_jacobian(robot, workspace, q.as_ptr(), 4, target, ptr::null_mut(), 0,),
+                DyniboStatus::InvalidArgument
+            );
+            assert_eq!(
+                dynibo_jacobian_derivative(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    ptr::null(),
+                    4,
+                    target,
+                    jacobian_derivative.as_mut_ptr(),
+                    24,
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            assert_eq!(
+                dynibo_jacobian_derivative(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    q.as_ptr(),
+                    4,
+                    usize::MAX,
+                    jacobian_derivative.as_mut_ptr(),
+                    24,
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            assert_eq!(
+                dynibo_mass_matrix(robot, workspace, q.as_ptr(), 4, square.as_mut_ptr(), 15,),
+                DyniboStatus::InvalidArgument
+            );
+            assert_eq!(
+                dynibo_mass_matrix(robot, workspace, ptr::null(), 4, square.as_mut_ptr(), 16,),
+                DyniboStatus::InvalidArgument
+            );
+            assert_eq!(
+                dynibo_coriolis_matrix(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    q.as_ptr(),
+                    3,
+                    square.as_mut_ptr(),
+                    16,
+                ),
                 DyniboStatus::InvalidArgument
             );
 
