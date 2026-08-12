@@ -654,6 +654,99 @@ fn every_dynamic_api_validates_its_workspace_link_and_slices() {
 }
 
 #[test]
+fn matrix_and_jacobian_derivative_apis_validate_workspace_link_and_slices() {
+    let robot = test_arm();
+    let other = test_arm();
+    let target = robot.link_id("test_link_4").unwrap();
+    let foreign_target = other.link_id("test_link_4").unwrap();
+    let q = [0.0; 4];
+    let short = [0.0; 3];
+    let mut derivative = [0.0; 24];
+    let mut short_derivative = [0.0; 23];
+    let mut matrix = [0.0; 16];
+    let mut short_matrix = [0.0; 15];
+
+    let mut foreign_workspace = other.workspace();
+    assert_invalid_workspace(robot.jacobian_derivative(
+        &q,
+        &q,
+        target,
+        &mut foreign_workspace,
+        &mut derivative,
+    ));
+    assert_invalid_workspace(robot.mass_matrix(&q, &mut foreign_workspace, &mut matrix));
+    assert_invalid_workspace(robot.coriolis_matrix(&q, &q, &mut foreign_workspace, &mut matrix));
+
+    let mut workspace = robot.workspace();
+    assert_wrong_length(
+        robot.jacobian_derivative(&short, &q, target, &mut workspace, &mut derivative),
+        "q",
+    );
+    assert_wrong_length(
+        robot.jacobian_derivative(&q, &short, target, &mut workspace, &mut derivative),
+        "qd",
+    );
+    assert_wrong_length(
+        robot.jacobian_derivative(&q, &q, target, &mut workspace, &mut short_derivative),
+        "jacobian derivative output",
+    );
+    assert_invalid_link(robot.jacobian_derivative(
+        &q,
+        &q,
+        foreign_target,
+        &mut workspace,
+        &mut derivative,
+    ));
+
+    assert_wrong_length(robot.mass_matrix(&short, &mut workspace, &mut matrix), "q");
+    assert_wrong_length(
+        robot.mass_matrix(&q, &mut workspace, &mut short_matrix),
+        "mass matrix output",
+    );
+
+    assert_wrong_length(
+        robot.coriolis_matrix(&short, &q, &mut workspace, &mut matrix),
+        "q",
+    );
+    assert_wrong_length(
+        robot.coriolis_matrix(&q, &short, &mut workspace, &mut matrix),
+        "qd",
+    );
+    assert_wrong_length(
+        robot.coriolis_matrix(&q, &q, &mut workspace, &mut short_matrix),
+        "coriolis matrix output",
+    );
+}
+
+#[test]
+fn inverse_kinematics_skips_fixed_joints_on_the_ancestor_path() {
+    // `oracle_mixed` chains revolute -> fixed -> prismatic -> continuous, so the
+    // solver's Jacobian sweeps must skip the fixed `rigid_mount` joint.
+    let robot = Robot::from_urdf(urdf_path("oracle_mixed.urdf")).expect("oracle URDF must load");
+    let target = robot.link_id("tool").unwrap();
+    let mut workspace = robot.workspace();
+    let q = [0.3, 0.0, 0.12, -0.4];
+    let desired = robot
+        .forward_kinematics(&q, target, &mut workspace)
+        .unwrap();
+    let mut solution = [0.0; 4];
+    robot
+        .inverse_kinematics(
+            &[0.0; 4],
+            target,
+            &desired,
+            InverseKinematicsOptions::default(),
+            &mut workspace,
+            &mut solution,
+        )
+        .unwrap();
+    let reached = robot
+        .forward_kinematics(&solution, target, &mut workspace)
+        .unwrap();
+    assert_relative_eq!(reached, desired, epsilon = 1.0e-6);
+}
+
+#[test]
 fn dynamic_root_results_are_zero_or_identity() {
     let robot = test_arm();
     let root = robot.link_id("test_base_link").unwrap();
@@ -670,6 +763,17 @@ fn dynamic_root_results_are_zero_or_identity() {
         .forward_acceleration_kinematics(&q, &[0.2; 4], &[0.3; 4], root, &mut workspace)
         .unwrap();
     assert_eq!(acceleration, Twist::zeros());
+    let velocity = robot
+        .forward_velocity_kinematics(
+            &q,
+            &[0.2; 4],
+            root,
+            &Frame::identity(),
+            &Frame::identity(),
+            &mut workspace,
+        )
+        .unwrap();
+    assert_eq!(velocity, Twist::zeros());
 
     let root_load = IndexedLoad {
         link: root,
