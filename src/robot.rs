@@ -210,6 +210,10 @@ impl Robot {
 
     /// Computes a target link frame using runtime-sized input and workspace.
     ///
+    /// For the joints on the root-to-target path, the returned pose is
+    ///
+    /// <math display="block"><mrow><msup><mi>T</mi><mn>0</mn></msup><mi>target</mi><mo>(</mo><mi>q</mi><mo>)</mo><mo>=</mo><munderover><mo>∏</mo><mrow><mi>i</mi><mo>∈</mo><mi>path</mi></mrow><mi></mi></munderover><msup><mi>T</mi><mrow><mi>i</mi><mo>−</mo><mn>1</mn></mrow></msup><mi>i</mi><mo>(</mo><msub><mi>q</mi><mi>i</mi></msub><mo>)</mo></mrow></math>
+    ///
     /// # Errors
     ///
     /// Returns an error for an invalid input length, link ID, or workspace.
@@ -230,6 +234,9 @@ impl Robot {
     ///
     /// Each column stores `[angular_x, angular_y, angular_z, linear_x,
     /// linear_y, linear_z]`.
+    /// The Jacobian maps joint velocity to the target spatial velocity:
+    ///
+    /// <math display="block"><mrow><msup><mi>V</mi><mn>0</mn></msup><mi>target</mi><mo>=</mo><mi>J</mi><mo>(</mo><mi>q</mi><mo>)</mo><mover><mi>q</mi><mo>˙</mo></mover><mo>,</mo><mspace width="1em"/><mi>J</mi><mo>(</mo><mi>q</mi><mo>)</mo><mo>=</mo><mfenced><mtable><mtr><mtd><msub><mi>J</mi><mi>ω</mi></msub><mo>(</mo><mi>q</mi><mo>)</mo></mtd></mtr><mtr><mtd><msub><mi>J</mi><mi>v</mi></msub><mo>(</mo><mi>q</mi><mo>)</mo></mtd></mtr></mtable></mfenced></mrow></math>
     ///
     /// # Errors
     ///
@@ -265,6 +272,9 @@ impl Robot {
     /// satisfies `forward_acceleration_kinematics(q, qd, 0) == J_dot * qd`.
     /// Columns of fixed joints and of joints outside the target's ancestor
     /// chain are zero; a root target yields an all-zero matrix.
+    /// In general, the target spatial acceleration is
+    ///
+    /// <math display="block"><mrow><msup><mi>A</mi><mn>0</mn></msup><mi>target</mi><mo>=</mo><mi>J</mi><mo>(</mo><mi>q</mi><mo>)</mo><mover><mi>q</mi><mo>¨</mo></mover><mo>+</mo><mover><mi>J</mi><mo>˙</mo></mover><mo>(</mo><mi>q</mi><mo>,</mo><mover><mi>q</mi><mo>˙</mo></mover><mo>)</mo><mover><mi>q</mi><mo>˙</mo></mover></mrow></math>
     ///
     /// # Errors
     ///
@@ -346,6 +356,12 @@ impl Robot {
 
     /// Writes a runtime-sized inverse-kinematics solution using the supplied options.
     ///
+    /// Each iteration applies a damped-least-squares update,
+    ///
+    /// <math display="block"><mrow><mi>Δ</mi><mi>q</mi><mo>=</mo><msup><mi>J</mi><mi>T</mi></msup><msup><mfenced><mrow><mi>J</mi><msup><mi>J</mi><mi>T</mi></msup><mo>+</mo><msup><mi>λ</mi><mn>2</mn></msup><mi>I</mi></mrow></mfenced><mrow><mo>−</mo><mn>1</mn></mrow></msup><mi>e</mi><mo>,</mo><mspace width="1em"/><msub><mi>q</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>=</mo><msub><mi>q</mi><mi>k</mi></msub><mo>+</mo><mi>Δ</mi><mi>q</mi></mrow></math>
+    ///
+    /// where `e` combines target translation and rotation-vector errors.
+    ///
     /// # Errors
     ///
     /// Returns an error for invalid lengths, link ID, workspace, solver input,
@@ -380,6 +396,10 @@ impl Robot {
 
     /// Computes runtime-sized spatial velocity at a point on a target link.
     ///
+    /// With the selected base and tool frames, the angular-first twist obeys
+    ///
+    /// <math display="block"><mrow><msub><mi>V</mi><mi>tool</mi></msub><mo>=</mo><msub><mi>J</mi><mi>tool</mi></msub><mo>(</mo><mi>q</mi><mo>)</mo><mover><mi>q</mi><mo>˙</mo></mover></mrow></math>
+    ///
     /// # Errors
     ///
     /// Returns an error for invalid input lengths, link ID, or workspace.
@@ -410,6 +430,10 @@ impl Robot {
 
     /// Computes runtime-sized spatial acceleration of a target link origin.
     ///
+    /// The returned angular-first acceleration is
+    ///
+    /// <math display="block"><mrow><msub><mi>A</mi><mi>target</mi></msub><mo>=</mo><mi>J</mi><mo>(</mo><mi>q</mi><mo>)</mo><mover><mi>q</mi><mo>¨</mo></mover><mo>+</mo><mover><mi>J</mi><mo>˙</mo></mover><mo>(</mo><mi>q</mi><mo>,</mo><mover><mi>q</mi><mo>˙</mo></mover><mo>)</mo><mover><mi>q</mi><mo>˙</mo></mover></mrow></math>
+    ///
     /// # Errors
     ///
     /// Returns an error for invalid input lengths, link ID, or workspace.
@@ -435,6 +459,9 @@ impl Robot {
     /// The matrix is symmetric positive semi-definite. Rows and columns of
     /// fixed joints are zero; their subtree inertia still contributes to the
     /// moving ancestors.
+    /// It is the inertia term in the manipulator equation
+    ///
+    /// <math display="block"><mrow><mi>τ</mi><mo>=</mo><mi>M</mi><mo>(</mo><mi>q</mi><mo>)</mo><mover><mi>q</mi><mo>¨</mo></mover><mo>+</mo><mi>C</mi><mo>(</mo><mi>q</mi><mo>,</mo><mover><mi>q</mi><mo>˙</mo></mover><mo>)</mo><mover><mi>q</mi><mo>˙</mo></mover><mo>+</mo><mi>g</mi><mo>(</mo><mi>q</mi><mo>)</mo></mrow></math>
     ///
     /// # Errors
     ///
@@ -463,6 +490,9 @@ impl Robot {
     /// The matrix uses the Christoffel factorization, so `C(q, qd) qd + g(q)`
     /// equals the RNEA bias `inverse_dynamics(q, qd, 0)` and `dM/dt - 2C` is
     /// skew-symmetric. Rows and columns of fixed joints are zero.
+    /// Equivalently, for a Christoffel factorization,
+    ///
+    /// <math display="block"><mrow><msub><mi>C</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo>(</mo><mi>q</mi><mo>,</mo><mover><mi>q</mi><mo>˙</mo></mover><mo>)</mo><mo>=</mo><mfrac><mn>1</mn><mn>2</mn></mfrac><msub><mo>∑</mo><mi>k</mi></msub><mfenced><mrow><mfrac><mrow><mo>∂</mo><msub><mi>M</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub></mrow><mrow><mo>∂</mo><msub><mi>q</mi><mi>k</mi></msub></mrow></mfrac><mo>+</mo><mfrac><mrow><mo>∂</mo><msub><mi>M</mi><mrow><mi>i</mi><mi>k</mi></mrow></msub></mrow><mrow><mo>∂</mo><msub><mi>q</mi><mi>j</mi></msub></mrow></mfrac><mo>−</mo><mfrac><mrow><mo>∂</mo><msub><mi>M</mi><mrow><mi>j</mi><mi>k</mi></mrow></msub></mrow><mrow><mo>∂</mo><msub><mi>q</mi><mi>i</mi></msub></mrow></mfrac></mrow></mfenced><msub><mover><mi>q</mi><mo>˙</mo></mover><mi>k</mi></msub></mrow></math>
     ///
     /// # Errors
     ///
@@ -488,6 +518,11 @@ impl Robot {
     }
 
     /// Writes runtime-sized Newton-Euler joint forces into caller-owned output.
+    ///
+    /// With a stationary base and no external loads, the returned generalized
+    /// forces follow
+    ///
+    /// <math display="block"><mrow><mi>τ</mi><mo>=</mo><mi>M</mi><mo>(</mo><mi>q</mi><mo>)</mo><mover><mi>q</mi><mo>¨</mo></mover><mo>+</mo><mi>C</mi><mo>(</mo><mi>q</mi><mo>,</mo><mover><mi>q</mi><mo>˙</mo></mover><mo>)</mo><mover><mi>q</mi><mo>˙</mo></mover><mo>+</mo><mi>g</mi><mo>(</mo><mi>q</mi><mo>)</mo></mrow></math>
     ///
     /// # Errors
     ///
@@ -531,6 +566,11 @@ impl Robot {
     }
 
     /// Writes runtime-sized gravity joint forces into caller-owned output.
+    ///
+    /// With no external loads, this is the zero-velocity, zero-acceleration
+    /// inverse-dynamics term:
+    ///
+    /// <math display="block"><mrow><mi>g</mi><mo>(</mo><mi>q</mi><mo>)</mo><mo>=</mo><mi>τ</mi><mo>(</mo><mi>q</mi><mo>,</mo><mn>0</mn><mo>,</mo><mn>0</mn><mo>)</mo></mrow></math>
     ///
     /// # Errors
     ///
