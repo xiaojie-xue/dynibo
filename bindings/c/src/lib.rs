@@ -205,6 +205,38 @@ unsafe fn output_slice<'a>(
     Ok(unsafe { std::slice::from_raw_parts_mut(pointer, length) })
 }
 
+fn reject_f64_overlap(
+    input: *const f64,
+    input_length: usize,
+    input_name: &str,
+    output: *mut f64,
+    output_length: usize,
+) -> Result<(), (DyniboStatus, String)> {
+    if input.is_null() || output.is_null() || input_length == 0 || output_length == 0 {
+        return Ok(());
+    }
+    let element_size = std::mem::size_of::<f64>();
+    let input_bytes = input_length
+        .checked_mul(element_size)
+        .ok_or_else(|| invalid(format!("{input_name} length is too large")))?;
+    let output_bytes = output_length
+        .checked_mul(element_size)
+        .ok_or_else(|| invalid("output length is too large"))?;
+    let input_start = input.addr();
+    let output_start = output.addr();
+    let input_end = input_start
+        .checked_add(input_bytes)
+        .ok_or_else(|| invalid(format!("{input_name} address range overflows")))?;
+    let output_end = output_start
+        .checked_add(output_bytes)
+        .ok_or_else(|| invalid("output address range overflows"))?;
+    if input_start < output_end && output_start < input_end {
+        Err(invalid(format!("{input_name} and output must not overlap")))
+    } else {
+        Ok(())
+    }
+}
+
 fn frame_from_pose(pose: &DyniboPose) -> Result<Frame, (DyniboStatus, String)> {
     let [x, y, z, w] = pose.rotation_xyzw;
     let norm_squared = x * x + y * y + z * z + w * w;
@@ -497,6 +529,8 @@ pub unsafe extern "C" fn dynibo_jacobian_derivative(
         let q = unsafe { input_slice(q, state_len, "q") }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let qd = unsafe { input_slice(qd, state_len, "qd") }?;
+        reject_f64_overlap(q.as_ptr(), q.len(), "q", output, output_len)?;
+        reject_f64_overlap(qd.as_ptr(), qd.len(), "qd", output, output_len)?;
         // SAFETY: Pointer validation is performed by the helpers.
         let output = unsafe { output_slice(output, output_len, "output") }?;
         let link = robot
@@ -528,6 +562,7 @@ pub unsafe extern "C" fn dynibo_mass_matrix(
         let workspace = unsafe { required_mut(workspace, "workspace") }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let q = unsafe { input_slice(q, q_len, "q") }?;
+        reject_f64_overlap(q.as_ptr(), q.len(), "q", output, output_len)?;
         // SAFETY: Pointer validation is performed by the helpers.
         let output = unsafe { output_slice(output, output_len, "output") }?;
         robot
@@ -557,6 +592,8 @@ pub unsafe extern "C" fn dynibo_coriolis_matrix(
         let q = unsafe { input_slice(q, state_len, "q") }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let qd = unsafe { input_slice(qd, state_len, "qd") }?;
+        reject_f64_overlap(q.as_ptr(), q.len(), "q", output, output_len)?;
+        reject_f64_overlap(qd.as_ptr(), qd.len(), "qd", output, output_len)?;
         // SAFETY: Pointer validation is performed by the helpers.
         let output = unsafe { output_slice(output, output_len, "output") }?;
         robot
@@ -1379,6 +1416,39 @@ mod tests {
                 ),
                 DyniboStatus::InvalidArgument
             );
+            let mut overlapping_derivative = [0.0; 24];
+            let overlapping_q = overlapping_derivative.as_ptr();
+            let overlapping_output = overlapping_derivative.as_mut_ptr();
+            assert_eq!(
+                dynibo_jacobian_derivative(
+                    robot,
+                    workspace,
+                    overlapping_q,
+                    q.as_ptr(),
+                    4,
+                    target,
+                    overlapping_output,
+                    24,
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            assert!(last_error().contains("q and output must not overlap"));
+            let overlapping_qd = overlapping_derivative.as_ptr();
+            let overlapping_output = overlapping_derivative.as_mut_ptr();
+            assert_eq!(
+                dynibo_jacobian_derivative(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    overlapping_qd,
+                    4,
+                    target,
+                    overlapping_output,
+                    24,
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            assert!(last_error().contains("qd and output must not overlap"));
 
             // dynibo_mass_matrix: every validation arm.
             assert_eq!(
@@ -1415,6 +1485,14 @@ mod tests {
                 dynibo_mass_matrix(robot, workspace, q.as_ptr(), 4, ptr::null_mut(), 0,),
                 DyniboStatus::InvalidArgument
             );
+            let mut overlapping_mass = [0.0; 16];
+            let overlapping_q = overlapping_mass.as_ptr();
+            let overlapping_output = overlapping_mass.as_mut_ptr();
+            assert_eq!(
+                dynibo_mass_matrix(robot, workspace, overlapping_q, 4, overlapping_output, 16,),
+                DyniboStatus::InvalidArgument
+            );
+            assert!(last_error().contains("q and output must not overlap"));
 
             // dynibo_coriolis_matrix: every validation arm.
             assert_eq!(
@@ -1513,6 +1591,37 @@ mod tests {
                 ),
                 DyniboStatus::InvalidArgument
             );
+            let mut overlapping_coriolis = [0.0; 16];
+            let overlapping_q = overlapping_coriolis.as_ptr();
+            let overlapping_output = overlapping_coriolis.as_mut_ptr();
+            assert_eq!(
+                dynibo_coriolis_matrix(
+                    robot,
+                    workspace,
+                    overlapping_q,
+                    q.as_ptr(),
+                    4,
+                    overlapping_output,
+                    16,
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            assert!(last_error().contains("q and output must not overlap"));
+            let overlapping_qd = overlapping_coriolis.as_ptr();
+            let overlapping_output = overlapping_coriolis.as_mut_ptr();
+            assert_eq!(
+                dynibo_coriolis_matrix(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    overlapping_qd,
+                    4,
+                    overlapping_output,
+                    16,
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            assert!(last_error().contains("qd and output must not overlap"));
 
             dynibo_workspace_destroy(workspace);
             dynibo_robot_destroy(robot);

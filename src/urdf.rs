@@ -80,7 +80,7 @@ pub(crate) fn tree_model(robot: &Robot) -> Result<TreeModel> {
     let mut has_children = Vec::with_capacity(robot.links.len());
 
     let root = roots[0];
-    links.push(robot_link(links_by_name[root]));
+    links.push(robot_link(links_by_name[root])?);
     topological_names.push(root);
     discovered.insert(root, 0);
     has_children.push(false);
@@ -107,7 +107,7 @@ pub(crate) fn tree_model(robot: &Robot) -> Result<TreeModel> {
                 let child_index = links.len();
                 discovered.insert(child_name, child_index);
                 topological_names.push(child_name);
-                links.push(robot_link(child));
+                links.push(robot_link(child)?);
                 has_children.push(false);
                 joints.push(robot_joint(joint)?);
                 joint_parents.push(parent_index);
@@ -164,8 +164,26 @@ fn robot_joint(joint: &urdf_rs::Joint) -> Result<Joint> {
 }
 
 /// Converts one URDF link and its inertial block into a [`Link`].
-fn robot_link(link: &urdf_rs::Link) -> Link {
+fn robot_link(link: &urdf_rs::Link) -> Result<Link> {
     let inertial = &link.inertial;
+    if !inertial.mass.value.is_finite() || inertial.mass.value < 0.0 {
+        return Err(Error::InvalidModel(format!(
+            "link {} mass must be finite and non-negative",
+            link.name
+        )));
+    }
+    if !inertial
+        .origin
+        .xyz
+        .iter()
+        .chain(inertial.origin.rpy.iter())
+        .all(|value| value.is_finite())
+    {
+        return Err(Error::InvalidModel(format!(
+            "link {} inertial origin must contain only finite values",
+            link.name
+        )));
+    }
     // URDF stores the entries of the symmetric inertia tensor directly.
     let inertia_in_inertial_frame = Matrix3::new(
         inertial.inertia.ixx,
@@ -178,6 +196,22 @@ fn robot_link(link: &urdf_rs::Link) -> Link {
         inertial.inertia.iyz,
         inertial.inertia.izz,
     );
+    if !inertia_in_inertial_frame
+        .iter()
+        .all(|value| value.is_finite())
+    {
+        return Err(Error::InvalidModel(format!(
+            "link {} inertia must contain only finite values",
+            link.name
+        )));
+    }
+    let principal_moments = inertia_in_inertial_frame.symmetric_eigen().eigenvalues;
+    if principal_moments.iter().any(|value| *value < 0.0) {
+        return Err(Error::InvalidModel(format!(
+            "link {} inertia must be positive semi-definite",
+            link.name
+        )));
+    }
     let inertial_rotation = UnitQuaternion::from_euler_angles(
         inertial.origin.rpy[0],
         inertial.origin.rpy[1],
@@ -187,7 +221,7 @@ fn robot_link(link: &urdf_rs::Link) -> Link {
     let inertia = inertial_rotation.matrix()
         * inertia_in_inertial_frame
         * inertial_rotation.matrix().transpose();
-    Link::new(
+    Ok(Link::new(
         link.name.clone(),
         inertial.mass.value,
         Vector3::new(
@@ -196,7 +230,7 @@ fn robot_link(link: &urdf_rs::Link) -> Link {
             inertial.origin.xyz[2],
         ),
         inertia,
-    )
+    ))
 }
 
 #[cfg(test)]
@@ -312,6 +346,29 @@ mod tests {
         assert_eq!(model.joints[0].joint_type(), JointType::Revolute);
         assert_eq!(model.joints[0].lower_limit(), f64::NEG_INFINITY);
         assert_eq!(model.joints[0].upper_limit(), f64::INFINITY);
+    }
+
+    #[test]
+    fn rejects_non_physical_link_inertial_properties() {
+        let mut robot = chain();
+        robot.links[1].inertial.mass.value = -1.0;
+        invalid_model(&robot, "mass must be finite and non-negative");
+
+        let mut robot = chain();
+        robot.links[1].inertial.mass.value = f64::NAN;
+        invalid_model(&robot, "mass must be finite and non-negative");
+
+        let mut robot = chain();
+        robot.links[1].inertial.origin.xyz[0] = f64::INFINITY;
+        invalid_model(&robot, "inertial origin must contain only finite values");
+
+        let mut robot = chain();
+        robot.links[1].inertial.inertia.ixx = f64::NAN;
+        invalid_model(&robot, "inertia must contain only finite values");
+
+        let mut robot = chain();
+        robot.links[1].inertial.inertia.ixx = -1.0;
+        invalid_model(&robot, "inertia must be positive semi-definite");
     }
 
     #[test]

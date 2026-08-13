@@ -231,18 +231,22 @@ def _check(status: int) -> None:
 
 def _array(values: Sequence[float], name: str) -> ct.Array[ct.c_double]:
     try:
-        return (ct.c_double * len(values))(*(float(value) for value in values))
+        snapshot = tuple(float(value) for value in values)
+        return (ct.c_double * len(snapshot))(*snapshot)
     except (TypeError, ValueError) as error:
         raise TypeError(f"{name} must be a finite-sized sequence of numbers") from error
 
 
 def _fixed_array(values: Sequence[float], length: int, name: str) -> ct.Array[ct.c_double]:
-    if len(values) != length:
+    result = _array(values, name)
+    if len(result) != length:
         raise ValueError(f"{name} must contain exactly {length} elements")
-    return _array(values, name)
+    return result
 
 
-def _require_same_length(q: Sequence[float], **states: Sequence[float]) -> None:
+def _require_same_length(
+    q: ct.Array[ct.c_double], **states: ct.Array[ct.c_double]
+) -> None:
     for name, values in states.items():
         if len(values) != len(q):
             raise ValueError(f"q and {name} must have the same length")
@@ -372,7 +376,7 @@ class Robot:
         q_array = _array(q, "q")
         output = _Pose()
         _check(_lib.dynibo_forward_kinematics(
-            self._robot, self._workspace, q_array, len(q), target, ct.byref(output)
+            self._robot, self._workspace, q_array, len(q_array), target, ct.byref(output)
         ))
         return Pose(tuple(output.translation), tuple(output.rotation_xyzw))
 
@@ -395,7 +399,7 @@ class Robot:
         q_array = _array(q, "q")
         output = (ct.c_double * (6 * self.joint_count))()
         _check(_lib.dynibo_jacobian(
-            self._robot, self._workspace, q_array, len(q), target,
+            self._robot, self._workspace, q_array, len(q_array), target,
             output, len(output),
         ))
         return tuple(output)
@@ -419,12 +423,12 @@ class Robot:
             ValueError: If an input length or link identifier is invalid.
             DyniboError: If the native calculation fails.
         """
-        _require_same_length(q, qd=qd)
         q_array = _array(q, "q")
         qd_array = _array(qd, "qd")
+        _require_same_length(q_array, qd=qd_array)
         output = (ct.c_double * (6 * self.joint_count))()
         _check(_lib.dynibo_jacobian_derivative(
-            self._robot, self._workspace, q_array, qd_array, len(q), target,
+            self._robot, self._workspace, q_array, qd_array, len(q_array), target,
             output, len(output),
         ))
         return tuple(output)
@@ -447,7 +451,7 @@ class Robot:
         q_array = _array(q, "q")
         output = (ct.c_double * (self.joint_count * self.joint_count))()
         _check(_lib.dynibo_mass_matrix(
-            self._robot, self._workspace, q_array, len(q), output, len(output),
+            self._robot, self._workspace, q_array, len(q_array), output, len(output),
         ))
         return tuple(output)
 
@@ -468,12 +472,12 @@ class Robot:
             ValueError: If an input length is invalid.
             DyniboError: If the native calculation fails.
         """
-        _require_same_length(q, qd=qd)
         q_array = _array(q, "q")
         qd_array = _array(qd, "qd")
+        _require_same_length(q_array, qd=qd_array)
         output = (ct.c_double * (self.joint_count * self.joint_count))()
         _check(_lib.dynibo_coriolis_matrix(
-            self._robot, self._workspace, q_array, qd_array, len(q),
+            self._robot, self._workspace, q_array, qd_array, len(q_array),
             output, len(output),
         ))
         return tuple(output)
@@ -507,7 +511,7 @@ class Robot:
         )
         output = (ct.c_double * self.joint_count)()
         _check(_lib.dynibo_inverse_kinematics(
-            self._robot, self._workspace, q_array, len(initial_q), target,
+            self._robot, self._workspace, q_array, len(q_array), target,
             ct.byref(desired_c), options_c, output, len(output),
         ))
         return tuple(output)
@@ -535,11 +539,11 @@ class Robot:
                 invalid.
             DyniboError: If the native calculation fails.
         """
-        _require_same_length(q, qd=qd)
         q_array, qd_array = _array(q, "q"), _array(qd, "qd")
+        _require_same_length(q_array, qd=qd_array)
         base_c, tool_c, output = _pose(base), _pose(tool), _Twist()
         _check(_lib.dynibo_forward_velocity(
-            self._robot, self._workspace, q_array, qd_array, len(q), target,
+            self._robot, self._workspace, q_array, qd_array, len(q_array), target,
             ct.byref(base_c), ct.byref(tool_c), ct.byref(output),
         ))
         return Twist(tuple(output.angular), tuple(output.linear))
@@ -563,14 +567,14 @@ class Robot:
             ValueError: If an input length or link identifier is invalid.
             DyniboError: If the native calculation fails.
         """
-        _require_same_length(q, qd=qd, qdd=qdd)
         q_array = _array(q, "q")
         qd_array = _array(qd, "qd")
         qdd_array = _array(qdd, "qdd")
+        _require_same_length(q_array, qd=qd_array, qdd=qdd_array)
         output = _Twist()
         _check(_lib.dynibo_forward_acceleration(
             self._robot, self._workspace, q_array, qd_array, qdd_array,
-            len(q), target, ct.byref(output),
+            len(q_array), target, ct.byref(output),
         ))
         return Twist(tuple(output.angular), tuple(output.linear))
 
@@ -596,7 +600,7 @@ class Robot:
         q_array, base_c, loads_c = _array(q, "q"), _pose(base), _loads(loads)
         output = (ct.c_double * self.joint_count)()
         _check(_lib.dynibo_gravity(
-            self._robot, self._workspace, q_array, len(q), ct.byref(base_c),
+            self._robot, self._workspace, q_array, len(q_array), ct.byref(base_c),
             loads_c, len(loads_c), output, len(output),
         ))
         return tuple(output)
@@ -627,14 +631,14 @@ class Robot:
             ValueError: If an input, pose, or load is invalid.
             DyniboError: If the native calculation fails.
         """
-        _require_same_length(q, qd=qd, qdd=qdd)
         q_array = _array(q, "q")
         qd_array = _array(qd, "qd")
         qdd_array = _array(qdd, "qdd")
+        _require_same_length(q_array, qd=qd_array, qdd=qdd_array)
         base_c, loads_c = _pose(base), _loads(loads)
         output = (ct.c_double * self.joint_count)()
         _check(_lib.dynibo_inverse_dynamics(
-            self._robot, self._workspace, q_array, qd_array, qdd_array, len(q),
+            self._robot, self._workspace, q_array, qd_array, qdd_array, len(q_array),
             ct.byref(base_c), _twist(base_velocity), _twist(base_acceleration),
             loads_c, len(loads_c), output, len(output),
         ))

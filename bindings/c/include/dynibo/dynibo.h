@@ -83,6 +83,7 @@ DYNIBO_API DyniboStatus dynibo_jacobian(
     const DyniboRobot *robot, DyniboWorkspace *workspace,
     const double *q, size_t q_len, size_t target,
     double *output, size_t output_len);
+/* State inputs must not overlap the output buffer. */
 DYNIBO_API DyniboStatus dynibo_jacobian_derivative(
     const DyniboRobot *robot, DyniboWorkspace *workspace,
     const double *q, const double *qd, size_t state_len, size_t target,
@@ -100,9 +101,11 @@ DYNIBO_API DyniboStatus dynibo_forward_acceleration(
     const DyniboRobot *robot, DyniboWorkspace *workspace,
     const double *q, const double *qd, const double *qdd,
     size_t state_len, size_t target, DyniboTwist *output);
+/* q must not overlap the output buffer. */
 DYNIBO_API DyniboStatus dynibo_mass_matrix(
     const DyniboRobot *robot, DyniboWorkspace *workspace,
     const double *q, size_t q_len, double *output, size_t output_len);
+/* State inputs must not overlap the output buffer. */
 DYNIBO_API DyniboStatus dynibo_coriolis_matrix(
     const DyniboRobot *robot, DyniboWorkspace *workspace,
     const double *q, const double *qd, size_t state_len,

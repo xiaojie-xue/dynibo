@@ -186,6 +186,10 @@ int main(int argc, char **argv) {
         robot, workspace, reference_q, reference_qd, n, target,
         jacobian_derivative, 6 * n - 1)
         == DYNIBO_STATUS_INVALID_ARGUMENT);
+    double overlapping_mass[16] = {0.2, 1.0, -0.7, 0.4};
+    CHECK(dynibo_mass_matrix(
+        robot, workspace, overlapping_mass, n, overlapping_mass, n * n)
+        == DYNIBO_STATUS_INVALID_ARGUMENT);
 
     free(output);
     free(square);

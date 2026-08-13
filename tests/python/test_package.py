@@ -159,8 +159,21 @@ class PackageTests(unittest.TestCase):
             self.assertAlmostEqual(actual, expected, delta=2.0e-10)
 
     def test_python_input_validation_and_lifecycle(self) -> None:
+        class ChangingLengthSequence:
+            def __init__(self) -> None:
+                self.length_calls = 0
+
+            def __len__(self) -> int:
+                self.length_calls += 1
+                return 3 if self.length_calls == 1 else 4
+
+            def __iter__(self):
+                return iter((0.0, 0.0, 0.0))
+
         with self.assertRaisesRegex(TypeError, "sequence of numbers"):
             self.robot.forward_kinematics(["not-a-number"] * 4, self.target)
+        with self.assertRaisesRegex(ValueError, "expected 4 elements"):
+            self.robot.mass_matrix(ChangingLengthSequence())
         with self.assertRaisesRegex(ValueError, "q and qd must have the same length"):
             self.robot.forward_velocity(self.q, self.q[:-1], self.target)
         with self.assertRaisesRegex(ValueError, "q and qdd must have the same length"):
