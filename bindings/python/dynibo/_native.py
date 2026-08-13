@@ -360,7 +360,13 @@ class Robot:
         return int(result.value)
 
     def forward_kinematics(self, q: Sequence[float], target: int) -> Pose:
-        """Compute the pose of a target link.
+        r"""Compute the pose of a target link.
+
+        For the joints on the root-to-target path, the returned pose is
+
+        \[
+        {}^0 T_{\mathrm{target}}(q) = \prod_{i \in \mathrm{path}} {}^{i-1}T_i(q_i).
+        \]
 
         Args:
             q: Joint positions in model joint order.
@@ -381,7 +387,12 @@ class Robot:
         return Pose(tuple(output.translation), tuple(output.rotation_xyzw))
 
     def jacobian(self, q: Sequence[float], target: int) -> tuple[float, ...]:
-        """Compute the geometric Jacobian of a target link.
+        r"""Compute the geometric Jacobian of a target link.
+
+        \[
+        {}^0 V_{\mathrm{target}} = J(q) \dot q, \qquad
+        J(q) = \begin{bmatrix} J_\omega(q) \\ J_v(q) \end{bmatrix}.
+        \]
 
         Args:
             q: Joint positions in model joint order.
@@ -407,7 +418,11 @@ class Robot:
     def jacobian_derivative(
         self, q: Sequence[float], qd: Sequence[float], target: int
     ) -> tuple[float, ...]:
-        """Compute the time derivative of the geometric Jacobian.
+        r"""Compute the time derivative of the geometric Jacobian.
+
+        \[
+        {}^0 A_{\mathrm{target}} = J(q) \ddot q + \dot J(q, \dot q) \dot q.
+        \]
 
         Args:
             q: Joint positions in model joint order.
@@ -434,7 +449,11 @@ class Robot:
         return tuple(output)
 
     def mass_matrix(self, q: Sequence[float]) -> tuple[float, ...]:
-        """Compute the joint-space mass matrix.
+        r"""Compute the joint-space mass matrix.
+
+        \[
+        \tau = M(q) \ddot q + C(q, \dot q) \dot q + g(q).
+        \]
 
         Args:
             q: Joint positions in model joint order.
@@ -456,7 +475,14 @@ class Robot:
         return tuple(output)
 
     def coriolis_matrix(self, q: Sequence[float], qd: Sequence[float]) -> tuple[float, ...]:
-        """Compute the Coriolis and centrifugal matrix.
+        r"""Compute the Coriolis and centrifugal matrix.
+
+        \[
+        C_{ij}(q, \dot q) = \frac{1}{2}\sum_k
+        \left(\frac{\partial M_{ij}}{\partial q_k}
+        + \frac{\partial M_{ik}}{\partial q_j}
+        - \frac{\partial M_{jk}}{\partial q_i}\right) \dot q_k.
+        \]
 
         Args:
             q: Joint positions in model joint order.
@@ -486,7 +512,14 @@ class Robot:
         self, initial_q: Sequence[float], target: int, desired: Pose,
         options: IkOptions = IkOptions(),
     ) -> tuple[float, ...]:
-        """Solve for joint positions that reach a desired target pose.
+        r"""Solve for joint positions that reach a desired target pose.
+
+        Each iteration applies the damped-least-squares update
+
+        \[
+        \Delta q = J^T\left(JJ^T + \lambda^2 I\right)^{-1} e,
+        \qquad q_{k+1} = q_k + \Delta q.
+        \]
 
         Args:
             initial_q: Initial joint positions in model joint order.
@@ -520,7 +553,11 @@ class Robot:
         self, q: Sequence[float], qd: Sequence[float], target: int,
         base: Pose = Pose(), tool: Pose = Pose(),
     ) -> Twist:
-        """Compute spatial velocity at a point on a target link.
+        r"""Compute spatial velocity at a point on a target link.
+
+        \[
+        V_{\mathrm{tool}} = J_{\mathrm{tool}}(q) \dot q.
+        \]
 
         Args:
             q: Joint positions in model joint order.
@@ -552,7 +589,11 @@ class Robot:
         self, q: Sequence[float], qd: Sequence[float],
         qdd: Sequence[float], target: int,
     ) -> Twist:
-        """Compute spatial acceleration at a target-link origin.
+        r"""Compute spatial acceleration at a target-link origin.
+
+        \[
+        A_{\mathrm{target}} = J(q) \ddot q + \dot J(q, \dot q) \dot q.
+        \]
 
         Args:
             q: Joint positions in model joint order.
@@ -582,7 +623,13 @@ class Robot:
         self, q: Sequence[float], base: Pose = Pose(),
         loads: Iterable[Load] = (),
     ) -> tuple[float, ...]:
-        """Compute gravity-compensation joint forces.
+        r"""Compute gravity-compensation joint forces.
+
+        With no external loads, the returned vector is
+
+        \[
+        g(q) = \tau(q, 0, 0).
+        \]
 
         Args:
             q: Joint positions in model joint order.
@@ -610,9 +657,16 @@ class Robot:
         base: Pose = Pose(), base_velocity: Twist = Twist(),
         base_acceleration: Twist = Twist(), loads: Iterable[Load] = (),
     ) -> tuple[float, ...]:
-        """Compute recursive Newton-Euler inverse dynamics.
+        r"""Compute recursive Newton-Euler inverse dynamics.
 
         Gravity is included in the result.
+
+        With a stationary base and no external loads, the returned generalized
+        forces satisfy
+
+        \[
+        \tau = M(q) \ddot q + C(q, \dot q) \dot q + g(q).
+        \]
 
         Args:
             q: Joint positions in model joint order.
