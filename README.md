@@ -3,7 +3,7 @@
 [![Package CI](https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml/badge.svg?branch=main)](https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml)
 [![codecov](https://codecov.io/gh/xiaojie-xue/dynibo/branch/main/graph/badge.svg)](https://codecov.io/gh/xiaojie-xue/dynibo)
 [![GitHub Release](https://img.shields.io/github/v/release/xiaojie-xue/dynibo)](https://github.com/xiaojie-xue/dynibo/releases/latest)
-[![Built with Rust](https://img.shields.io/badge/Built_with-Rust-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Built with Rust](https://img.shields.io/badge/Built_with-Rust-CE422B?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 English | [简体中文](README.zh.md)
