@@ -22,6 +22,9 @@ exclude = [
     "setup.py",
 ]
 
+[package.metadata.docs.rs]
+rustdoc-args = ["--html-in-header", "katex-header.html"]
+
 [workspace]
 members = ["bindings/c"]
 resolver = "3"

@@ -212,7 +212,9 @@ impl Robot {
     ///
     /// For the joints on the root-to-target path, the returned pose is
     ///
-    /// <math display="block"><mrow><msup><mi>T</mi><mn>0</mn></msup><mi>target</mi><mo>(</mo><mi>q</mi><mo>)</mo><mo>=</mo><munderover><mo>∏</mo><mrow><mi>i</mi><mo>∈</mo><mi>path</mi></mrow><mi></mi></munderover><msup><mi>T</mi><mrow><mi>i</mi><mo>−</mo><mn>1</mn></mrow></msup><mi>i</mi><mo>(</mo><msub><mi>q</mi><mi>i</mi></msub><mo>)</mo></mrow></math>
+    /// $$
+    /// {}^0 T_{\mathrm{target}}(q) = \prod_{i \in \mathrm{path}} {}^{i-1}T_i(q_i).
+    /// $$
     ///
     /// # Errors
     ///
@@ -236,7 +238,10 @@ impl Robot {
     /// linear_y, linear_z]`.
     /// The Jacobian maps joint velocity to the target spatial velocity:
     ///
-    /// <math display="block"><mrow><msup><mi>V</mi><mn>0</mn></msup><mi>target</mi><mo>=</mo><mi>J</mi><mo>(</mo><mi>q</mi><mo>)</mo><mover><mi>q</mi><mo>˙</mo></mover><mo>,</mo><mspace width="1em"/><mi>J</mi><mo>(</mo><mi>q</mi><mo>)</mo><mo>=</mo><mfenced><mtable><mtr><mtd><msub><mi>J</mi><mi>ω</mi></msub><mo>(</mo><mi>q</mi><mo>)</mo></mtd></mtr><mtr><mtd><msub><mi>J</mi><mi>v</mi></msub><mo>(</mo><mi>q</mi><mo>)</mo></mtd></mtr></mtable></mfenced></mrow></math>
+    /// $$
+    /// {}^0 V_{\mathrm{target}} = J(q) \dot q, \qquad
+    /// J(q) = \begin{bmatrix} J_\omega(q) \\ J_v(q) \end{bmatrix}.
+    /// $$
     ///
     /// # Errors
     ///
@@ -274,7 +279,9 @@ impl Robot {
     /// chain are zero; a root target yields an all-zero matrix.
     /// In general, the target spatial acceleration is
     ///
-    /// <math display="block"><mrow><msup><mi>A</mi><mn>0</mn></msup><mi>target</mi><mo>=</mo><mi>J</mi><mo>(</mo><mi>q</mi><mo>)</mo><mover><mi>q</mi><mo>¨</mo></mover><mo>+</mo><mover><mi>J</mi><mo>˙</mo></mover><mo>(</mo><mi>q</mi><mo>,</mo><mover><mi>q</mi><mo>˙</mo></mover><mo>)</mo><mover><mi>q</mi><mo>˙</mo></mover></mrow></math>
+    /// $$
+    /// {}^0 A_{\mathrm{target}} = J(q) \ddot q + \dot J(q, \dot q) \dot q.
+    /// $$
     ///
     /// # Errors
     ///
@@ -358,7 +365,10 @@ impl Robot {
     ///
     /// Each iteration applies a damped-least-squares update,
     ///
-    /// <math display="block"><mrow><mi>Δ</mi><mi>q</mi><mo>=</mo><msup><mi>J</mi><mi>T</mi></msup><msup><mfenced><mrow><mi>J</mi><msup><mi>J</mi><mi>T</mi></msup><mo>+</mo><msup><mi>λ</mi><mn>2</mn></msup><mi>I</mi></mrow></mfenced><mrow><mo>−</mo><mn>1</mn></mrow></msup><mi>e</mi><mo>,</mo><mspace width="1em"/><msub><mi>q</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>=</mo><msub><mi>q</mi><mi>k</mi></msub><mo>+</mo><mi>Δ</mi><mi>q</mi></mrow></math>
+    /// $$
+    /// \Delta q = J^T\left(JJ^T + \lambda^2 I\right)^{-1} e,
+    /// \qquad q_{k+1} = q_k + \Delta q.
+    /// $$
     ///
     /// where `e` combines target translation and rotation-vector errors.
     ///
@@ -398,7 +408,9 @@ impl Robot {
     ///
     /// With the selected base and tool frames, the angular-first twist obeys
     ///
-    /// <math display="block"><mrow><msub><mi>V</mi><mi>tool</mi></msub><mo>=</mo><msub><mi>J</mi><mi>tool</mi></msub><mo>(</mo><mi>q</mi><mo>)</mo><mover><mi>q</mi><mo>˙</mo></mover></mrow></math>
+    /// $$
+    /// V_{\mathrm{tool}} = J_{\mathrm{tool}}(q) \dot q.
+    /// $$
     ///
     /// # Errors
     ///
@@ -432,7 +444,9 @@ impl Robot {
     ///
     /// The returned angular-first acceleration is
     ///
-    /// <math display="block"><mrow><msub><mi>A</mi><mi>target</mi></msub><mo>=</mo><mi>J</mi><mo>(</mo><mi>q</mi><mo>)</mo><mover><mi>q</mi><mo>¨</mo></mover><mo>+</mo><mover><mi>J</mi><mo>˙</mo></mover><mo>(</mo><mi>q</mi><mo>,</mo><mover><mi>q</mi><mo>˙</mo></mover><mo>)</mo><mover><mi>q</mi><mo>˙</mo></mover></mrow></math>
+    /// $$
+    /// A_{\mathrm{target}} = J(q) \ddot q + \dot J(q, \dot q) \dot q.
+    /// $$
     ///
     /// # Errors
     ///
@@ -461,7 +475,9 @@ impl Robot {
     /// moving ancestors.
     /// It is the inertia term in the manipulator equation
     ///
-    /// <math display="block"><mrow><mi>τ</mi><mo>=</mo><mi>M</mi><mo>(</mo><mi>q</mi><mo>)</mo><mover><mi>q</mi><mo>¨</mo></mover><mo>+</mo><mi>C</mi><mo>(</mo><mi>q</mi><mo>,</mo><mover><mi>q</mi><mo>˙</mo></mover><mo>)</mo><mover><mi>q</mi><mo>˙</mo></mover><mo>+</mo><mi>g</mi><mo>(</mo><mi>q</mi><mo>)</mo></mrow></math>
+    /// $$
+    /// \tau = M(q) \ddot q + C(q, \dot q) \dot q + g(q).
+    /// $$
     ///
     /// # Errors
     ///
@@ -492,7 +508,12 @@ impl Robot {
     /// skew-symmetric. Rows and columns of fixed joints are zero.
     /// Equivalently, for a Christoffel factorization,
     ///
-    /// <math display="block"><mrow><msub><mi>C</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo>(</mo><mi>q</mi><mo>,</mo><mover><mi>q</mi><mo>˙</mo></mover><mo>)</mo><mo>=</mo><mfrac><mn>1</mn><mn>2</mn></mfrac><msub><mo>∑</mo><mi>k</mi></msub><mfenced><mrow><mfrac><mrow><mo>∂</mo><msub><mi>M</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub></mrow><mrow><mo>∂</mo><msub><mi>q</mi><mi>k</mi></msub></mrow></mfrac><mo>+</mo><mfrac><mrow><mo>∂</mo><msub><mi>M</mi><mrow><mi>i</mi><mi>k</mi></mrow></msub></mrow><mrow><mo>∂</mo><msub><mi>q</mi><mi>j</mi></msub></mrow></mfrac><mo>−</mo><mfrac><mrow><mo>∂</mo><msub><mi>M</mi><mrow><mi>j</mi><mi>k</mi></mrow></msub></mrow><mrow><mo>∂</mo><msub><mi>q</mi><mi>i</mi></msub></mrow></mfrac></mrow></mfenced><msub><mover><mi>q</mi><mo>˙</mo></mover><mi>k</mi></msub></mrow></math>
+    /// $$
+    /// C_{ij}(q, \dot q) = \frac{1}{2}\sum_k
+    /// \left(\frac{\partial M_{ij}}{\partial q_k}
+    /// + \frac{\partial M_{ik}}{\partial q_j}
+    /// - \frac{\partial M_{jk}}{\partial q_i}\right) \dot q_k.
+    /// $$
     ///
     /// # Errors
     ///
@@ -522,7 +543,9 @@ impl Robot {
     /// With a stationary base and no external loads, the returned generalized
     /// forces follow
     ///
-    /// <math display="block"><mrow><mi>τ</mi><mo>=</mo><mi>M</mi><mo>(</mo><mi>q</mi><mo>)</mo><mover><mi>q</mi><mo>¨</mo></mover><mo>+</mo><mi>C</mi><mo>(</mo><mi>q</mi><mo>,</mo><mover><mi>q</mi><mo>˙</mo></mover><mo>)</mo><mover><mi>q</mi><mo>˙</mo></mover><mo>+</mo><mi>g</mi><mo>(</mo><mi>q</mi><mo>)</mo></mrow></math>
+    /// $$
+    /// \tau = M(q) \ddot q + C(q, \dot q) \dot q + g(q).
+    /// $$
     ///
     /// # Errors
     ///
@@ -570,7 +593,9 @@ impl Robot {
     /// With no external loads, this is the zero-velocity, zero-acceleration
     /// inverse-dynamics term:
     ///
-    /// <math display="block"><mrow><mi>g</mi><mo>(</mo><mi>q</mi><mo>)</mo><mo>=</mo><mi>τ</mi><mo>(</mo><mi>q</mi><mo>,</mo><mn>0</mn><mo>,</mo><mn>0</mn><mo>)</mo></mrow></math>
+    /// $$
+    /// g(q) = \tau(q, 0, 0).
+    /// $$
     ///
     /// # Errors
     ///
