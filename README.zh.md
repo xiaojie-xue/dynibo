@@ -3,10 +3,12 @@
 [![Package CI](https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml/badge.svg?branch=main)](https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml)
 [![codecov](https://codecov.io/gh/xiaojie-xue/dynibo/branch/main/graph/badge.svg)](https://codecov.io/gh/xiaojie-xue/dynibo)
 [![GitHub Release](https://img.shields.io/github/v/release/xiaojie-xue/dynibo)](https://github.com/xiaojie-xue/dynibo/releases/latest)
+[![Built with Rust](https://img.shields.io/badge/Built_with-Rust-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [English](README.md) | 简体中文
 
-`dynibo` 是一个快速、轻量且可靠的 Rust 机器人运动学与动力学库。它在运行时从 URDF
+`dynibo` 是一个快速、轻量且可靠的机器人运动学与动力学库。它在运行时从 URDF
 加载机器人，并通过可复用的 Workspace 提供计算期零分配的接口；同时基于同一
 套 Rust 核心开放 Python 与 C/C++ 接口。
 
@@ -46,8 +48,8 @@ Dynibo 专注于最常用的机器人运动学与动力学接口：
 - `forward_velocity_kinematics` — 空间速度
 - `forward_acceleration_kinematics` — 空间加速度
 - `inverse_kinematics` — 阻尼最小二乘逆运动学
-- `mass_matrix` — 关节空间质量矩阵（复合刚体算法）
-- `coriolis_matrix` — 科氏/离心矩阵（Christoffel 分解）
+- `mass_matrix` — 关节空间质量矩阵
+- `coriolis_matrix` — 离心力 + 科氏力矩阵
 - `gravity` — 重力补偿，可附加外部载荷
 - `inverse_dynamics` — 递归 Newton–Euler 逆动力学
 
@@ -150,7 +152,3 @@ Dynibo 目前仍处于早期阶段，欢迎大家一起参与构建和完善。�
   url     = {https://github.com/xiaojie-xue/dynibo}
 }
 ```
-
-## 许可证
-
-Dynibo 使用 [MIT License](LICENSE)。

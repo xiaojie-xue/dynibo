@@ -3,10 +3,12 @@
 [![Package CI](https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml/badge.svg?branch=main)](https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml)
 [![codecov](https://codecov.io/gh/xiaojie-xue/dynibo/branch/main/graph/badge.svg)](https://codecov.io/gh/xiaojie-xue/dynibo)
 [![GitHub Release](https://img.shields.io/github/v/release/xiaojie-xue/dynibo)](https://github.com/xiaojie-xue/dynibo/releases/latest)
+[![Built with Rust](https://img.shields.io/badge/Built_with-Rust-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 English | [简体中文](README.zh.md)
 
-`dynibo` is a fast, lightweight, and reliable Rust library for 
+`dynibo` is a fast, lightweight, and reliable library for
 robot kinematics and dynamics. It loads robot topology from URDF at runtime and
 provides allocation-free calculations through reusable workspaces. Python and
 C/C++ interfaces are available on top of the same Rust core.
@@ -53,8 +55,8 @@ dynamics interfaces:
 - `forward_velocity_kinematics` — spatial velocity
 - `forward_acceleration_kinematics` — spatial acceleration
 - `inverse_kinematics` — damped least-squares IK
-- `mass_matrix` — joint-space mass matrix (composite rigid-body algorithm)
-- `coriolis_matrix` — Coriolis and centrifugal matrix (Christoffel factorization)
+- `mass_matrix` — joint-space mass matrix
+- `coriolis_matrix` — Coriolis and centrifugal matrix
 - `gravity` — gravity compensation with optional external loads
 - `inverse_dynamics` — recursive Newton–Euler inverse dynamics
 
@@ -164,7 +166,3 @@ If Dynibo is useful in your work, please cite it as:
   url     = {https://github.com/xiaojie-xue/dynibo}
 }
 ```
-
-## License
-
-Dynibo is available under the [MIT License](LICENSE).
