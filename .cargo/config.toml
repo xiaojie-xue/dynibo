@@ -1,0 +1,2 @@
+[alias]
+doc-katex = "rustdoc -p dynibo -- --html-in-header katex-header.html"

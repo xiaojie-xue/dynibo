@@ -32,8 +32,6 @@ jobs:
           python -m pip install "pip>=25.1"
           python -m pip install --group docs
       - name: Build Rust documentation with KaTeX
-        env:
-          RUSTDOCFLAGS: --html-in-header katex-header.html
-        run: cargo doc --no-deps
+        run: cargo doc-katex
       - name: Build Python documentation
         run: mkdocs build --strict
