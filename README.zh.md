@@ -148,7 +148,7 @@ Dynibo 目前仍处于早期阶段，欢迎大家一起参与构建和完善。�
   author  = {Xue, Xiaojie},
   title   = {Dynibo: a Fast, Lightweight, and Reliable Robot Kinematics and Dynamics Library},
   year    = {2026},
-  version = {0.1.0},
+  version = {0.2.0},
   url     = {https://github.com/xiaojie-xue/dynibo}
 }
 ```

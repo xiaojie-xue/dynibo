@@ -314,7 +314,7 @@ pub extern "C" fn dynibo_last_error_message() -> *const c_char {
 /// Returns the linked ABI version string.
 #[unsafe(no_mangle)]
 pub extern "C" fn dynibo_version() -> *const c_char {
-    c"0.1.0".as_ptr()
+    c"0.2.0".as_ptr()
 }
 
 /// Returns default inverse-kinematics options.
@@ -869,7 +869,7 @@ mod tests {
     fn metadata_and_construction_reject_invalid_arguments() {
         // SAFETY: null is explicitly supported by the metadata/destructor functions.
         unsafe {
-            assert_eq!(CStr::from_ptr(dynibo_version()), c"0.1.0");
+            assert_eq!(CStr::from_ptr(dynibo_version()), c"0.2.0");
             assert!(dynibo_robot_name(ptr::null()).is_null());
             assert_eq!(dynibo_robot_joint_count(ptr::null()), 0);
             assert_eq!(dynibo_robot_link_count(ptr::null()), 0);

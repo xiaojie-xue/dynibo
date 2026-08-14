@@ -1,6 +1,6 @@
 [package]
 name = "dynibo-c"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Stable C ABI for the dynibo robot kinematics and dynamics library"
 license = "MIT"
@@ -12,5 +12,5 @@ name = "dynibo_c"
 crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-dynibo = { path = "../..", version = "0.1.0" }
+dynibo = { path = "../..", version = "0.2.0" }
 nalgebra = "0.34.1"
