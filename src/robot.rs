@@ -511,8 +511,8 @@ impl Robot {
     /// $$
     /// C_{ij}(q, \dot q) = \frac{1}{2}\sum_k
     /// \left(\frac{\partial M_{ij}}{\partial q_k}
-    /// + \frac{\partial M_{ik}}{\partial q_j}
-    /// - \frac{\partial M_{jk}}{\partial q_i}\right) \dot q_k.
+    /// {}+ \frac{\partial M_{ik}}{\partial q_j}
+    /// {}- \frac{\partial M_{jk}}{\partial q_i}\right) \dot q_k.
     /// $$
     ///
     /// # Errors
