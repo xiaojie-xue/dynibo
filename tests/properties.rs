@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use approx::assert_relative_eq;
-use dynibo::{Frame, IndexedLoad, JointType, Robot, Twist, Workspace, Wrench};
+use dynibo::{Frame, IndexedLoad, JointType, Robot, Workspace, Wrench};
 use nalgebra::{DMatrix, Vector3};
 
 fn tree_arm() -> Robot {
@@ -35,17 +35,7 @@ fn rnea_mass_matrix(robot: &Robot, q: &[f64], workspace: &mut Workspace) -> Vec<
     let zero = vec![0.0; joint_count];
     let mut bias = vec![0.0; joint_count];
     robot
-        .inverse_dynamics(
-            q,
-            &zero,
-            &zero,
-            &Frame::identity(),
-            Twist::zeros(),
-            Twist::zeros(),
-            &[],
-            workspace,
-            &mut bias,
-        )
+        .inverse_dynamics(q, &zero, &zero, &[], workspace, &mut bias)
         .unwrap();
     let mut mass = vec![0.0; joint_count * joint_count];
     for column in 0..joint_count {
@@ -53,17 +43,7 @@ fn rnea_mass_matrix(robot: &Robot, q: &[f64], workspace: &mut Workspace) -> Vec<
         unit_acceleration[column] = 1.0;
         let mut torque = vec![0.0; joint_count];
         robot
-            .inverse_dynamics(
-                q,
-                &zero,
-                &unit_acceleration,
-                &Frame::identity(),
-                Twist::zeros(),
-                Twist::zeros(),
-                &[],
-                workspace,
-                &mut torque,
-            )
+            .inverse_dynamics(q, &zero, &unit_acceleration, &[], workspace, &mut torque)
             .unwrap();
         for row in 0..joint_count {
             mass[column * joint_count + row] = torque[row] - bias[row];
@@ -180,17 +160,7 @@ fn polarization_coriolis_matrix(
     let bias = |velocity: &[f64], workspace: &mut Workspace| {
         let mut output = vec![0.0; joint_count];
         robot
-            .inverse_dynamics(
-                q,
-                velocity,
-                &zero,
-                &Frame::identity(),
-                Twist::zeros(),
-                Twist::zeros(),
-                &[],
-                workspace,
-                &mut output,
-            )
+            .inverse_dynamics(q, velocity, &zero, &[], workspace, &mut output)
             .unwrap();
         output
     };
@@ -240,21 +210,11 @@ fn coriolis_matrix_matches_bias_identity_and_polarization() {
             let zero = vec![0.0; joint_count];
             let mut gravity = vec![0.0; joint_count];
             robot
-                .gravity(&q, &Frame::identity(), &[], &mut workspace, &mut gravity)
+                .gravity(&q, &[], &mut workspace, &mut gravity)
                 .unwrap();
             let mut bias = vec![0.0; joint_count];
             robot
-                .inverse_dynamics(
-                    &q,
-                    &qd,
-                    &zero,
-                    &Frame::identity(),
-                    Twist::zeros(),
-                    Twist::zeros(),
-                    &[],
-                    &mut workspace,
-                    &mut bias,
-                )
+                .inverse_dynamics(&q, &qd, &zero, &[], &mut workspace, &mut bias)
                 .unwrap();
             let reconstructed: Vec<f64> = (0..joint_count)
                 .map(|row| {
@@ -402,7 +362,7 @@ fn jacobian_derivative_matches_zero_acceleration_and_finite_difference() {
 
 #[test]
 fn deterministic_dynamics_preserve_gravity_and_load_invariants() {
-    let robot = tree_arm();
+    let mut robot = tree_arm();
     let left = robot.link_id("left_tool").unwrap();
     let right = robot.link_id("right_tool").unwrap();
     let left_load = IndexedLoad {
@@ -423,23 +383,14 @@ fn deterministic_dynamics_preserve_gravity_and_load_invariants() {
             -0.15 * (sample as f64 * 0.47).cos(),
             0.1 * (sample as f64 * 0.23).sin(),
         ));
+        robot.set_base_frame(base).unwrap();
         let mut gravity = [0.0; 7];
         let mut inverse = [0.0; 7];
         robot
-            .gravity(&q, &base, &[], &mut workspace, &mut gravity)
+            .gravity(&q, &[], &mut workspace, &mut gravity)
             .unwrap();
         robot
-            .inverse_dynamics(
-                &q,
-                &zero,
-                &zero,
-                &base,
-                Twist::zeros(),
-                Twist::zeros(),
-                &[],
-                &mut workspace,
-                &mut inverse,
-            )
+            .inverse_dynamics(&q, &zero, &zero, &[], &mut workspace, &mut inverse)
             .unwrap();
         assert_slice_close(&gravity, &inverse, 3.0e-12);
 
@@ -447,19 +398,13 @@ fn deterministic_dynamics_preserve_gravity_and_load_invariants() {
         let mut right_only = [0.0; 7];
         let mut both = [0.0; 7];
         robot
-            .gravity(&q, &base, &[left_load], &mut workspace, &mut left_only)
+            .gravity(&q, &[left_load], &mut workspace, &mut left_only)
             .unwrap();
         robot
-            .gravity(&q, &base, &[right_load], &mut workspace, &mut right_only)
+            .gravity(&q, &[right_load], &mut workspace, &mut right_only)
             .unwrap();
         robot
-            .gravity(
-                &q,
-                &base,
-                &[left_load, right_load],
-                &mut workspace,
-                &mut both,
-            )
+            .gravity(&q, &[left_load, right_load], &mut workspace, &mut both)
             .unwrap();
         let expected: [f64; 7] =
             std::array::from_fn(|joint| left_only[joint] + right_only[joint] - gravity[joint]);
@@ -482,17 +427,7 @@ fn mixed_joint_mass_matrix_is_symmetric_and_positive_on_moving_coordinates() {
         ];
         let mut bias = [0.0; 4];
         robot
-            .inverse_dynamics(
-                &q,
-                &zero,
-                &zero,
-                &Frame::identity(),
-                Twist::zeros(),
-                Twist::zeros(),
-                &[],
-                &mut workspace,
-                &mut bias,
-            )
+            .inverse_dynamics(&q, &zero, &zero, &[], &mut workspace, &mut bias)
             .unwrap();
 
         let mut mass = DMatrix::<f64>::zeros(4, 4);
@@ -505,9 +440,6 @@ fn mixed_joint_mass_matrix_is_symmetric_and_positive_on_moving_coordinates() {
                     &q,
                     &zero,
                     &unit_acceleration,
-                    &Frame::identity(),
-                    Twist::zeros(),
-                    Twist::zeros(),
                     &[],
                     &mut workspace,
                     &mut torque,

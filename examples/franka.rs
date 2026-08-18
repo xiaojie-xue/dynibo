@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use dynibo::{Frame, Robot};
+use dynibo::Robot;
 use nalgebra::{DMatrixView, DVectorView};
 
 fn main() -> dynibo::Result<()> {
@@ -17,13 +17,7 @@ fn main() -> dynibo::Result<()> {
 
     let flange_frame = robot.forward_kinematics(&q, flange, &mut workspace)?;
     robot.jacobian(&q, flange, &mut workspace, &mut jacobian)?;
-    robot.gravity(
-        &q,
-        &Frame::identity(),
-        &[],
-        &mut workspace,
-        &mut gravity_torque,
-    )?;
+    robot.gravity(&q, &[], &mut workspace, &mut gravity_torque)?;
 
     println!(
         "loaded {}: {} links, {} joints",

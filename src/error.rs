@@ -38,6 +38,17 @@ pub enum Error {
     InvalidLinkId,
     /// A workspace belongs to a different robot model or has the wrong size.
     InvalidWorkspace,
+    /// A base-state component is invalid.
+    InvalidBaseState {
+        /// Name of the rejected component.
+        field: &'static str,
+        /// Constraint violated by the component.
+        reason: &'static str,
+    },
+    /// Motion was assigned to a robot whose root link is fixed.
+    FixedBaseMotion,
+    /// Inverse kinematics is not defined for floating-base robots.
+    FloatingBaseIkUnsupported,
     /// One of the inverse-kinematics options is zero, negative, or non-finite.
     InvalidIkOptions {
         /// Name of the rejected option.
@@ -102,6 +113,9 @@ impl Error {
             | Self::UnknownLink { .. }
             | Self::InvalidLinkId
             | Self::InvalidWorkspace
+            | Self::InvalidBaseState { .. }
+            | Self::FixedBaseMotion
+            | Self::FloatingBaseIkUnsupported
             | Self::InvalidIkOptions { .. }
             | Self::NonFiniteIkInput { .. } => ErrorCategory::InvalidInput,
             Self::IkNumericalFailure { .. }
@@ -130,6 +144,13 @@ impl fmt::Display for Error {
             Self::InvalidLinkId => write!(f, "link identifier does not belong to this robot model"),
             Self::InvalidWorkspace => {
                 write!(f, "workspace does not belong to this robot model")
+            }
+            Self::InvalidBaseState { field, reason } => {
+                write!(f, "invalid base {field}: {reason}")
+            }
+            Self::FixedBaseMotion => write!(f, "cannot assign motion to a fixed base"),
+            Self::FloatingBaseIkUnsupported => {
+                write!(f, "inverse kinematics does not support a floating base")
             }
             Self::InvalidIkOptions { option, reason } => {
                 write!(f, "invalid inverse-kinematics option {option}: {reason}")
@@ -230,6 +251,21 @@ mod tests {
             (
                 Error::InvalidWorkspace,
                 "workspace does not belong to this robot model".to_owned(),
+            ),
+            (
+                Error::InvalidBaseState {
+                    field: "velocity",
+                    reason: "must be finite",
+                },
+                "invalid base velocity: must be finite".to_owned(),
+            ),
+            (
+                Error::FixedBaseMotion,
+                "cannot assign motion to a fixed base".to_owned(),
+            ),
+            (
+                Error::FloatingBaseIkUnsupported,
+                "inverse kinematics does not support a floating base".to_owned(),
             ),
             (
                 Error::InvalidIkOptions {

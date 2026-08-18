@@ -38,6 +38,7 @@ pub struct IndexedLoad {
 pub struct Workspace {
     pub(super) model_id: u64,
     pub(super) joint_count: usize,
+    pub(super) generalized_count: usize,
     pub(super) frames: Vec<Frame>,
     pub(super) angular_velocities: Vec<Vector3<f64>>,
     pub(super) angular_accelerations: Vec<Vector3<f64>>,
@@ -52,16 +53,20 @@ pub struct Workspace {
     pub(super) derivative_accelerations: Vec<Vector3<f64>>,
     pub(super) origin_velocities: Vec<Vector3<f64>>,
     pub(super) jacobian: Vec<f64>,
+    pub(super) jacobian_derivative: Vec<f64>,
+    pub(super) generalized_work: Vec<f64>,
+    pub(super) generalized_step: Vec<f64>,
     pub(super) q_work: Vec<f64>,
     pub(super) step: Vec<f64>,
     pub(super) ancestor_path: Vec<usize>,
 }
 
 impl Workspace {
-    pub(super) fn new(model_id: u64, joint_count: usize) -> Self {
+    pub(super) fn new(model_id: u64, joint_count: usize, generalized_count: usize) -> Self {
         Self {
             model_id,
             joint_count,
+            generalized_count,
             frames: vec![Frame::identity(); joint_count],
             angular_velocities: vec![Vector3::zeros(); joint_count],
             angular_accelerations: vec![Vector3::zeros(); joint_count],
@@ -76,6 +81,9 @@ impl Workspace {
             derivative_accelerations: vec![Vector3::zeros(); joint_count],
             origin_velocities: vec![Vector3::zeros(); joint_count],
             jacobian: vec![0.0; 6 * joint_count],
+            jacobian_derivative: vec![0.0; 6 * joint_count],
+            generalized_work: vec![0.0; generalized_count],
+            generalized_step: vec![0.0; generalized_count],
             q_work: vec![0.0; joint_count],
             step: vec![0.0; joint_count],
             ancestor_path: vec![0; joint_count],
@@ -85,5 +93,10 @@ impl Workspace {
     /// Returns the joint count for which this workspace was allocated.
     pub const fn joint_count(&self) -> usize {
         self.joint_count
+    }
+
+    /// Returns the generalized-vector size for which this workspace was allocated.
+    pub const fn generalized_count(&self) -> usize {
+        self.generalized_count
     }
 }

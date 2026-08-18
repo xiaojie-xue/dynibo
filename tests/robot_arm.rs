@@ -64,15 +64,11 @@ trait DynamicTestApi {
         base: &Frame,
         loads: &[Load<'_>],
     ) -> dynibo::Result<JointVector<N>>;
-    #[allow(clippy::too_many_arguments)]
     fn test_inverse_dynamics<const N: usize>(
         &self,
         q: &JointVector<N>,
         qd: &JointVector<N>,
         qdd: &JointVector<N>,
-        base: &Frame,
-        base_velocity: Twist,
-        base_acceleration: Twist,
         loads: &[Load<'_>],
     ) -> dynibo::Result<JointVector<N>>;
 }
@@ -131,12 +127,13 @@ impl DynamicTestApi for Robot {
         base: &Frame,
         tool: &Frame,
     ) -> dynibo::Result<Twist> {
-        let mut workspace = self.workspace();
-        self.forward_velocity_kinematics(
+        let mut robot = self.clone();
+        robot.set_base_frame(*base)?;
+        let mut workspace = robot.workspace();
+        robot.forward_velocity_kinematics(
             q.as_slice(),
             qd.as_slice(),
-            self.link_id(target.name())?,
-            base,
+            robot.link_id(target.name())?,
             tool,
             &mut workspace,
         )
@@ -174,15 +171,11 @@ impl DynamicTestApi for Robot {
                 })
             })
             .collect::<dynibo::Result<Vec<_>>>()?;
-        let mut workspace = self.workspace();
+        let mut robot = self.clone();
+        robot.set_base_frame(*base)?;
+        let mut workspace = robot.workspace();
         let mut output = JointVector::<N>::zeros();
-        self.gravity(
-            q.as_slice(),
-            base,
-            &loads,
-            &mut workspace,
-            output.as_mut_slice(),
-        )?;
+        robot.gravity(q.as_slice(), &loads, &mut workspace, output.as_mut_slice())?;
         Ok(output)
     }
 
@@ -191,9 +184,6 @@ impl DynamicTestApi for Robot {
         q: &JointVector<N>,
         qd: &JointVector<N>,
         qdd: &JointVector<N>,
-        base: &Frame,
-        base_velocity: Twist,
-        base_acceleration: Twist,
         loads: &[Load<'_>],
     ) -> dynibo::Result<JointVector<N>> {
         let loads = loads
@@ -211,9 +201,6 @@ impl DynamicTestApi for Robot {
             q.as_slice(),
             qd.as_slice(),
             qdd.as_slice(),
-            base,
-            base_velocity,
-            base_acceleration,
             &loads,
             &mut workspace,
             output.as_mut_slice(),
@@ -888,15 +875,7 @@ fn fixed_joint_has_constant_pose_and_no_motion_or_generalized_force() {
     );
 
     let torque = arm
-        .test_inverse_dynamics(
-            &arbitrary,
-            &arbitrary,
-            &arbitrary,
-            &Frame::identity(),
-            Twist::zeros(),
-            Twist::zeros(),
-            &[],
-        )
+        .test_inverse_dynamics(&arbitrary, &arbitrary, &arbitrary, &[])
         .unwrap();
     assert_relative_eq!(torque, zero, epsilon = 1.0e-12);
 }
@@ -983,16 +962,8 @@ fn single_revolute_pendulum_matches_closed_form_oracle() {
             epsilon = 2.0e-12
         );
         assert_relative_eq!(
-            arm.test_inverse_dynamics(
-                &position,
-                &velocity,
-                &acceleration,
-                &Frame::identity(),
-                Twist::zeros(),
-                Twist::zeros(),
-                &[],
-            )
-            .unwrap(),
+            arm.test_inverse_dynamics(&position, &velocity, &acceleration, &[],)
+                .unwrap(),
             JointVector::<1>::new(gravity_torque + joint_inertia * qdd),
             epsilon = 2.0e-12
         );
@@ -1092,16 +1063,7 @@ fn revolute_prismatic_arm_matches_closed_form_oracle() {
         qdd[1] - second_com_radius * qd[0].powi(2),
     );
     assert_relative_eq!(
-        arm.test_inverse_dynamics(
-            &q,
-            &qd,
-            &qdd,
-            &Frame::identity(),
-            Twist::zeros(),
-            Twist::zeros(),
-            &[],
-        )
-        .unwrap(),
+        arm.test_inverse_dynamics(&q, &qd, &qdd, &[],).unwrap(),
         expected_torque,
         epsilon = 2.0e-12
     );
@@ -1158,17 +1120,7 @@ fn inverse_dynamics_matches_test_arm_numeric_reference() {
         ),
     ];
     for (q, qd, qdd, expected, epsilon) in cases {
-        let tau = arm
-            .test_inverse_dynamics(
-                &q,
-                &qd,
-                &qdd,
-                &Frame::identity(),
-                Twist::zeros(),
-                Twist::zeros(),
-                &[],
-            )
-            .unwrap();
+        let tau = arm.test_inverse_dynamics(&q, &qd, &qdd, &[]).unwrap();
         assert_relative_eq!(tau, expected, epsilon = epsilon);
     }
 }
@@ -1179,15 +1131,7 @@ fn prismatic_inverse_dynamics_projects_linear_inertia_onto_its_axis() {
     let zero = JointVector::<2>::zeros();
     let gravity = arm.test_gravity(&zero, &Frame::identity(), &[]).unwrap();
     let accelerated = arm
-        .test_inverse_dynamics(
-            &zero,
-            &zero,
-            &JointVector::<2>::new(0.0, 1.0),
-            &Frame::identity(),
-            Twist::zeros(),
-            Twist::zeros(),
-            &[],
-        )
+        .test_inverse_dynamics(&zero, &zero, &JointVector::<2>::new(0.0, 1.0), &[])
         .unwrap();
 
     assert_relative_eq!(

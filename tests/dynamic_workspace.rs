@@ -123,8 +123,11 @@ fn all_dynamic_calculations_match_pinocchio_references() {
         epsilon = 2.0e-12
     );
 
-    let velocity = robot
-        .forward_velocity_kinematics(&q, &qd, target_id, &base, &tool, &mut workspace)
+    let mut velocity_robot = robot.clone();
+    velocity_robot.set_base_frame(base).unwrap();
+    let mut velocity_workspace = velocity_robot.workspace();
+    let velocity = velocity_robot
+        .forward_velocity_kinematics(&q, &qd, target_id, &tool, &mut velocity_workspace)
         .unwrap();
     let mut tool_jacobian = expected_jacobian;
     let offset_world = frame.rotation * tool.translation.vector;
@@ -166,7 +169,7 @@ fn all_dynamic_calculations_match_pinocchio_references() {
 
     let mut gravity = vec![f64::NAN; 4];
     robot
-        .gravity(&q, &Frame::identity(), &[], &mut workspace, &mut gravity)
+        .gravity(&q, &[], &mut workspace, &mut gravity)
         .unwrap();
     assert_relative_eq!(
         SVector::<f64, 4>::from_column_slice(&gravity),
@@ -181,17 +184,7 @@ fn all_dynamic_calculations_match_pinocchio_references() {
 
     let mut dynamics = vec![f64::NAN; 4];
     robot
-        .inverse_dynamics(
-            &q,
-            &qd,
-            &qdd,
-            &Frame::identity(),
-            Twist::zeros(),
-            Twist::zeros(),
-            &[],
-            &mut workspace,
-            &mut dynamics,
-        )
+        .inverse_dynamics(&q, &qd, &qdd, &[], &mut workspace, &mut dynamics)
         .unwrap();
     assert_relative_eq!(
         SVector::<f64, 4>::from_column_slice(&dynamics),
@@ -242,37 +235,19 @@ fn workspace_reuse_clears_jacobian_load_and_solver_state() {
     let mut middle = vec![0.0; 7];
     let mut third = vec![0.0; 7];
     robot
-        .gravity(
-            &q_a,
-            &Frame::identity(),
-            &[load],
-            &mut workspace,
-            &mut first,
-        )
+        .gravity(&q_a, &[load], &mut workspace, &mut first)
         .unwrap();
     robot
-        .gravity(&q_b, &Frame::identity(), &[], &mut workspace, &mut middle)
+        .gravity(&q_b, &[], &mut workspace, &mut middle)
         .unwrap();
     robot
-        .gravity(
-            &q_a,
-            &Frame::identity(),
-            &[load],
-            &mut workspace,
-            &mut third,
-        )
+        .gravity(&q_a, &[load], &mut workspace, &mut third)
         .unwrap();
     assert_slice_close(&first, &third);
     let mut expected_middle = vec![0.0; 7];
     let mut clean_workspace = robot.workspace();
     robot
-        .gravity(
-            &q_b,
-            &Frame::identity(),
-            &[],
-            &mut clean_workspace,
-            &mut expected_middle,
-        )
+        .gravity(&q_b, &[], &mut clean_workspace, &mut expected_middle)
         .unwrap();
     assert_slice_close(&middle, &expected_middle);
 
@@ -285,35 +260,19 @@ fn workspace_reuse_clears_jacobian_load_and_solver_state() {
             &q_a,
             &zero,
             &zero,
-            &Frame::identity(),
-            Twist::zeros(),
-            Twist::zeros(),
             &[load, load],
             &mut workspace,
             &mut first_rnea,
         )
         .unwrap();
     robot
-        .inverse_dynamics(
-            &q_b,
-            &zero,
-            &zero,
-            &Frame::identity(),
-            Twist::zeros(),
-            Twist::zeros(),
-            &[],
-            &mut workspace,
-            &mut middle_rnea,
-        )
+        .inverse_dynamics(&q_b, &zero, &zero, &[], &mut workspace, &mut middle_rnea)
         .unwrap();
     robot
         .inverse_dynamics(
             &q_a,
             &zero,
             &zero,
-            &Frame::identity(),
-            Twist::zeros(),
-            Twist::zeros(),
             &[load, load],
             &mut workspace,
             &mut third_rnea,
@@ -326,9 +285,6 @@ fn workspace_reuse_clears_jacobian_load_and_solver_state() {
             &q_b,
             &zero,
             &zero,
-            &Frame::identity(),
-            Twist::zeros(),
-            Twist::zeros(),
             &[],
             &mut clean_workspace,
             &mut expected_middle_rnea,
@@ -420,13 +376,7 @@ fn dynamic_api_rejects_wrong_models_and_lengths() {
     };
     let mut output = [0.0; 4];
     assert!(matches!(
-        robot_a.gravity(
-            &q,
-            &Frame::identity(),
-            &[invalid_load],
-            &mut workspace_a,
-            &mut output,
-        ),
+        robot_a.gravity(&q, &[invalid_load], &mut workspace_a, &mut output,),
         Err(Error::InvalidLinkId)
     ));
 
@@ -467,7 +417,6 @@ fn every_dynamic_api_validates_its_workspace_link_and_slices() {
         &q,
         target,
         &identity,
-        &identity,
         &mut foreign_workspace,
     ));
     assert_invalid_workspace(robot.forward_acceleration_kinematics(
@@ -477,20 +426,11 @@ fn every_dynamic_api_validates_its_workspace_link_and_slices() {
         target,
         &mut foreign_workspace,
     ));
-    assert_invalid_workspace(robot.gravity(
-        &q,
-        &identity,
-        &[],
-        &mut foreign_workspace,
-        &mut output,
-    ));
+    assert_invalid_workspace(robot.gravity(&q, &[], &mut foreign_workspace, &mut output));
     assert_invalid_workspace(robot.inverse_dynamics(
         &q,
         &q,
         &q,
-        &identity,
-        Twist::zeros(),
-        Twist::zeros(),
         &[],
         &mut foreign_workspace,
         &mut output,
@@ -535,18 +475,17 @@ fn every_dynamic_api_validates_its_workspace_link_and_slices() {
     ));
 
     assert_wrong_length(
-        robot.forward_velocity_kinematics(&short, &q, target, &identity, &identity, &mut workspace),
+        robot.forward_velocity_kinematics(&short, &q, target, &identity, &mut workspace),
         "q",
     );
     assert_wrong_length(
-        robot.forward_velocity_kinematics(&q, &short, target, &identity, &identity, &mut workspace),
+        robot.forward_velocity_kinematics(&q, &short, target, &identity, &mut workspace),
         "qd",
     );
     assert_invalid_link(robot.forward_velocity_kinematics(
         &q,
         &q,
         foreign_target,
-        &identity,
         &identity,
         &mut workspace,
     ));
@@ -571,69 +510,26 @@ fn every_dynamic_api_validates_its_workspace_link_and_slices() {
         &mut workspace,
     ));
 
+    assert_wrong_length(robot.gravity(&short, &[], &mut workspace, &mut output), "q");
     assert_wrong_length(
-        robot.gravity(&short, &identity, &[], &mut workspace, &mut output),
-        "q",
-    );
-    assert_wrong_length(
-        robot.gravity(&q, &identity, &[], &mut workspace, &mut short_output),
+        robot.gravity(&q, &[], &mut workspace, &mut short_output),
         "gravity output",
     );
 
     assert_wrong_length(
-        robot.inverse_dynamics(
-            &short,
-            &q,
-            &q,
-            &identity,
-            Twist::zeros(),
-            Twist::zeros(),
-            &[],
-            &mut workspace,
-            &mut output,
-        ),
+        robot.inverse_dynamics(&short, &q, &q, &[], &mut workspace, &mut output),
         "q",
     );
     assert_wrong_length(
-        robot.inverse_dynamics(
-            &q,
-            &short,
-            &q,
-            &identity,
-            Twist::zeros(),
-            Twist::zeros(),
-            &[],
-            &mut workspace,
-            &mut output,
-        ),
+        robot.inverse_dynamics(&q, &short, &q, &[], &mut workspace, &mut output),
         "qd",
     );
     assert_wrong_length(
-        robot.inverse_dynamics(
-            &q,
-            &q,
-            &short,
-            &identity,
-            Twist::zeros(),
-            Twist::zeros(),
-            &[],
-            &mut workspace,
-            &mut output,
-        ),
+        robot.inverse_dynamics(&q, &q, &short, &[], &mut workspace, &mut output),
         "qdd",
     );
     assert_wrong_length(
-        robot.inverse_dynamics(
-            &q,
-            &q,
-            &q,
-            &identity,
-            Twist::zeros(),
-            Twist::zeros(),
-            &[],
-            &mut workspace,
-            &mut short_output,
-        ),
+        robot.inverse_dynamics(&q, &q, &q, &[], &mut workspace, &mut short_output),
         "inverse dynamics output",
     );
     let invalid_load = IndexedLoad {
@@ -644,9 +540,6 @@ fn every_dynamic_api_validates_its_workspace_link_and_slices() {
         &q,
         &q,
         &q,
-        &identity,
-        Twist::zeros(),
-        Twist::zeros(),
         &[invalid_load],
         &mut workspace,
         &mut output,
@@ -764,14 +657,7 @@ fn dynamic_root_results_are_zero_or_identity() {
         .unwrap();
     assert_eq!(acceleration, Twist::zeros());
     let velocity = robot
-        .forward_velocity_kinematics(
-            &q,
-            &[0.2; 4],
-            root,
-            &Frame::identity(),
-            &Frame::identity(),
-            &mut workspace,
-        )
+        .forward_velocity_kinematics(&q, &[0.2; 4], root, &Frame::identity(), &mut workspace)
         .unwrap();
     assert_eq!(velocity, Twist::zeros());
 
@@ -782,16 +668,10 @@ fn dynamic_root_results_are_zero_or_identity() {
     let mut baseline = [0.0; 4];
     let mut loaded = [f64::NAN; 4];
     robot
-        .gravity(&q, &Frame::identity(), &[], &mut workspace, &mut baseline)
+        .gravity(&q, &[], &mut workspace, &mut baseline)
         .unwrap();
     robot
-        .gravity(
-            &q,
-            &Frame::identity(),
-            &[root_load],
-            &mut workspace,
-            &mut loaded,
-        )
+        .gravity(&q, &[root_load], &mut workspace, &mut loaded)
         .unwrap();
     assert_slice_close(&loaded, &baseline);
 }
