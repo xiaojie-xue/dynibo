@@ -13,8 +13,8 @@ use std::{
 };
 
 use dynibo::{
-    ErrorCategory, Frame, IndexedLoad, InverseKinematicsOptions, LinkId, Robot, Twist, Workspace,
-    Wrench,
+    BaseMode, ErrorCategory, Frame, IndexedLoad, InverseKinematicsOptions, LinkId, Robot, Twist,
+    Workspace, Wrench,
 };
 use nalgebra::{Quaternion, Translation3, UnitQuaternion, Vector3};
 
@@ -36,6 +36,26 @@ pub enum DyniboStatus {
     Panic = 3,
     /// An iterative numerical calculation failed to produce a valid result.
     SolverError = 4,
+}
+
+/// Root-link connection mode.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DyniboBaseMode {
+    /// The root link is fixed to the world.
+    #[default]
+    Fixed = 0,
+    /// The root link has six generalized velocity coordinates.
+    Floating = 1,
+}
+
+impl From<DyniboBaseMode> for BaseMode {
+    fn from(value: DyniboBaseMode) -> Self {
+        match value {
+            DyniboBaseMode::Fixed => Self::Fixed,
+            DyniboBaseMode::Floating => Self::Floating,
+        }
+    }
 }
 
 /// Translation plus an `(x, y, z, w)` unit quaternion.
@@ -357,6 +377,39 @@ pub unsafe extern "C" fn dynibo_robot_load_urdf(
     })
 }
 
+/// Loads a URDF with an explicit root-link mode and allocates a robot handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dynibo_robot_load_urdf_with_base(
+    path: *const c_char,
+    base_mode: DyniboBaseMode,
+    output: *mut *mut DyniboRobot,
+) -> DyniboStatus {
+    call(|| {
+        let output = unsafe { required_mut(output, "output") }?;
+        *output = ptr::null_mut();
+        if path.is_null() {
+            return Err(invalid("path must not be null"));
+        }
+        let path = unsafe { CStr::from_ptr(path) }
+            .to_str()
+            .map_err(|_| invalid("path must be valid UTF-8"))?;
+        let inner = Robot::from_urdf_with_base(path, base_mode.into()).map_err(core_error)?;
+        let link_ids = inner
+            .links()
+            .iter()
+            .map(|link| inner.link_id(link.name()).expect("link came from robot"))
+            .collect();
+        let name =
+            CString::new(inner.name()).map_err(|_| model_error("robot name contains NUL"))?;
+        *output = Box::into_raw(Box::new(DyniboRobot {
+            inner,
+            link_ids,
+            name,
+        }));
+        Ok(())
+    })
+}
+
 /// Destroys a robot handle. Passing null is allowed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_robot_destroy(robot: *mut DyniboRobot) {
@@ -378,6 +431,30 @@ pub unsafe extern "C" fn dynibo_robot_name(robot: *const DyniboRobot) -> *const 
 pub unsafe extern "C" fn dynibo_robot_joint_count(robot: *const DyniboRobot) -> usize {
     // SAFETY: Reading a valid opaque handle is part of the C contract.
     unsafe { robot.as_ref() }.map_or(0, |robot| robot.inner.joint_count())
+}
+
+/// Returns the generalized-vector size, or zero for a null handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dynibo_robot_generalized_count(robot: *const DyniboRobot) -> usize {
+    unsafe { robot.as_ref() }.map_or(0, |robot| robot.inner.generalized_count())
+}
+
+/// Replaces the complete floating-base state.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dynibo_robot_set_base_state(
+    robot: *mut DyniboRobot,
+    frame: *const DyniboPose,
+    velocity: DyniboTwist,
+    acceleration: DyniboTwist,
+) -> DyniboStatus {
+    call(|| {
+        let robot = unsafe { required_mut(robot, "robot") }?;
+        let frame = frame_from_pose(unsafe { required_ref(frame, "frame") }?)?;
+        robot
+            .inner
+            .set_floating_base_state(frame, twist_from_c(velocity), twist_from_c(acceleration))
+            .map_err(core_error)
+    })
 }
 
 /// Returns the number of links, or zero for a null handle.
@@ -685,10 +762,16 @@ pub unsafe extern "C" fn dynibo_forward_velocity(
             .get(target)
             .copied()
             .ok_or_else(|| invalid(format!("invalid link id {target}")))?;
-        let value = robot
-            .inner
-            .forward_velocity_kinematics(q, qd, link, &base, &tool, &mut workspace.inner)
-            .map_err(core_error)?;
+        let value = if robot.inner.base_mode() == BaseMode::Floating {
+            robot
+                .inner
+                .forward_velocity_kinematics(q, qd, link, &tool, &mut workspace.inner)
+        } else {
+            let mut calculation_robot = robot.inner.clone();
+            calculation_robot.set_base_frame(base).map_err(core_error)?;
+            calculation_robot.forward_velocity_kinematics(q, qd, link, &tool, &mut workspace.inner)
+        }
+        .map_err(core_error)?;
         *output = twist_to_c(value);
         Ok(())
     })
@@ -759,10 +842,18 @@ pub unsafe extern "C" fn dynibo_gravity(
         let loads = unsafe { load_slice(robot, loads, load_count) }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let output = unsafe { output_slice(output, output_len, "output") }?;
-        robot
-            .inner
-            .gravity(q, &base, &loads, &mut workspace.inner, output)
-            .map_err(core_error)
+        if robot.inner.base_mode() == BaseMode::Floating {
+            robot
+                .inner
+                .gravity(q, &loads, &mut workspace.inner, output)
+                .map_err(core_error)
+        } else {
+            let mut calculation_robot = robot.inner.clone();
+            calculation_robot.set_base_frame(base).map_err(core_error)?;
+            calculation_robot
+                .gravity(q, &loads, &mut workspace.inner, output)
+                .map_err(core_error)
+        }
     })
 }
 
@@ -777,8 +868,8 @@ pub unsafe extern "C" fn dynibo_inverse_dynamics(
     qdd: *const f64,
     state_len: usize,
     base: *const DyniboPose,
-    base_velocity: DyniboTwist,
-    base_acceleration: DyniboTwist,
+    _base_velocity: DyniboTwist,
+    _base_acceleration: DyniboTwist,
     loads: *const DyniboLoad,
     load_count: usize,
     output: *mut f64,
@@ -801,20 +892,18 @@ pub unsafe extern "C" fn dynibo_inverse_dynamics(
         let loads = unsafe { load_slice(robot, loads, load_count) }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let output = unsafe { output_slice(output, output_len, "output") }?;
-        robot
-            .inner
-            .inverse_dynamics(
-                q,
-                qd,
-                qdd,
-                &base,
-                twist_from_c(base_velocity),
-                twist_from_c(base_acceleration),
-                &loads,
-                &mut workspace.inner,
-                output,
-            )
-            .map_err(core_error)
+        if robot.inner.base_mode() == BaseMode::Floating {
+            robot
+                .inner
+                .inverse_dynamics(q, qd, qdd, &loads, &mut workspace.inner, output)
+                .map_err(core_error)
+        } else {
+            let mut calculation_robot = robot.inner.clone();
+            calculation_robot.set_base_frame(base).map_err(core_error)?;
+            calculation_robot
+                .inverse_dynamics(q, qd, qdd, &loads, &mut workspace.inner, output)
+                .map_err(core_error)
+        }
     })
 }
 

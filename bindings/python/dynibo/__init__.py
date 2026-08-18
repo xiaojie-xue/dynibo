@@ -1,6 +1,7 @@
 """Python interface to the dynibo robot kinematics and dynamics library."""
 
 from ._native import (
+    BaseMode,
     DyniboError,
     IkOptions,
     Load,
@@ -13,6 +14,7 @@ from ._native import (
 )
 
 __all__ = [
+    "BaseMode",
     "DyniboError",
     "IkOptions",
     "Load",

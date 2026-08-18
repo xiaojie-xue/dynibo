@@ -37,8 +37,11 @@ inline DyniboPose identity_pose() {
 
 class Robot {
 public:
-    explicit Robot(const std::string& urdf_path) {
-        check(dynibo_robot_load_urdf(urdf_path.c_str(), &robot_));
+    explicit Robot(
+        const std::string& urdf_path,
+        DyniboBaseMode base_mode = DYNIBO_BASE_FIXED) {
+        check(dynibo_robot_load_urdf_with_base(
+            urdf_path.c_str(), base_mode, &robot_));
         try {
             check(dynibo_workspace_create(robot_, &workspace_));
         } catch (...) {
@@ -76,6 +79,9 @@ public:
     }
 
     std::size_t joint_count() const { return dynibo_robot_joint_count(robot_); }
+    std::size_t generalized_count() const {
+        return dynibo_robot_generalized_count(robot_);
+    }
     std::size_t link_count() const { return dynibo_robot_link_count(robot_); }
 
     std::size_t link_id(const std::string& name) const {
@@ -94,7 +100,7 @@ public:
 
     std::vector<double> jacobian(
         const std::vector<double>& q, std::size_t target) {
-        std::vector<double> result(6 * joint_count());
+        std::vector<double> result(6 * generalized_count());
         check(dynibo_jacobian(robot_, workspace_, q.data(), q.size(), target,
                             result.data(), result.size()));
         return result;
@@ -107,7 +113,7 @@ public:
             throw Error(DYNIBO_STATUS_INVALID_ARGUMENT,
                         "q and qd must have the same length");
         }
-        std::vector<double> result(6 * joint_count());
+        std::vector<double> result(6 * generalized_count());
         check(dynibo_jacobian_derivative(
             robot_, workspace_, q.data(), qd.data(), q.size(), target,
             result.data(), result.size()));
@@ -115,7 +121,7 @@ public:
     }
 
     std::vector<double> mass_matrix(const std::vector<double>& q) {
-        const std::size_t n = joint_count();
+        const std::size_t n = generalized_count();
         std::vector<double> result(n * n);
         check(dynibo_mass_matrix(
             robot_, workspace_, q.data(), q.size(), result.data(), result.size()));
@@ -128,7 +134,7 @@ public:
             throw Error(DYNIBO_STATUS_INVALID_ARGUMENT,
                         "q and qd must have the same length");
         }
-        const std::size_t n = joint_count();
+        const std::size_t n = generalized_count();
         std::vector<double> result(n * n);
         check(dynibo_coriolis_matrix(
             robot_, workspace_, q.data(), qd.data(), q.size(),
@@ -161,6 +167,14 @@ public:
         return result;
     }
 
+    void set_base_state(
+        const DyniboPose& frame,
+        DyniboTwist velocity = {},
+        DyniboTwist acceleration = {}) {
+        check(dynibo_robot_set_base_state(
+            robot_, &frame, velocity, acceleration));
+    }
+
     DyniboTwist forward_acceleration(
         const std::vector<double>& q, const std::vector<double>& qd,
         const std::vector<double>& qdd, std::size_t target) {
@@ -179,7 +193,7 @@ public:
         const std::vector<double>& q,
         const DyniboPose& base = identity_pose(),
         const std::vector<DyniboLoad>& loads = {}) {
-        std::vector<double> result(joint_count());
+        std::vector<double> result(generalized_count());
         check(dynibo_gravity(robot_, workspace_, q.data(), q.size(), &base,
                            loads.data(), loads.size(), result.data(), result.size()));
         return result;
@@ -195,7 +209,7 @@ public:
             throw Error(DYNIBO_STATUS_INVALID_ARGUMENT,
                         "q, qd, and qdd must have the same length");
         }
-        std::vector<double> result(joint_count());
+        std::vector<double> result(generalized_count());
         check(dynibo_inverse_dynamics(
             robot_, workspace_, q.data(), qd.data(), qdd.data(), q.size(),
             &base, base_velocity, base_acceleration, loads.data(), loads.size(),

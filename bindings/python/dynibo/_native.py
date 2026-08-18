@@ -7,6 +7,7 @@ import ctypes.util
 import os
 import sys
 from dataclasses import dataclass
+from enum import IntEnum
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -61,6 +62,13 @@ class _IkOptions(ct.Structure):
         ("damping", ct.c_double),
         ("max_step_norm", ct.c_double),
     ]
+
+
+class BaseMode(IntEnum):
+    """Connection mode of the URDF root link."""
+
+    FIXED = 0
+    FLOATING = 1
 
 
 @dataclass(frozen=True)
@@ -152,11 +160,21 @@ _lib.dynibo_last_error_message.restype = ct.c_char_p
 _lib.dynibo_version.restype = ct.c_char_p
 _lib.dynibo_robot_load_urdf.argtypes = [ct.c_char_p, ct.POINTER(_robot_p)]
 _lib.dynibo_robot_load_urdf.restype = ct.c_int
+_lib.dynibo_robot_load_urdf_with_base.argtypes = [
+    ct.c_char_p, ct.c_int, ct.POINTER(_robot_p),
+]
+_lib.dynibo_robot_load_urdf_with_base.restype = ct.c_int
 _lib.dynibo_robot_destroy.argtypes = [_robot_p]
 _lib.dynibo_robot_name.argtypes = [_robot_p]
 _lib.dynibo_robot_name.restype = ct.c_char_p
 _lib.dynibo_robot_joint_count.argtypes = [_robot_p]
 _lib.dynibo_robot_joint_count.restype = ct.c_size_t
+_lib.dynibo_robot_generalized_count.argtypes = [_robot_p]
+_lib.dynibo_robot_generalized_count.restype = ct.c_size_t
+_lib.dynibo_robot_set_base_state.argtypes = [
+    _robot_p, ct.POINTER(_Pose), _Twist, _Twist,
+]
+_lib.dynibo_robot_set_base_state.restype = ct.c_int
 _lib.dynibo_robot_link_count.argtypes = [_robot_p]
 _lib.dynibo_robot_link_count.restype = ct.c_size_t
 _lib.dynibo_robot_link_id.argtypes = [_robot_p, ct.c_char_p, ct.POINTER(ct.c_size_t)]
@@ -295,10 +313,21 @@ class Robot:
         concurrent calculations.
     """
 
-    def __init__(self, urdf_path: str | os.PathLike[str]):
+    def __init__(
+        self,
+        urdf_path: str | os.PathLike[str],
+        base_mode: BaseMode | str = BaseMode.FIXED,
+    ):
         self._robot = _robot_p()
         self._workspace = _workspace_p()
-        _check(_lib.dynibo_robot_load_urdf(os.fsencode(urdf_path), ct.byref(self._robot)))
+        if isinstance(base_mode, str):
+            try:
+                base_mode = BaseMode[base_mode.upper()]
+            except KeyError as error:
+                raise ValueError("base_mode must be 'fixed' or 'floating'") from error
+        _check(_lib.dynibo_robot_load_urdf_with_base(
+            os.fsencode(urdf_path), int(base_mode), ct.byref(self._robot),
+        ))
         try:
             _check(_lib.dynibo_workspace_create(self._robot, ct.byref(self._workspace)))
         except Exception:
@@ -336,6 +365,26 @@ class Robot:
     def joint_count(self) -> int:
         """The number of joints in the model."""
         return int(_lib.dynibo_robot_joint_count(self._robot))
+
+    @property
+    def generalized_count(self) -> int:
+        """The generalized-vector size selected by the base mode."""
+        return int(_lib.dynibo_robot_generalized_count(self._robot))
+
+    def set_base_state(
+        self,
+        frame: Pose,
+        velocity: Twist = Twist(),
+        acceleration: Twist = Twist(),
+    ) -> None:
+        """Replace the pose and classical motion of a floating base."""
+        frame_c = _pose(frame)
+        _check(_lib.dynibo_robot_set_base_state(
+            self._robot,
+            ct.byref(frame_c),
+            _twist(velocity),
+            _twist(acceleration),
+        ))
 
     @property
     def link_count(self) -> int:
@@ -399,7 +448,7 @@ class Robot:
             target: Link identifier returned by `link_id()`.
 
         Returns:
-            A flat, column-major `6 x joint_count` tuple. Each column is
+            A flat, column-major `6 x generalized_count` tuple. Each column is
             angular-first: `(angular_x, angular_y, angular_z, linear_x,
             linear_y, linear_z)`.
 
@@ -408,7 +457,7 @@ class Robot:
             DyniboError: If the native calculation fails.
         """
         q_array = _array(q, "q")
-        output = (ct.c_double * (6 * self.joint_count))()
+        output = (ct.c_double * (6 * self.generalized_count))()
         _check(_lib.dynibo_jacobian(
             self._robot, self._workspace, q_array, len(q_array), target,
             output, len(output),
@@ -430,7 +479,7 @@ class Robot:
             target: Link identifier returned by `link_id()`.
 
         Returns:
-            A flat, column-major `6 x joint_count` tuple with the same
+            A flat, column-major `6 x generalized_count` tuple with the same
             angular-first column layout as `jacobian()`. The result satisfies
             `forward_acceleration(q, qd, 0) == J_dot @ qd`.
 
@@ -441,7 +490,7 @@ class Robot:
         q_array = _array(q, "q")
         qd_array = _array(qd, "qd")
         _require_same_length(q_array, qd=qd_array)
-        output = (ct.c_double * (6 * self.joint_count))()
+        output = (ct.c_double * (6 * self.generalized_count))()
         _check(_lib.dynibo_jacobian_derivative(
             self._robot, self._workspace, q_array, qd_array, len(q_array), target,
             output, len(output),
@@ -459,7 +508,7 @@ class Robot:
             q: Joint positions in model joint order.
 
         Returns:
-            A flat, column-major `joint_count x joint_count` tuple. The matrix
+            A flat, column-major `generalized_count x generalized_count` tuple. The matrix
             is symmetric positive semi-definite; rows and columns of fixed
             joints are zero.
 
@@ -468,7 +517,7 @@ class Robot:
             DyniboError: If the native calculation fails.
         """
         q_array = _array(q, "q")
-        output = (ct.c_double * (self.joint_count * self.joint_count))()
+        output = (ct.c_double * (self.generalized_count * self.generalized_count))()
         _check(_lib.dynibo_mass_matrix(
             self._robot, self._workspace, q_array, len(q_array), output, len(output),
         ))
@@ -489,7 +538,7 @@ class Robot:
             qd: Joint velocities in model joint order.
 
         Returns:
-            A flat, column-major `joint_count x joint_count` tuple using the
+            A flat, column-major `generalized_count x generalized_count` tuple using the
             Christoffel factorization: `C(q, qd) @ qd + gravity(q)` equals the
             zero-acceleration inverse dynamics, and `dM/dt - 2C` is
             skew-symmetric. Rows and columns of fixed joints are zero.
@@ -501,7 +550,7 @@ class Robot:
         q_array = _array(q, "q")
         qd_array = _array(qd, "qd")
         _require_same_length(q_array, qd=qd_array)
-        output = (ct.c_double * (self.joint_count * self.joint_count))()
+        output = (ct.c_double * (self.generalized_count * self.generalized_count))()
         _check(_lib.dynibo_coriolis_matrix(
             self._robot, self._workspace, q_array, qd_array, len(q_array),
             output, len(output),
@@ -638,14 +687,14 @@ class Robot:
             loads: Optional external link-local wrenches.
 
         Returns:
-            Joint forces or torques in model joint order.
+            Generalized forces in base-then-joint order.
 
         Raises:
             ValueError: If an input, pose, or load is invalid.
             DyniboError: If the native calculation fails.
         """
         q_array, base_c, loads_c = _array(q, "q"), _pose(base), _loads(loads)
-        output = (ct.c_double * self.joint_count)()
+        output = (ct.c_double * self.generalized_count)()
         _check(_lib.dynibo_gravity(
             self._robot, self._workspace, q_array, len(q_array), ct.byref(base_c),
             loads_c, len(loads_c), output, len(output),
@@ -679,7 +728,7 @@ class Robot:
             loads: Optional external link-local wrenches.
 
         Returns:
-            Joint forces or torques in model joint order.
+            Generalized forces in base-then-joint order.
 
         Raises:
             ValueError: If an input, pose, or load is invalid.
@@ -690,7 +739,7 @@ class Robot:
         qdd_array = _array(qdd, "qdd")
         _require_same_length(q_array, qd=qd_array, qdd=qdd_array)
         base_c, loads_c = _pose(base), _loads(loads)
-        output = (ct.c_double * self.joint_count)()
+        output = (ct.c_double * self.generalized_count)()
         _check(_lib.dynibo_inverse_dynamics(
             self._robot, self._workspace, q_array, qd_array, qdd_array, len(q_array),
             ct.byref(base_c), _twist(base_velocity), _twist(base_acceleration),

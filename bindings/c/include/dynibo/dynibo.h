@@ -32,6 +32,11 @@ typedef enum DyniboStatus {
     DYNIBO_STATUS_SOLVER_ERROR = 4
 } DyniboStatus;
 
+typedef enum DyniboBaseMode {
+    DYNIBO_BASE_FIXED = 0,
+    DYNIBO_BASE_FLOATING = 1
+} DyniboBaseMode;
+
 /* Compatibility alias retained for clients of dynibo 0.1.0. */
 #define DYNIBO_STATUS_ERROR DYNIBO_STATUS_MODEL_ERROR
 
@@ -65,10 +70,16 @@ DYNIBO_API const char *dynibo_last_error_message(void);
 DYNIBO_API DyniboIkOptions dynibo_ik_options_default(void);
 
 DYNIBO_API DyniboStatus dynibo_robot_load_urdf(const char *path, DyniboRobot **output);
+DYNIBO_API DyniboStatus dynibo_robot_load_urdf_with_base(
+    const char *path, DyniboBaseMode base_mode, DyniboRobot **output);
 DYNIBO_API void dynibo_robot_destroy(DyniboRobot *robot);
 DYNIBO_API const char *dynibo_robot_name(const DyniboRobot *robot);
 DYNIBO_API size_t dynibo_robot_joint_count(const DyniboRobot *robot);
+DYNIBO_API size_t dynibo_robot_generalized_count(const DyniboRobot *robot);
 DYNIBO_API size_t dynibo_robot_link_count(const DyniboRobot *robot);
+DYNIBO_API DyniboStatus dynibo_robot_set_base_state(
+    DyniboRobot *robot, const DyniboPose *frame,
+    DyniboTwist velocity, DyniboTwist acceleration);
 DYNIBO_API DyniboStatus dynibo_robot_link_id(
     const DyniboRobot *robot, const char *name, size_t *output);
 

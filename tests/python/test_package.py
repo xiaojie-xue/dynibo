@@ -88,6 +88,25 @@ class PackageTests(unittest.TestCase):
             contracted = sum(derivative[column * 6 + row] * qd[column] for column in range(n))
             self.assertAlmostEqual(contracted, expected[row], delta=1.0e-10)
 
+    def test_floating_base_shapes_state_and_ik_contract(self) -> None:
+        with dynibo.Robot(URDF, base_mode=dynibo.BaseMode.FLOATING) as robot:
+            target = robot.link_id("test_link_4")
+            q = [0.0] * robot.joint_count
+            robot.set_base_state(
+                dynibo.Pose(translation=(0.2, -0.3, 0.4)),
+                dynibo.Twist(angular=(0.1, -0.2, 0.3), linear=(0.4, 0.2, -0.1)),
+                dynibo.Twist(angular=(-0.1, 0.05, 0.2), linear=(0.3, -0.2, 0.1)),
+            )
+            self.assertEqual(robot.generalized_count, robot.joint_count + 6)
+            self.assertEqual(len(robot.jacobian(q, target)), 6 * robot.generalized_count)
+            self.assertEqual(len(robot.mass_matrix(q)), robot.generalized_count**2)
+            self.assertEqual(len(robot.gravity(q)), robot.generalized_count)
+            self.assertEqual(
+                len(robot.inverse_dynamics(q, q, q)), robot.generalized_count
+            )
+            with self.assertRaisesRegex(ValueError, "does not support a floating base"):
+                robot.inverse_kinematics(q, target, robot.forward_kinematics(q, target))
+
     def test_errors_cross_the_package_boundary(self) -> None:
         with self.assertRaisesRegex(ValueError, "does not exist"):
             self.robot.link_id("missing")
