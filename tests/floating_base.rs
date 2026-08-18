@@ -58,6 +58,14 @@ fn base_mode_state_dimensions_and_ik_contract_are_explicit() {
             .set_base_velocity(Twist::new(Vector3::x(), Vector3::zeros())),
         Err(Error::FixedBaseMotion)
     ));
+    assert!(matches!(
+        fixed.set_floating_base_state(base_frame(), Twist::zeros(), Twist::zeros()),
+        Err(Error::FixedBaseMotion)
+    ));
+    assert!(matches!(
+        fixed.set_base_frame(Frame::translation(f64::NAN, 0.0, 0.0)),
+        Err(Error::InvalidBaseState { field: "frame", .. })
+    ));
     fixed.set_base_frame(base_frame()).unwrap();
     let fixed_target = fixed.link_id("tool").unwrap();
     let mut fixed_workspace = fixed.workspace();
@@ -94,6 +102,16 @@ fn base_mode_state_dimensions_and_ik_contract_are_explicit() {
         )),
         Err(Error::InvalidBaseState {
             field: "velocity",
+            ..
+        })
+    ));
+    assert!(matches!(
+        floating.set_base_acceleration(Twist::new(
+            Vector3::zeros(),
+            Vector3::new(0.0, f64::INFINITY, 0.0),
+        )),
+        Err(Error::InvalidBaseState {
+            field: "acceleration",
             ..
         })
     ));
