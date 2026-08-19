@@ -1,10 +1,26 @@
-# dynibo
+<!-- markdownlint-disable MD033 MD041 -->
 
-[![Package CI](https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml/badge.svg?branch=main)](https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml)
-[![codecov](https://codecov.io/gh/xiaojie-xue/dynibo/branch/main/graph/badge.svg)](https://codecov.io/gh/xiaojie-xue/dynibo)
-[![GitHub Release](https://img.shields.io/github/v/release/xiaojie-xue/dynibo)](https://github.com/xiaojie-xue/dynibo/releases/latest)
-[![Built with Rust](https://img.shields.io/badge/Built_with-Rust-CE422B?logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+<div align="center">
+
+<h1>dynibo</h1>
+
+<p><strong>Fast &middot; Lightweight &middot; Reliable</strong></p>
+
+<p>
+  <a href="https://docs.rs/dynibo">Rust API</a>
+  &nbsp;&middot;&nbsp;
+  <a href="https://dynibo.readthedocs.io/">Python API</a>
+</p>
+
+<p>
+  <a href="https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml"><img alt="CI" src="https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml/badge.svg?branch=main"></a>
+  <a href="https://codecov.io/gh/xiaojie-xue/dynibo"><img alt="codecov" src="https://codecov.io/gh/xiaojie-xue/dynibo/branch/main/graph/badge.svg"></a>
+  <a href="https://crates.io/crates/dynibo"><img alt="crates.io" src="https://img.shields.io/crates/v/dynibo.svg?color=CE422B&amp;logo=rust&amp;logoColor=white"></a>
+  <a href="https://pypi.org/project/dynibo/"><img alt="PyPI" src="https://img.shields.io/pypi/v/dynibo.svg?color=3776AB&amp;logo=python&amp;logoColor=white"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+</p>
+
+</div>
 
 [English](README.md) | 简体中文
 
@@ -16,23 +32,23 @@
 
 ### 快速
 
-Dynibo 基于 Rust 实现，并将内存分配移出计算循环。创建 `Workspace` 和输出 buffer 后，
-主要运动学与动力学接口会复用已有内存，不再分配或调整容量。
+在下列 benchmark 所测量的核心操作中，Dynibo 的运行速度是 Pinocchio 的
+1.19–2.51 倍。Dynibo 基于 Rust 实现，并将内存分配移出计算循环。创建 `Workspace`
+和输出 buffer 后，主要运动学与动力学接口会复用已有内存，不再分配或调整容量。
 
-以下 Criterion 数据使用相同的 URDF 模型和关节状态对比 Dynibo 与 Pinocchio。Robot、
-Workspace、Pinocchio `Data` 和输出 buffer 的创建均不计入耗时。加速比根据 quick 模式
-报告区间的中值计算，并从 Pinocchio 耗时中扣除了实测的 0.882 ns 固定 C ABI 开销。
-
-在这些 benchmark 中，Dynibo 相比 Pinocchio 快 1.17–2.70 倍，数值越高表示性能越好。
+下表展示 Dynibo 相对 Pinocchio 在核心运动学与动力学接口上的加速比。
 
 | 模型 | FK | Jacobian | Gravity | RNEA |
 |---|---:|---:|---:|---:|
-| 串联模型（4 关节） | 1.17× | 1.58× | 1.59× | 1.66× |
-| 串联模型（40 关节） | 1.24× | 1.72× | 1.63× | 1.91× |
-| 双末端树状模型（7 关节） | 2.08× | 2.70× | 1.89× | 1.91× |
+| 双末端树状模型（7 关节，固定基座） | 1.90× | 2.05× | 1.89× | 1.94× |
+| 双末端树状模型（7 关节，浮动基座） | 2.16× | 2.51× | 2.15× | 2.20× |
+| 串联模型（40 关节，固定基座） | 1.19× | 1.49× | 1.78× | 1.99× |
+| 串联模型（40 关节，浮动基座） | 1.21× | 1.56× | 1.79× | 2.09× |
 
-测试环境为 Intel Core i9-14900K、rustc 1.97.1 和 Pinocchio 3.9.0。确保 `pkg-config` 能找到 Pinocchio 后，
-可通过以下命令复现：
+这些 Criterion quick 模式数据使用相同的 URDF 模型和关节状态，测试环境为 Intel Core
+i9-14900K、rustc 1.97.1 和 Pinocchio 3.9.0。初始化和内存分配不计入耗时；加速比根据
+报告区间的中值计算，并从 Pinocchio 耗时中扣除实测的 0.703 ns 固定 C ABI 开销。
+确保 `pkg-config` 能找到 Pinocchio 后，可通过以下命令重新运行原始 benchmark：
 
 ```bash
 cargo bench --features pinocchio-bench --bench pinocchio -- --quick
@@ -62,9 +78,6 @@ Dynibo 经过了深入的单元测试。测试覆盖有限差分运动学、动�
 载荷、逆运动学、非法输入、Workspace 归属与复用，以及计算期零分配。独立的 Pinocchio
 oracle 还会在确定性机器人状态下完整对比 FK、Jacobian、Jacobian 时间导数、质量矩阵、速度乘积力、gravity 和 RNEA 输出。
 
-Rust 核心不包含项目自身的 `unsafe` 代码。CI 要求 Rust workspace 的行覆盖率不低于
-85%，分支覆盖率不低于 75%。
-
 ## 依赖
 
 Rust 核心只有两个直接运行时依赖：
@@ -84,6 +97,23 @@ Python wheel 已包含原生库，无需额外的 Python 运行时依赖。
 cargo add dynibo
 ```
 
+加载 URDF、创建可复用的 workspace，并计算目标 link 位姿：
+
+```rust
+use dynibo::Robot;
+
+fn main() -> dynibo::Result<()> {
+    let robot = Robot::from_urdf("robot.urdf")?;
+    let tool = robot.link_id("tool")?;
+    let mut workspace = robot.workspace();
+    let q = vec![0.0; robot.joint_count()];
+
+    let pose = robot.forward_kinematics(&q, tool, &mut workspace)?;
+    println!("translation: {}", pose.translation.vector.transpose());
+    Ok(())
+}
+```
+
 ### Python
 
 从 PyPI 安装 Python package：
@@ -92,11 +122,21 @@ cargo add dynibo
 python -m pip install dynibo
 ```
 
-安装后通过 `dynibo` 导入。
+Python binding 会在内部持有并复用原生 workspace：
+
+```python
+from dynibo import Robot
+
+with Robot("robot.urdf") as robot:
+    tool = robot.link_id("tool")
+    q = [0.0] * robot.joint_count
+    pose = robot.forward_kinematics(q, tool)
+    print(pose.translation)
+```
 
 ### C/C++
 
-构建并安装 CMake package：
+从源码构建并安装 CMake package。构建需要 Rust、Cargo 和 CMake 3.16 或更高版本：
 
 ```bash
 cmake -S . -B build/c -DCMAKE_BUILD_TYPE=Release
@@ -104,12 +144,15 @@ cmake --build build/c --parallel
 cmake --install build/c --prefix /opt/dynibo
 ```
 
-CMake 项目可使用安装后的 `dynibo::dynibo` target。
+在另一个 CMake 项目中使用安装后的 package：
 
-## 文档
+```cmake
+find_package(dynibo CONFIG REQUIRED)
+target_link_libraries(my_robot PRIVATE dynibo::dynibo)
+```
 
-- [Rust API 文档](https://docs.rs/dynibo)
-- [Python API 文档](https://dynibo.readthedocs.io/)
+如果 dynibo 安装在自定义目录中，请通过 `-DCMAKE_PREFIX_PATH=/opt/dynibo`
+（或实际选择的安装目录）配置消费端项目。
 
 ## 示例
 
@@ -124,11 +167,12 @@ Dynibo 支持运行时尺寸的树状 URDF，以及 revolute、continuous、pris
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo test --workspace --all-targets
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --all-targets --locked
 ```
 
-运行完整的 Rust、Pinocchio、Python、C 和 C++ 验证套件：
+通过以下命令运行完整的本地 Rust、Python、C 和 C++ 验证套件。当 `pkg-config`
+能够找到 Pinocchio 时，该命令也会运行 Pinocchio 参考测试。
 
 ```bash
 bash ci/test-all.sh
@@ -136,8 +180,8 @@ bash ci/test-all.sh
 
 ## 贡献
 
-Dynibo 目前仍处于早期阶段，欢迎大家一起参与构建和完善。你可以通过 issue 反馈问题
-或提出建议，也可以提交 pull request；如果你对项目的发展有任何想法，欢迎随时联系我。
+Dynibo 目前仍处于早期阶段，欢迎参与构建和完善。开发环境、必要检查和 pull request
+要求请参阅 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
 ## 引用
 

@@ -5,17 +5,22 @@ use std::{
     ptr::NonNull,
 };
 
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use dynibo::{LinkId, Robot};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use dynibo::{BaseMode, LinkId, Robot};
 
 unsafe extern "C" {
-    fn dynibo_pinocchio_create(urdf_path: *const std::ffi::c_char) -> *mut std::ffi::c_void;
-    fn dynibo_pinocchio_create_for_joint(
+    fn dynibo_pinocchio_create_for_frame(
         urdf_path: *const std::ffi::c_char,
-        end_joint_name: *const std::ffi::c_char,
+        frame_name: *const std::ffi::c_char,
+    ) -> *mut std::ffi::c_void;
+    fn dynibo_pinocchio_create_floating_for_frame(
+        urdf_path: *const std::ffi::c_char,
+        frame_name: *const std::ffi::c_char,
     ) -> *mut std::ffi::c_void;
     fn dynibo_pinocchio_destroy(context: *mut std::ffi::c_void);
     fn dynibo_pinocchio_dof(context: *const std::ffi::c_void) -> usize;
+    fn dynibo_pinocchio_configuration_size(context: *const std::ffi::c_void) -> usize;
+    fn dynibo_pinocchio_neutral_configuration(context: *const std::ffi::c_void, q: *mut f64);
     fn dynibo_pinocchio_noop(context: *const std::ffi::c_void, q: *const f64) -> f64;
     fn dynibo_pinocchio_forward_kinematics(context: *mut std::ffi::c_void, q: *const f64) -> f64;
     fn dynibo_pinocchio_jacobian(context: *mut std::ffi::c_void, q: *const f64) -> f64;
@@ -42,169 +47,168 @@ unsafe extern "C" {
 struct PinocchioContext(NonNull<std::ffi::c_void>);
 
 impl PinocchioContext {
-    fn new(urdf_path: &std::path::Path) -> Self {
+    fn new_for_frame(urdf_path: &Path, frame_name: &str, base_mode: BaseMode) -> Self {
         let path = CString::new(urdf_path.to_string_lossy().as_bytes())
             .expect("URDF path must not contain a NUL byte");
-        // SAFETY: `path` is a valid, NUL-terminated string for the duration of the call.
-        let context = unsafe { dynibo_pinocchio_create(path.as_ptr()) };
-        Self(NonNull::new(context).expect("Pinocchio failed to load the benchmark URDF"))
-    }
-
-    fn new_for_joint(urdf_path: &std::path::Path, end_joint_name: &str) -> Self {
-        let path = CString::new(urdf_path.to_string_lossy().as_bytes())
-            .expect("URDF path must not contain a NUL byte");
-        let joint_name =
-            CString::new(end_joint_name).expect("joint name must not contain a NUL byte");
+        let frame_name = CString::new(frame_name).expect("frame name must not contain a NUL byte");
         // SAFETY: both arguments are valid, NUL-terminated strings for the duration of the call.
-        let context =
-            unsafe { dynibo_pinocchio_create_for_joint(path.as_ptr(), joint_name.as_ptr()) };
-        Self(NonNull::new(context).expect("Pinocchio failed to load the requested end joint"))
+        let context = unsafe {
+            match base_mode {
+                BaseMode::Fixed => {
+                    dynibo_pinocchio_create_for_frame(path.as_ptr(), frame_name.as_ptr())
+                }
+                BaseMode::Floating => {
+                    dynibo_pinocchio_create_floating_for_frame(path.as_ptr(), frame_name.as_ptr())
+                }
+            }
+        };
+        Self(NonNull::new(context).expect("Pinocchio failed to load the benchmark URDF"))
     }
 
     fn dof(&self) -> usize {
         // SAFETY: the context is owned by `self` and remains valid until `drop`.
         unsafe { dynibo_pinocchio_dof(self.0.as_ptr()) }
     }
-}
 
-struct TreeBenchmarkCase<const N: usize> {
-    arm: Robot,
-    pinocchio: PinocchioContext,
-    target: LinkId,
-    q: [f64; N],
-    qd: [f64; N],
-    qdd: [f64; N],
-}
+    fn configuration_size(&self) -> usize {
+        // SAFETY: the context is owned by `self` and remains valid until `drop`.
+        unsafe { dynibo_pinocchio_configuration_size(self.0.as_ptr()) }
+    }
 
-impl<const N: usize> TreeBenchmarkCase<N> {
-    fn new(relative_urdf_path: impl AsRef<Path>, target_link: &str, target_joint: &str) -> Self {
-        let urdf_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_urdf_path.as_ref());
-        let arm = Robot::from_urdf(&urdf_path).expect("Dynibo must load the tree benchmark URDF");
-        let target = arm
-            .link_id(target_link)
-            .expect("target link must exist in the tree benchmark URDF");
-        let pinocchio = PinocchioContext::new_for_joint(&urdf_path, target_joint);
-        assert_eq!(pinocchio.dof(), N);
-        assert_eq!(arm.joint_count(), N);
-
-        Self {
-            arm,
-            pinocchio,
-            target,
-            q: [0.2; N],
-            qd: [-0.1; N],
-            qdd: [0.15; N],
-        }
+    fn neutral_configuration(&self) -> Vec<f64> {
+        let mut configuration = vec![0.0; self.configuration_size()];
+        // SAFETY: the output vector matches the configuration size reported by the context.
+        unsafe {
+            dynibo_pinocchio_neutral_configuration(self.0.as_ptr(), configuration.as_mut_ptr())
+        };
+        configuration
     }
 }
 
 impl Drop for PinocchioContext {
     fn drop(&mut self) {
-        // SAFETY: this pointer was returned by `dynibo_pinocchio_create` and is destroyed once.
+        // SAFETY: this pointer was returned by the bridge and is destroyed exactly once.
         unsafe { dynibo_pinocchio_destroy(self.0.as_ptr()) };
     }
 }
 
 struct BenchmarkCase<const N: usize> {
-    arm: Robot,
+    robot: Robot,
     pinocchio: PinocchioContext,
     target: LinkId,
     q: [f64; N],
     qd: [f64; N],
     qdd: [f64; N],
+    pinocchio_q: Vec<f64>,
+    pinocchio_qd: Vec<f64>,
+    pinocchio_qdd: Vec<f64>,
 }
 
 impl<const N: usize> BenchmarkCase<N> {
-    fn new(relative_urdf_path: impl AsRef<Path>) -> Self {
+    fn new(relative_urdf_path: impl AsRef<Path>, target_link: &str, base_mode: BaseMode) -> Self {
         let urdf_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_urdf_path.as_ref());
-        let arm = Robot::from_urdf(&urdf_path).expect("dynibo must load the benchmark URDF");
-        let pinocchio = PinocchioContext::new(&urdf_path);
-        assert_eq!(
-            pinocchio.dof(),
-            N,
-            "Pinocchio and Dynibo must load the same number of DoF"
-        );
-        let leaf = arm
-            .leaf_links()
-            .next()
-            .expect("benchmark robot must have a leaf link");
-        let target = arm
-            .link_id(leaf.name())
-            .expect("leaf link must belong to the benchmark robot");
+        let robot = Robot::from_urdf_with_base(&urdf_path, base_mode)
+            .expect("Dynibo must load the benchmark URDF");
+        let target = robot
+            .link_id(target_link)
+            .expect("target link must exist in the benchmark URDF");
+        let pinocchio = PinocchioContext::new_for_frame(&urdf_path, target_link, base_mode);
+
+        assert_eq!(robot.joint_count(), N);
+        assert_eq!(pinocchio.dof(), robot.generalized_count());
+
+        let q = std::array::from_fn(|row| (0.37 * (row + 1) as f64).sin() * 0.5);
+        let qd = std::array::from_fn(|row| (0.23 * (row + 1) as f64).cos() * 0.4);
+        let qdd = std::array::from_fn(|row| (0.41 * (row + 1) as f64).sin() * 0.3);
+
+        let mut pinocchio_q = pinocchio.neutral_configuration();
+        let configuration_offset = pinocchio_q.len() - N;
+        pinocchio_q[configuration_offset..].copy_from_slice(&q);
+        let velocity_offset = robot.generalized_count() - N;
+        let mut pinocchio_qd = vec![0.0; robot.generalized_count()];
+        pinocchio_qd[velocity_offset..].copy_from_slice(&qd);
+        let mut pinocchio_qdd = vec![0.0; robot.generalized_count()];
+        pinocchio_qdd[velocity_offset..].copy_from_slice(&qdd);
 
         Self {
-            arm,
+            robot,
             pinocchio,
             target,
-            q: std::array::from_fn(|row| (0.37 * (row + 1) as f64).sin() * 0.5),
-            qd: std::array::from_fn(|row| (0.23 * (row + 1) as f64).cos() * 0.4),
-            qdd: std::array::from_fn(|row| (0.41 * (row + 1) as f64).sin() * 0.3),
+            q,
+            qd,
+            qdd,
+            pinocchio_q,
+            pinocchio_qd,
+            pinocchio_qdd,
         }
     }
 }
 
-fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
-    let size = format!("{N}dof");
+fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &BenchmarkCase<N>) {
+    let generalized_count = case.robot.generalized_count();
 
-    let mut fk = c.benchmark_group(format!("forward_kinematics/{size}"));
+    let mut fk = c.benchmark_group(format!("forward_kinematics/{model}"));
     fk.throughput(Throughput::Elements(1));
-    let mut workspace = case.arm.workspace();
-    fk.bench_with_input(BenchmarkId::from_parameter("dynibo"), &case.q, |b, q| {
+    let mut workspace = case.robot.workspace();
+    fk.bench_function("dynibo", |b| {
         b.iter(|| {
             black_box(
-                case.arm
-                    .forward_kinematics(black_box(q), case.target, &mut workspace)
+                case.robot
+                    .forward_kinematics(black_box(&case.q), case.target, &mut workspace)
                     .unwrap(),
             )
         });
     });
-    fk.bench_with_input(BenchmarkId::from_parameter("pinocchio"), &case.q, |b, q| {
+    fk.bench_function("pinocchio", |b| {
         b.iter(|| {
-            // SAFETY: context and input vector remain valid for the duration of every call.
+            // SAFETY: the context and configuration remain valid for every call.
             black_box(unsafe {
                 dynibo_pinocchio_forward_kinematics(
                     case.pinocchio.0.as_ptr(),
-                    black_box(q).as_ptr(),
+                    black_box(case.pinocchio_q.as_ptr()),
                 )
             })
         });
     });
     fk.finish();
 
-    let mut jacobian = c.benchmark_group(format!("end_jacobian/{size}"));
+    let mut jacobian = c.benchmark_group(format!("end_jacobian/{model}"));
     jacobian.throughput(Throughput::Elements(1));
-    let mut workspace = case.arm.workspace();
-    let mut output = vec![0.0; 6 * N];
-    jacobian.bench_with_input(BenchmarkId::from_parameter("dynibo"), &case.q, |b, q| {
+    let mut workspace = case.robot.workspace();
+    let mut output = vec![0.0; 6 * generalized_count];
+    jacobian.bench_function("dynibo", |b| {
         b.iter(|| {
-            case.arm
+            case.robot
                 .jacobian(
-                    black_box(q),
+                    black_box(&case.q),
                     case.target,
                     &mut workspace,
                     black_box(&mut output),
                 )
                 .unwrap();
             black_box(&output);
-        })
+        });
     });
-    jacobian.bench_with_input(BenchmarkId::from_parameter("pinocchio"), &case.q, |b, q| {
+    jacobian.bench_function("pinocchio", |b| {
         b.iter(|| {
-            // SAFETY: context and input vector remain valid for the duration of every call.
+            // SAFETY: the context and configuration remain valid for every call.
             black_box(unsafe {
-                dynibo_pinocchio_jacobian(case.pinocchio.0.as_ptr(), black_box(q).as_ptr())
+                dynibo_pinocchio_jacobian(
+                    case.pinocchio.0.as_ptr(),
+                    black_box(case.pinocchio_q.as_ptr()),
+                )
             })
         });
     });
     jacobian.finish();
 
-    let mut acceleration = c.benchmark_group(format!("forward_acceleration/{size}"));
+    let mut acceleration = c.benchmark_group(format!("forward_acceleration/{model}"));
     acceleration.throughput(Throughput::Elements(1));
-    let mut workspace = case.arm.workspace();
+    let mut workspace = case.robot.workspace();
     acceleration.bench_function("dynibo", |b| {
         b.iter(|| {
             black_box(
-                case.arm
+                case.robot
                     .forward_acceleration_kinematics(
                         black_box(&case.q),
                         black_box(&case.qd),
@@ -218,40 +222,43 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
     });
     acceleration.finish();
 
-    let mut gravity = c.benchmark_group(format!("gravity/{size}"));
+    let mut gravity = c.benchmark_group(format!("gravity/{model}"));
     gravity.throughput(Throughput::Elements(1));
-    let mut workspace = case.arm.workspace();
-    let mut output = [0.0; N];
-    gravity.bench_with_input(BenchmarkId::from_parameter("dynibo"), &case.q, |b, q| {
+    let mut workspace = case.robot.workspace();
+    let mut output = vec![0.0; generalized_count];
+    gravity.bench_function("dynibo", |b| {
         b.iter(|| {
-            case.arm
+            case.robot
                 .gravity(
-                    black_box(q),
+                    black_box(&case.q),
                     black_box(&[]),
                     &mut workspace,
                     black_box(&mut output),
                 )
                 .unwrap();
-            black_box(output);
+            black_box(&output);
         });
     });
-    gravity.bench_with_input(BenchmarkId::from_parameter("pinocchio"), &case.q, |b, q| {
+    gravity.bench_function("pinocchio", |b| {
         b.iter(|| {
-            // SAFETY: context and input vector remain valid for the duration of every call.
+            // SAFETY: the context and configuration remain valid for every call.
             black_box(unsafe {
-                dynibo_pinocchio_gravity(case.pinocchio.0.as_ptr(), black_box(q).as_ptr())
+                dynibo_pinocchio_gravity(
+                    case.pinocchio.0.as_ptr(),
+                    black_box(case.pinocchio_q.as_ptr()),
+                )
             })
         });
     });
     gravity.finish();
 
-    let mut rnea = c.benchmark_group(format!("rnea/{size}"));
+    let mut rnea = c.benchmark_group(format!("rnea/{model}"));
     rnea.throughput(Throughput::Elements(1));
-    let mut workspace = case.arm.workspace();
-    let mut output = [0.0; N];
+    let mut workspace = case.robot.workspace();
+    let mut output = vec![0.0; generalized_count];
     rnea.bench_function("dynibo", |b| {
         b.iter(|| {
-            case.arm
+            case.robot
                 .inverse_dynamics(
                     black_box(&case.q),
                     black_box(&case.qd),
@@ -261,31 +268,31 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
                     black_box(&mut output),
                 )
                 .unwrap();
-            black_box(output);
+            black_box(&output);
         });
     });
     rnea.bench_function("pinocchio", |b| {
         b.iter(|| {
-            // SAFETY: context and input vectors remain valid for the duration of every call.
+            // SAFETY: the context and state vectors remain valid for every call.
             black_box(unsafe {
                 dynibo_pinocchio_rnea(
                     case.pinocchio.0.as_ptr(),
-                    black_box(case.q.as_ptr()),
-                    black_box(case.qd.as_ptr()),
-                    black_box(case.qdd.as_ptr()),
+                    black_box(case.pinocchio_q.as_ptr()),
+                    black_box(case.pinocchio_qd.as_ptr()),
+                    black_box(case.pinocchio_qdd.as_ptr()),
                 )
             })
         });
     });
     rnea.finish();
 
-    let mut jacobian_derivative = c.benchmark_group(format!("end_jacobian_derivative/{size}"));
+    let mut jacobian_derivative = c.benchmark_group(format!("end_jacobian_derivative/{model}"));
     jacobian_derivative.throughput(Throughput::Elements(1));
-    let mut workspace = case.arm.workspace();
-    let mut output = vec![0.0; 6 * N];
+    let mut workspace = case.robot.workspace();
+    let mut output = vec![0.0; 6 * generalized_count];
     jacobian_derivative.bench_function("dynibo", |b| {
         b.iter(|| {
-            case.arm
+            case.robot
                 .jacobian_derivative(
                     black_box(&case.q),
                     black_box(&case.qd),
@@ -295,69 +302,72 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
                 )
                 .unwrap();
             black_box(&output);
-        })
+        });
     });
     jacobian_derivative.bench_function("pinocchio", |b| {
         b.iter(|| {
-            // SAFETY: context and input vectors remain valid for the duration of every call.
+            // SAFETY: the context and state vectors remain valid for every call.
             black_box(unsafe {
                 dynibo_pinocchio_jacobian_time_variation(
                     case.pinocchio.0.as_ptr(),
-                    black_box(case.q.as_ptr()),
-                    black_box(case.qd.as_ptr()),
+                    black_box(case.pinocchio_q.as_ptr()),
+                    black_box(case.pinocchio_qd.as_ptr()),
                 )
             })
         });
     });
     jacobian_derivative.finish();
 
-    let mut mass = c.benchmark_group(format!("mass_matrix/{size}"));
+    let mut mass = c.benchmark_group(format!("mass_matrix/{model}"));
     mass.throughput(Throughput::Elements(1));
-    let mut workspace = case.arm.workspace();
-    let mut output = vec![0.0; N * N];
+    let mut workspace = case.robot.workspace();
+    let mut output = vec![0.0; generalized_count * generalized_count];
     mass.bench_function("dynibo", |b| {
         b.iter(|| {
-            case.arm
+            case.robot
                 .mass_matrix(black_box(&case.q), &mut workspace, black_box(&mut output))
                 .unwrap();
             black_box(&output);
-        })
+        });
     });
     mass.bench_function("pinocchio", |b| {
         b.iter(|| {
-            // SAFETY: context and input vector remain valid for the duration of every call.
+            // SAFETY: the context and configuration remain valid for every call.
             black_box(unsafe {
-                dynibo_pinocchio_crba(case.pinocchio.0.as_ptr(), black_box(case.q.as_ptr()))
+                dynibo_pinocchio_crba(
+                    case.pinocchio.0.as_ptr(),
+                    black_box(case.pinocchio_q.as_ptr()),
+                )
             })
         });
     });
     mass.finish();
 
-    let mut velocity_product = c.benchmark_group(format!("velocity_product_forces/{size}"));
+    let mut velocity_product = c.benchmark_group(format!("velocity_product_forces/{model}"));
     velocity_product.throughput(Throughput::Elements(1));
-    let mut workspace = case.arm.workspace();
-    let mut velocity_output = [0.0; N];
+    let mut workspace = case.robot.workspace();
+    let mut output = vec![0.0; generalized_count];
     velocity_product.bench_function("dynibo", |b| {
         b.iter(|| {
-            case.arm
+            case.robot
                 .velocity_product_forces(
                     black_box(&case.q),
                     black_box(&case.qd),
                     &mut workspace,
-                    black_box(&mut velocity_output),
+                    black_box(&mut output),
                 )
                 .unwrap();
-            black_box(&velocity_output);
-        })
+            black_box(&output);
+        });
     });
     velocity_product.bench_function("pinocchio", |b| {
         b.iter(|| {
-            // SAFETY: context and input vectors remain valid for the duration of every call.
+            // SAFETY: the context and state vectors remain valid for every call.
             black_box(unsafe {
                 dynibo_pinocchio_velocity_product(
                     case.pinocchio.0.as_ptr(),
-                    black_box(case.q.as_ptr()),
-                    black_box(case.qd.as_ptr()),
+                    black_box(case.pinocchio_q.as_ptr()),
+                    black_box(case.pinocchio_qd.as_ptr()),
                 )
             })
         });
@@ -365,144 +375,44 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
     velocity_product.finish();
 }
 
-fn benchmark_tree_case<const N: usize>(c: &mut Criterion, case: &TreeBenchmarkCase<N>) {
-    let size = format!("tree_{N}joint_2leaf");
-
-    let mut fk = c.benchmark_group(format!("tree_forward_kinematics/{size}"));
-    fk.throughput(Throughput::Elements(1));
-    let mut workspace = case.arm.workspace();
-    fk.bench_function("dynibo", |b| {
-        b.iter(|| {
-            black_box(
-                case.arm
-                    .forward_kinematics(black_box(&case.q), case.target, &mut workspace)
-                    .unwrap(),
-            )
-        });
-    });
-    fk.bench_function("pinocchio", |b| {
-        b.iter(|| {
-            // SAFETY: context and input vector remain valid for the duration of every call.
-            black_box(unsafe {
-                dynibo_pinocchio_forward_kinematics(
-                    case.pinocchio.0.as_ptr(),
-                    black_box(case.q.as_ptr()),
-                )
-            })
-        });
-    });
-    fk.finish();
-
-    let mut jacobian = c.benchmark_group(format!("tree_jacobian/{size}"));
-    jacobian.throughput(Throughput::Elements(1));
-    let mut workspace = case.arm.workspace();
-    let mut output = vec![0.0; 6 * N];
-    jacobian.bench_function("dynibo", |b| {
-        b.iter(|| {
-            case.arm
-                .jacobian(
-                    black_box(&case.q),
-                    case.target,
-                    &mut workspace,
-                    black_box(&mut output),
-                )
-                .unwrap();
-            black_box(&output);
-        });
-    });
-    jacobian.bench_function("pinocchio", |b| {
-        b.iter(|| {
-            // SAFETY: context and input vector remain valid for the duration of every call.
-            black_box(unsafe {
-                dynibo_pinocchio_jacobian(case.pinocchio.0.as_ptr(), black_box(case.q.as_ptr()))
-            })
-        });
-    });
-    jacobian.finish();
-
-    let mut gravity = c.benchmark_group(format!("tree_gravity/{size}"));
-    gravity.throughput(Throughput::Elements(1));
-    let mut workspace = case.arm.workspace();
-    let mut output = [0.0; N];
-    gravity.bench_function("dynibo", |b| {
-        b.iter(|| {
-            case.arm
-                .gravity(
-                    black_box(&case.q),
-                    black_box(&[]),
-                    &mut workspace,
-                    black_box(&mut output),
-                )
-                .unwrap();
-            black_box(output);
-        });
-    });
-    gravity.bench_function("pinocchio", |b| {
-        b.iter(|| {
-            // SAFETY: context and input vector remain valid for the duration of every call.
-            black_box(unsafe {
-                dynibo_pinocchio_gravity(case.pinocchio.0.as_ptr(), black_box(case.q.as_ptr()))
-            })
-        });
-    });
-    gravity.finish();
-
-    let mut rnea = c.benchmark_group(format!("tree_rnea/{size}"));
-    rnea.throughput(Throughput::Elements(1));
-    let mut workspace = case.arm.workspace();
-    let mut output = [0.0; N];
-    rnea.bench_function("dynibo", |b| {
-        b.iter(|| {
-            case.arm
-                .inverse_dynamics(
-                    black_box(&case.q),
-                    black_box(&case.qd),
-                    black_box(&case.qdd),
-                    black_box(&[]),
-                    &mut workspace,
-                    black_box(&mut output),
-                )
-                .unwrap();
-            black_box(output);
-        });
-    });
-    rnea.bench_function("pinocchio", |b| {
-        b.iter(|| {
-            // SAFETY: context and input vectors remain valid for the duration of every call.
-            black_box(unsafe {
-                dynibo_pinocchio_rnea(
-                    case.pinocchio.0.as_ptr(),
-                    black_box(case.q.as_ptr()),
-                    black_box(case.qd.as_ptr()),
-                    black_box(case.qdd.as_ptr()),
-                )
-            })
-        });
-    });
-    rnea.finish();
-}
-
 fn benchmark_pinocchio(c: &mut Criterion) {
-    let case_4 = BenchmarkCase::<4>::new("tests/data/test_arm.urdf");
+    let fixed_serial = BenchmarkCase::<40>::new(
+        "tests/data/test_arm_40.urdf",
+        "test_link_40",
+        BaseMode::Fixed,
+    );
+    let floating_serial = BenchmarkCase::<40>::new(
+        "tests/data/test_arm_40.urdf",
+        "test_link_40",
+        BaseMode::Floating,
+    );
+    let fixed_tree =
+        BenchmarkCase::<7>::new("tests/data/test_tree_7.urdf", "right_tool", BaseMode::Fixed);
+    let floating_tree = BenchmarkCase::<7>::new(
+        "tests/data/test_tree_7.urdf",
+        "right_tool",
+        BaseMode::Floating,
+    );
 
     let mut overhead = c.benchmark_group("ffi_overhead");
     overhead.throughput(Throughput::Elements(1));
     overhead.bench_function("pinocchio_c_abi", |b| {
         b.iter(|| {
-            // SAFETY: context and input vector remain valid for the duration of every call.
+            // SAFETY: the context and configuration remain valid for every call.
             black_box(unsafe {
-                dynibo_pinocchio_noop(case_4.pinocchio.0.as_ptr(), case_4.q.as_ptr())
+                dynibo_pinocchio_noop(
+                    floating_serial.pinocchio.0.as_ptr(),
+                    floating_serial.pinocchio_q.as_ptr(),
+                )
             })
         });
     });
     overhead.finish();
 
-    benchmark_case(c, &case_4);
-    benchmark_case(c, &BenchmarkCase::<40>::new("tests/data/test_arm_40.urdf"));
-    benchmark_tree_case(
-        c,
-        &TreeBenchmarkCase::<7>::new("tests/data/test_tree_7.urdf", "right_tool", "right_wrist"),
-    );
+    benchmark_case(c, "fixed_serial_40joint", &fixed_serial);
+    benchmark_case(c, "floating_serial_40joint", &floating_serial);
+    benchmark_case(c, "fixed_tree_7joint_2leaf", &fixed_tree);
+    benchmark_case(c, "floating_tree_7joint_2leaf", &floating_tree);
 }
 
 criterion_group!(benches, benchmark_pinocchio);

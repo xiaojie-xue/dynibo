@@ -1,10 +1,26 @@
-# dynibo
+<!-- markdownlint-disable MD033 MD041 -->
 
-[![Package CI](https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml/badge.svg?branch=main)](https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml)
-[![codecov](https://codecov.io/gh/xiaojie-xue/dynibo/branch/main/graph/badge.svg)](https://codecov.io/gh/xiaojie-xue/dynibo)
-[![GitHub Release](https://img.shields.io/github/v/release/xiaojie-xue/dynibo)](https://github.com/xiaojie-xue/dynibo/releases/latest)
-[![Built with Rust](https://img.shields.io/badge/Built_with-Rust-CE422B?logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+<div align="center">
+
+<h1>dynibo</h1>
+
+<p><strong>Fast &middot; Lightweight &middot; Reliable</strong></p>
+
+<p>
+  <a href="https://docs.rs/dynibo">Rust doc</a>
+  &nbsp;&middot;&nbsp;
+  <a href="https://dynibo.readthedocs.io/">Python doc</a>
+</p>
+
+<p>
+  <a href="https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml"><img alt="CI" src="https://github.com/xiaojie-xue/dynibo/actions/workflows/package-ci.yml/badge.svg?branch=main"></a>
+  <a href="https://codecov.io/gh/xiaojie-xue/dynibo"><img alt="codecov" src="https://codecov.io/gh/xiaojie-xue/dynibo/branch/main/graph/badge.svg"></a>
+  <a href="https://crates.io/crates/dynibo"><img alt="crates.io" src="https://img.shields.io/crates/v/dynibo.svg?color=CE422B&amp;logo=rust&amp;logoColor=white"></a>
+  <a href="https://pypi.org/project/dynibo/"><img alt="PyPI" src="https://img.shields.io/pypi/v/dynibo.svg?color=3776AB&amp;logo=python&amp;logoColor=white"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+</p>
+
+</div>
 
 English | [简体中文](README.zh.md)
 
@@ -17,28 +33,27 @@ C/C++ interfaces are available on top of the same Rust core.
 
 ### Fast
 
-Dynibo is written in Rust and keeps allocation outside the calculation loop.
-After a `Workspace` and output buffers are created, the main kinematics and
-dynamics routines reuse that memory without allocating or resizing.
+Across the benchmarks below, Dynibo runs 1.19–2.51× as fast as Pinocchio for the
+measured core operations. It is written in Rust and keeps allocation outside the
+calculation loop. After a `Workspace` and output buffers are created, the main
+kinematics and dynamics routines reuse that memory without allocating or
+resizing.
 
-The following Criterion results compare Dynibo with Pinocchio using the same URDF
-models and joint states. Model construction, workspaces, Pinocchio `Data`, and
-output allocation are excluded from the timed region. Speedups are calculated
-from quick-mode interval medians after subtracting the measured 0.882 ns fixed
-C ABI overhead from the Pinocchio times.
-
-Across these benchmarks, Dynibo is 1.17–2.70× as fast as Pinocchio. Higher is
-better.
+The table below shows Dynibo's speedup over Pinocchio for core kinematics and
+dynamics operations.
 
 | Model | FK | Jacobian | Gravity | RNEA |
 |---|---:|---:|---:|---:|
-| Serial chain (4 joints) | 1.17× | 1.58× | 1.59× | 1.66× |
-| Serial chain (40 joints) | 1.24× | 1.72× | 1.63× | 1.91× |
-| Two-leaf tree (7 joints) | 2.08× | 2.70× | 1.89× | 1.91× |
+| Two-leaf tree (7 joints, fixed base) | 1.90× | 2.05× | 1.89× | 1.94× |
+| Two-leaf tree (7 joints, floating base) | 2.16× | 2.51× | 2.15× | 2.20× |
+| Serial chain (40 joints, fixed base) | 1.19× | 1.49× | 1.78× | 1.99× |
+| Serial chain (40 joints, floating base) | 1.21× | 1.56× | 1.79× | 2.09× |
 
-Measurements were collected on an Intel Core i9-14900K with rustc 1.97.1 and
-Pinocchio 3.9.0. When Pinocchio is available through `pkg-config`,
-reproduce them with:
+These Criterion quick-mode results use the same URDF models and joint states on
+an Intel Core i9-14900K with rustc 1.97.1 and Pinocchio 3.9.0. Setup and
+allocation are excluded, and speedups use interval medians after subtracting the
+measured 0.703 ns fixed C ABI overhead. With Pinocchio available through
+`pkg-config`, rerun the raw benchmarks with:
 
 ```bash
 cargo bench --features pinocchio-bench --bench pinocchio -- --quick
@@ -73,9 +88,6 @@ An independent Pinocchio oracle also compares complete FK, Jacobian, Jacobian
 time-derivative, mass matrix, velocity-product forces, gravity, and RNEA outputs over
 deterministic robot states.
 
-The Rust core contains no project-owned `unsafe` code. CI requires at least 85%
-line coverage and 75% branch coverage across the Rust workspace.
-
 ## Dependencies
 
 The Rust core has two direct runtime dependencies:
@@ -95,6 +107,23 @@ Add the Cargo package:
 cargo add dynibo
 ```
 
+Load a URDF, create a reusable workspace, and compute a target-link pose:
+
+```rust
+use dynibo::Robot;
+
+fn main() -> dynibo::Result<()> {
+    let robot = Robot::from_urdf("robot.urdf")?;
+    let tool = robot.link_id("tool")?;
+    let mut workspace = robot.workspace();
+    let q = vec![0.0; robot.joint_count()];
+
+    let pose = robot.forward_kinematics(&q, tool, &mut workspace)?;
+    println!("translation: {}", pose.translation.vector.transpose());
+    Ok(())
+}
+```
+
 ### Python
 
 Install the Python package from PyPI:
@@ -103,11 +132,22 @@ Install the Python package from PyPI:
 python -m pip install dynibo
 ```
 
-The package is imported as `dynibo`.
+The Python binding owns its reusable native workspace:
+
+```python
+from dynibo import Robot
+
+with Robot("robot.urdf") as robot:
+    tool = robot.link_id("tool")
+    q = [0.0] * robot.joint_count
+    pose = robot.forward_kinematics(q, tool)
+    print(pose.translation)
+```
 
 ### C/C++
 
-Build and install the CMake package:
+Build and install the CMake package from source. This requires Rust with Cargo
+and CMake 3.16 or newer:
 
 ```bash
 cmake -S . -B build/c -DCMAKE_BUILD_TYPE=Release
@@ -115,12 +155,15 @@ cmake --build build/c --parallel
 cmake --install build/c --prefix /opt/dynibo
 ```
 
-CMake consumers can use the installed `dynibo::dynibo` target.
+Use the installed package from another CMake project:
 
-## Documentation
+```cmake
+find_package(dynibo CONFIG REQUIRED)
+target_link_libraries(my_robot PRIVATE dynibo::dynibo)
+```
 
-- [Rust API documentation](https://docs.rs/dynibo)
-- [Python API documentation](https://dynibo.readthedocs.io/)
+If dynibo was installed to a custom prefix, configure the consumer with
+`-DCMAKE_PREFIX_PATH=/opt/dynibo` (or the prefix you selected).
 
 ## Examples
 
@@ -137,11 +180,13 @@ bad input lengths, model-mismatched handles, and solver failures.
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo test --workspace --all-targets
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --all-targets --locked
 ```
 
-Run the complete Rust, Pinocchio, Python, C, and C++ verification suite with:
+Run the complete local Rust, Python, C, and C++ verification suite with the
+command below. Pinocchio reference tests are included when Pinocchio is
+available through `pkg-config`.
 
 ```bash
 bash ci/test-all.sh
@@ -149,9 +194,9 @@ bash ci/test-all.sh
 
 ## Contributing
 
-Dynibo is still at an early stage, and we welcome you to help shape and build it
-with us. Feel free to open an issue for bugs or ideas, submit a pull request with
-improvements, or contact me anytime to discuss how the project could evolve.
+Dynibo is still at an early stage, and contributions are welcome. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for development setup, required checks, and
+pull request guidelines.
 
 ## Citation
 
