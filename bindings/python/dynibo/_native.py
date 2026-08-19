@@ -6,8 +6,10 @@ import ctypes as ct
 import ctypes.util
 import os
 import sys
+import threading
 from dataclasses import dataclass
 from enum import IntEnum
+from functools import wraps
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -92,6 +94,9 @@ class Pose:
 class Twist:
     """An angular-first spatial velocity or acceleration.
 
+    Its flat order is `(angular_x, angular_y, angular_z, linear_x, linear_y,
+    linear_z)`. Kinematics results are expressed in the world frame.
+
     Attributes:
         angular: Angular component as `(x, y, z)`.
         linear: Linear component as `(x, y, z)`.
@@ -107,7 +112,8 @@ class Load:
 
     Attributes:
         link_id: Identifier returned by `Robot.link_id()`.
-        torque: Link-local torque as `(x, y, z)`.
+        torque: Link-local torque as `(x, y, z)`; it precedes `force` in the
+            corresponding wrench vector.
         force: Link-local force as `(x, y, z)`.
     """
 
@@ -158,12 +164,12 @@ _double_p = ct.POINTER(ct.c_double)
 
 _lib.dynibo_last_error_message.restype = ct.c_char_p
 _lib.dynibo_version.restype = ct.c_char_p
-_lib.dynibo_robot_load_urdf.argtypes = [ct.c_char_p, ct.POINTER(_robot_p)]
-_lib.dynibo_robot_load_urdf.restype = ct.c_int
-_lib.dynibo_robot_load_urdf_with_base.argtypes = [
+_lib.dynibo_robot_from_urdf.argtypes = [ct.c_char_p, ct.POINTER(_robot_p)]
+_lib.dynibo_robot_from_urdf.restype = ct.c_int
+_lib.dynibo_robot_from_urdf_with_base.argtypes = [
     ct.c_char_p, ct.c_int, ct.POINTER(_robot_p),
 ]
-_lib.dynibo_robot_load_urdf_with_base.restype = ct.c_int
+_lib.dynibo_robot_from_urdf_with_base.restype = ct.c_int
 _lib.dynibo_robot_destroy.argtypes = [_robot_p]
 _lib.dynibo_robot_name.argtypes = [_robot_p]
 _lib.dynibo_robot_name.restype = ct.c_char_p
@@ -171,10 +177,12 @@ _lib.dynibo_robot_joint_count.argtypes = [_robot_p]
 _lib.dynibo_robot_joint_count.restype = ct.c_size_t
 _lib.dynibo_robot_generalized_count.argtypes = [_robot_p]
 _lib.dynibo_robot_generalized_count.restype = ct.c_size_t
-_lib.dynibo_robot_set_base_state.argtypes = [
+_lib.dynibo_robot_set_base_frame.argtypes = [_robot_p, ct.POINTER(_Pose)]
+_lib.dynibo_robot_set_base_frame.restype = ct.c_int
+_lib.dynibo_robot_set_floating_base_state.argtypes = [
     _robot_p, ct.POINTER(_Pose), _Twist, _Twist,
 ]
-_lib.dynibo_robot_set_base_state.restype = ct.c_int
+_lib.dynibo_robot_set_floating_base_state.restype = ct.c_int
 _lib.dynibo_robot_link_count.argtypes = [_robot_p]
 _lib.dynibo_robot_link_count.restype = ct.c_size_t
 _lib.dynibo_robot_link_id.argtypes = [_robot_p, ct.c_char_p, ct.POINTER(ct.c_size_t)]
@@ -209,25 +217,24 @@ _lib.dynibo_inverse_kinematics.argtypes = [
     ct.POINTER(_Pose), _IkOptions, _double_p, ct.c_size_t,
 ]
 _lib.dynibo_inverse_kinematics.restype = ct.c_int
-_lib.dynibo_forward_velocity.argtypes = [
+_lib.dynibo_forward_velocity_kinematics.argtypes = [
     _robot_p, _workspace_p, _double_p, _double_p, ct.c_size_t, ct.c_size_t,
-    ct.POINTER(_Pose), ct.POINTER(_Pose), ct.POINTER(_Twist),
+    ct.POINTER(_Pose), ct.POINTER(_Twist),
 ]
-_lib.dynibo_forward_velocity.restype = ct.c_int
-_lib.dynibo_forward_acceleration.argtypes = [
+_lib.dynibo_forward_velocity_kinematics.restype = ct.c_int
+_lib.dynibo_forward_acceleration_kinematics.argtypes = [
     _robot_p, _workspace_p, _double_p, _double_p, _double_p,
     ct.c_size_t, ct.c_size_t, ct.POINTER(_Twist),
 ]
-_lib.dynibo_forward_acceleration.restype = ct.c_int
+_lib.dynibo_forward_acceleration_kinematics.restype = ct.c_int
 _lib.dynibo_gravity.argtypes = [
-    _robot_p, _workspace_p, _double_p, ct.c_size_t, ct.POINTER(_Pose),
-    ct.POINTER(_Load), ct.c_size_t, _double_p, ct.c_size_t,
+    _robot_p, _workspace_p, _double_p, ct.c_size_t, ct.POINTER(_Load),
+    ct.c_size_t, _double_p, ct.c_size_t,
 ]
 _lib.dynibo_gravity.restype = ct.c_int
 _lib.dynibo_inverse_dynamics.argtypes = [
     _robot_p, _workspace_p, _double_p, _double_p, _double_p, ct.c_size_t,
-    ct.POINTER(_Pose), _Twist, _Twist, ct.POINTER(_Load), ct.c_size_t,
-    _double_p, ct.c_size_t,
+    ct.POINTER(_Load), ct.c_size_t, _double_p, ct.c_size_t,
 ]
 _lib.dynibo_inverse_dynamics.restype = ct.c_int
 
@@ -296,11 +303,22 @@ def _loads(values: Iterable[Load]) -> ct.Array[_Load]:
     ))
 
 
+def _synchronized(method):
+    """Serialize access to one Robot's native handles and mutable workspace."""
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return locked
+
+
 class Robot:
     """A URDF robot with a reusable calculation workspace.
 
     Args:
         urdf_path: Path to the URDF file to load.
+        base_mode: Whether the URDF root link is fixed or floating.
 
     Raises:
         ModelError: If the file cannot be read, parsed, or represented as a
@@ -309,8 +327,9 @@ class Robot:
 
     Notes:
         A `Robot` is a context manager and should be closed after use. Its
-        internal workspace is not thread-safe; use distinct instances for
-        concurrent calculations.
+        native calls are serialized so one instance can be shared safely
+        between threads. Use distinct instances for calculations that must run
+        in parallel.
     """
 
     def __init__(
@@ -318,6 +337,7 @@ class Robot:
         urdf_path: str | os.PathLike[str],
         base_mode: BaseMode | str = BaseMode.FIXED,
     ):
+        self._lock = threading.RLock()
         self._robot = _robot_p()
         self._workspace = _workspace_p()
         if isinstance(base_mode, str):
@@ -325,7 +345,9 @@ class Robot:
                 base_mode = BaseMode[base_mode.upper()]
             except KeyError as error:
                 raise ValueError("base_mode must be 'fixed' or 'floating'") from error
-        _check(_lib.dynibo_robot_load_urdf_with_base(
+        elif not isinstance(base_mode, BaseMode):
+            raise TypeError("base_mode must be BaseMode, 'fixed', or 'floating'")
+        _check(_lib.dynibo_robot_from_urdf_with_base(
             os.fsencode(urdf_path), int(base_mode), ct.byref(self._robot),
         ))
         try:
@@ -335,6 +357,21 @@ class Robot:
             self._robot = _robot_p()
             raise
 
+    @classmethod
+    def from_urdf(cls, urdf_path: str | os.PathLike[str]) -> "Robot":
+        """Load a fixed-base robot from a URDF file."""
+        return cls(urdf_path, BaseMode.FIXED)
+
+    @classmethod
+    def from_urdf_with_base(
+        cls,
+        urdf_path: str | os.PathLike[str],
+        base_mode: BaseMode | str,
+    ) -> "Robot":
+        """Load a robot from a URDF file with an explicit base mode."""
+        return cls(urdf_path, base_mode)
+
+    @_synchronized
     def close(self) -> None:
         """Release native resources; calling this more than once is safe."""
         if self._workspace:
@@ -354,6 +391,7 @@ class Robot:
         self.close()
 
     @property
+    @_synchronized
     def name(self) -> str:
         """The robot name declared in the URDF."""
         value = _lib.dynibo_robot_name(self._robot)
@@ -362,24 +400,48 @@ class Robot:
         return value.decode("utf-8")
 
     @property
+    @_synchronized
     def joint_count(self) -> int:
-        """The number of joints in the model."""
+        """The number of non-fixed joints in the model."""
         return int(_lib.dynibo_robot_joint_count(self._robot))
 
     @property
+    @_synchronized
     def generalized_count(self) -> int:
-        """The generalized-vector size selected by the base mode."""
+        """The generalized-vector size selected by the base mode.
+
+        A floating-base vector starts with world-frame angular then linear
+        components `(omega_x, omega_y, omega_z, v_x, v_y, v_z)`, followed by
+        non-fixed joints in URDF order.
+        """
         return int(_lib.dynibo_robot_generalized_count(self._robot))
 
-    def set_base_state(
+    @_synchronized
+    def set_base_frame(self, frame: Pose) -> None:
+        """Set the root-link pose used by every calculation.
+
+        This operation is valid for fixed-base and floating-base robots.
+        """
+        frame_c = _pose(frame)
+        _check(_lib.dynibo_robot_set_base_frame(
+            self._robot,
+            ct.byref(frame_c),
+        ))
+
+    @_synchronized
+    def set_floating_base_state(
         self,
         frame: Pose,
         velocity: Twist = Twist(),
         acceleration: Twist = Twist(),
     ) -> None:
-        """Replace the pose and classical motion of a floating base."""
+        """Replace the pose and classical motion of a floating base.
+
+        `velocity` and `acceleration` are angular-first and expressed in the
+        world frame at the root-link origin.
+        """
         frame_c = _pose(frame)
-        _check(_lib.dynibo_robot_set_base_state(
+        _check(_lib.dynibo_robot_set_floating_base_state(
             self._robot,
             ct.byref(frame_c),
             _twist(velocity),
@@ -387,10 +449,12 @@ class Robot:
         ))
 
     @property
+    @_synchronized
     def link_count(self) -> int:
         """The number of links in the model, including the root link."""
         return int(_lib.dynibo_robot_link_count(self._robot))
 
+    @_synchronized
     def link_id(self, name: str) -> int:
         """Look up a link identifier by its URDF name.
 
@@ -408,21 +472,23 @@ class Robot:
         _check(_lib.dynibo_robot_link_id(self._robot, name.encode(), ct.byref(result)))
         return int(result.value)
 
+    @_synchronized
     def forward_kinematics(self, q: Sequence[float], target: int) -> Pose:
         r"""Compute the pose of a target link.
 
         For the joints on the root-to-target path, the returned pose is
 
         \[
-        {}^0 T_{\mathrm{target}}(q) = \prod_{i \in \mathrm{path}} {}^{i-1}T_i(q_i).
+        {}^W T_{\mathrm{target}}(q) = {}^W T_{\mathrm{base}}
+        \prod_{i \in \mathrm{path}} {}^{i-1}T_i(q_i).
         \]
 
         Args:
-            q: Joint positions in model joint order.
+            q: Positions of non-fixed joints in URDF order.
             target: Link identifier returned by `link_id()`.
 
         Returns:
-            Target-link pose relative to the root link.
+            Target-link pose in the world frame.
 
         Raises:
             ValueError: If an input length or link identifier is invalid.
@@ -435,6 +501,7 @@ class Robot:
         ))
         return Pose(tuple(output.translation), tuple(output.rotation_xyzw))
 
+    @_synchronized
     def jacobian(self, q: Sequence[float], target: int) -> tuple[float, ...]:
         r"""Compute the geometric Jacobian of a target link.
 
@@ -444,13 +511,15 @@ class Robot:
         \]
 
         Args:
-            q: Joint positions in model joint order.
+            q: Non-fixed joint positions in URDF order.
             target: Link identifier returned by `link_id()`.
 
         Returns:
-            A flat, column-major `6 x generalized_count` tuple. Each column is
+            A flat, column-major world-frame, target-origin `6 x
+            generalized_count` tuple. Each column is
             angular-first: `(angular_x, angular_y, angular_z, linear_x,
-            linear_y, linear_z)`.
+            linear_y, linear_z)`. Floating-base columns precede joint columns
+            and are world-frame angular then linear.
 
         Raises:
             ValueError: If an input length or link identifier is invalid.
@@ -464,6 +533,7 @@ class Robot:
         ))
         return tuple(output)
 
+    @_synchronized
     def jacobian_derivative(
         self, q: Sequence[float], qd: Sequence[float], target: int
     ) -> tuple[float, ...]:
@@ -474,14 +544,15 @@ class Robot:
         \]
 
         Args:
-            q: Joint positions in model joint order.
-            qd: Joint velocities in model joint order.
+            q: Non-fixed joint positions in URDF order.
+            qd: Non-fixed joint velocities in URDF order.
             target: Link identifier returned by `link_id()`.
 
         Returns:
-            A flat, column-major `6 x generalized_count` tuple with the same
-            angular-first column layout as `jacobian()`. The result satisfies
-            `forward_acceleration(q, qd, 0) == J_dot @ qd`.
+            A flat, column-major world-frame, target-origin `6 x
+            generalized_count` tuple with the same angular-first column layout
+            as `jacobian()`. The result satisfies
+            `forward_acceleration_kinematics(q, qd, 0) == J_dot @ qd`.
 
         Raises:
             ValueError: If an input length or link identifier is invalid.
@@ -497,6 +568,7 @@ class Robot:
         ))
         return tuple(output)
 
+    @_synchronized
     def mass_matrix(self, q: Sequence[float]) -> tuple[float, ...]:
         r"""Compute the joint-space mass matrix.
 
@@ -505,12 +577,13 @@ class Robot:
         \]
 
         Args:
-            q: Joint positions in model joint order.
+            q: Non-fixed joint positions in URDF order.
 
         Returns:
-            A flat, column-major `generalized_count x generalized_count` tuple. The matrix
-            is symmetric positive semi-definite; rows and columns of fixed
-            joints are zero.
+            A flat, column-major `generalized_count x generalized_count` tuple.
+            For a floating base, rows and columns are world-frame angular,
+            world-frame linear, then non-fixed URDF joints. Fixed joints do not
+            occupy rows or columns.
 
         Raises:
             ValueError: If an input length is invalid.
@@ -523,6 +596,7 @@ class Robot:
         ))
         return tuple(output)
 
+    @_synchronized
     def velocity_product_forces(
         self, q: Sequence[float], qd: Sequence[float]
     ) -> tuple[float, ...]:
@@ -533,8 +607,8 @@ class Robot:
         \]
 
         Args:
-            q: Joint positions in model joint order.
-            qd: Joint velocities in model joint order.
+            q: Non-fixed joint positions in URDF order.
+            qd: Non-fixed joint velocities in URDF order.
 
         Returns:
             A generalized-force tuple equal to `C(q, qd) @ qd`. Gravity is
@@ -554,6 +628,7 @@ class Robot:
         ))
         return tuple(output)
 
+    @_synchronized
     def inverse_kinematics(
         self, initial_q: Sequence[float], target: int, desired: Pose,
         options: IkOptions = IkOptions(),
@@ -568,13 +643,13 @@ class Robot:
         \]
 
         Args:
-            initial_q: Initial joint positions in model joint order.
+            initial_q: Initial non-fixed joint positions in URDF order.
             target: Link identifier returned by `link_id()`.
             desired: Desired target-link pose relative to the root link.
             options: Solver tolerances and iteration limits.
 
         Returns:
-            Solved joint positions in model joint order.
+            Solved non-fixed joint positions in URDF order.
 
         Raises:
             ValueError: If an input, pose, link identifier, or option is
@@ -595,9 +670,10 @@ class Robot:
         ))
         return tuple(output)
 
-    def forward_velocity(
+    @_synchronized
+    def forward_velocity_kinematics(
         self, q: Sequence[float], qd: Sequence[float], target: int,
-        base: Pose = Pose(), tool: Pose = Pose(),
+        tool: Pose = Pose(),
     ) -> Twist:
         r"""Compute spatial velocity at a point on a target link.
 
@@ -606,16 +682,16 @@ class Robot:
         \]
 
         Args:
-            q: Joint positions in model joint order.
-            qd: Joint velocities in model joint order.
+            q: Non-fixed joint positions in URDF order.
+            qd: Non-fixed joint velocities in URDF order.
             target: Link identifier returned by `link_id()`.
-            base: Pose of the robot base; its rotation selects the coordinates
-                in which the result is expressed.
             tool: Target-to-tool pose; its translation selects the point whose
                 linear velocity is returned.
 
         Returns:
-            Angular-first spatial velocity at the selected tool point.
+            World-expressed, angular-first spatial velocity at the selected
+            tool point. The root pose and motion come from this Robot's stored
+            base state.
 
         Raises:
             ValueError: If an input length, pose, or link identifier is
@@ -624,14 +700,15 @@ class Robot:
         """
         q_array, qd_array = _array(q, "q"), _array(qd, "qd")
         _require_same_length(q_array, qd=qd_array)
-        base_c, tool_c, output = _pose(base), _pose(tool), _Twist()
-        _check(_lib.dynibo_forward_velocity(
+        tool_c, output = _pose(tool), _Twist()
+        _check(_lib.dynibo_forward_velocity_kinematics(
             self._robot, self._workspace, q_array, qd_array, len(q_array), target,
-            ct.byref(base_c), ct.byref(tool_c), ct.byref(output),
+            ct.byref(tool_c), ct.byref(output),
         ))
         return Twist(tuple(output.angular), tuple(output.linear))
 
-    def forward_acceleration(
+    @_synchronized
+    def forward_acceleration_kinematics(
         self, q: Sequence[float], qd: Sequence[float],
         qdd: Sequence[float], target: int,
     ) -> Twist:
@@ -642,13 +719,14 @@ class Robot:
         \]
 
         Args:
-            q: Joint positions in model joint order.
-            qd: Joint velocities in model joint order.
-            qdd: Joint accelerations in model joint order.
+            q: Non-fixed joint positions in URDF order.
+            qd: Non-fixed joint velocities in URDF order.
+            qdd: Non-fixed joint accelerations in URDF order.
             target: Link identifier returned by `link_id()`.
 
         Returns:
-            Angular-first spatial acceleration relative to the root link.
+            World-expressed, angular-first spatial acceleration at the
+            target-link origin.
 
         Raises:
             ValueError: If an input length or link identifier is invalid.
@@ -659,15 +737,15 @@ class Robot:
         qdd_array = _array(qdd, "qdd")
         _require_same_length(q_array, qd=qd_array, qdd=qdd_array)
         output = _Twist()
-        _check(_lib.dynibo_forward_acceleration(
+        _check(_lib.dynibo_forward_acceleration_kinematics(
             self._robot, self._workspace, q_array, qd_array, qdd_array,
             len(q_array), target, ct.byref(output),
         ))
         return Twist(tuple(output.angular), tuple(output.linear))
 
+    @_synchronized
     def gravity(
-        self, q: Sequence[float], base: Pose = Pose(),
-        loads: Iterable[Load] = (),
+        self, q: Sequence[float], loads: Iterable[Load] = (),
     ) -> tuple[float, ...]:
         r"""Compute gravity-compensation joint forces.
 
@@ -678,36 +756,36 @@ class Robot:
         \]
 
         Args:
-            q: Joint positions in model joint order.
-            base: Pose of the robot base in the world frame. Its rotation
-                determines gravity's direction in the robot model.
+            q: Non-fixed joint positions in URDF order.
             loads: Optional external link-local wrenches.
 
         Returns:
-            Generalized forces in base-then-joint order.
+            Generalized forces in base-then-joint order. Gravity direction is
+            determined by this Robot's stored base frame.
 
         Raises:
-            ValueError: If an input, pose, or load is invalid.
+            ValueError: If an input or load is invalid.
             DyniboError: If the native calculation fails.
         """
-        q_array, base_c, loads_c = _array(q, "q"), _pose(base), _loads(loads)
+        q_array, loads_c = _array(q, "q"), _loads(loads)
         output = (ct.c_double * self.generalized_count)()
         _check(_lib.dynibo_gravity(
-            self._robot, self._workspace, q_array, len(q_array), ct.byref(base_c),
-            loads_c, len(loads_c), output, len(output),
+            self._robot, self._workspace, q_array, len(q_array), loads_c,
+            len(loads_c), output, len(output),
         ))
         return tuple(output)
 
+    @_synchronized
     def inverse_dynamics(
         self, q: Sequence[float], qd: Sequence[float], qdd: Sequence[float],
-        base: Pose = Pose(), base_velocity: Twist = Twist(),
-        base_acceleration: Twist = Twist(), loads: Iterable[Load] = (),
+        loads: Iterable[Load] = (),
     ) -> tuple[float, ...]:
         r"""Compute recursive Newton-Euler inverse dynamics.
 
         Gravity is included in the result.
 
-        With a stationary base and no external loads, the returned generalized
+        The root pose and motion come from this Robot's stored base state. With
+        a stationary base and no external loads, the returned generalized
         forces satisfy
 
         \[
@@ -715,31 +793,26 @@ class Robot:
         \]
 
         Args:
-            q: Joint positions in model joint order.
-            qd: Joint velocities in model joint order.
-            qdd: Joint accelerations in model joint order.
-            base: Pose of the robot base in the world frame.
-            base_velocity: Base spatial velocity expressed in the world frame.
-            base_acceleration: Additional base spatial acceleration expressed
-                in the world frame.
+            q: Non-fixed joint positions in URDF order.
+            qd: Non-fixed joint velocities in URDF order.
+            qdd: Non-fixed joint accelerations in URDF order.
             loads: Optional external link-local wrenches.
 
         Returns:
             Generalized forces in base-then-joint order.
 
         Raises:
-            ValueError: If an input, pose, or load is invalid.
+            ValueError: If an input or load is invalid.
             DyniboError: If the native calculation fails.
         """
         q_array = _array(q, "q")
         qd_array = _array(qd, "qd")
         qdd_array = _array(qdd, "qdd")
         _require_same_length(q_array, qd=qd_array, qdd=qdd_array)
-        base_c, loads_c = _pose(base), _loads(loads)
+        loads_c = _loads(loads)
         output = (ct.c_double * self.generalized_count)()
         _check(_lib.dynibo_inverse_dynamics(
             self._robot, self._workspace, q_array, qd_array, qdd_array, len(q_array),
-            ct.byref(base_c), _twist(base_velocity), _twist(base_acceleration),
             loads_c, len(loads_c), output, len(output),
         ))
         return tuple(output)

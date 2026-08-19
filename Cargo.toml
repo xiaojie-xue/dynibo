@@ -57,6 +57,10 @@ name = "core"
 harness = false
 required-features = ["core-bench"]
 
+[[example]]
+name = "franka"
+path = "examples/rust/franka.rs"
+
 [profile.release]
 codegen-units = 1
 lto = "fat"

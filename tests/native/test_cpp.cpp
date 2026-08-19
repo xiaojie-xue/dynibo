@@ -73,7 +73,7 @@ int main(int argc, char** argv) {
         assigned.jacobian_derivative(reference_q, reference_qd, target);
     CHECK(derivative.size() == 6 * reference_q.size());
     const auto origin_acceleration =
-        assigned.forward_acceleration(reference_q, reference_qd, zero_qdd, target);
+        assigned.forward_acceleration_kinematics(reference_q, reference_qd, zero_qdd, target);
     for (std::size_t row = 0; row < 6; ++row) {
         const double expected = row < 3
             ? origin_acceleration.angular[row]
@@ -85,8 +85,8 @@ int main(int argc, char** argv) {
         CHECK(std::abs(contracted - expected) < 1.0e-10);
     }
 
-    const auto velocity = assigned.forward_velocity(q, q, target);
-    const auto acceleration = assigned.forward_acceleration(q, q, q, target);
+    const auto velocity = assigned.forward_velocity_kinematics(q, q, target);
+    const auto acceleration = assigned.forward_acceleration_kinematics(q, q, q, target);
     for (double value : velocity.angular) CHECK(std::abs(value) < 1.0e-12);
     for (double value : velocity.linear) CHECK(std::abs(value) < 1.0e-12);
     for (double value : acceleration.angular) CHECK(std::abs(value) < 1.0e-12);
@@ -95,7 +95,7 @@ int main(int argc, char** argv) {
     DyniboLoad load{};
     load.link_id = target;
     load.force[1] = 1.0;
-    CHECK(assigned.gravity(q, dynibo::identity_pose(), {load}) != gravity);
+    CHECK(assigned.gravity(q, {load}) != gravity);
 
     bool caught = false;
     try {
@@ -109,7 +109,7 @@ int main(int argc, char** argv) {
     const std::vector<double> short_q(q.size() - 1, 0.0);
     caught = false;
     try {
-        static_cast<void>(assigned.forward_velocity(q, short_q, target));
+        static_cast<void>(assigned.forward_velocity_kinematics(q, short_q, target));
     } catch (const dynibo::Error& error) {
         caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
             && std::string(error.what()).find("same length") != std::string::npos;
@@ -117,7 +117,7 @@ int main(int argc, char** argv) {
     CHECK(caught);
     caught = false;
     try {
-        static_cast<void>(assigned.forward_acceleration(q, q, short_q, target));
+        static_cast<void>(assigned.forward_acceleration_kinematics(q, q, short_q, target));
     } catch (const dynibo::Error& error) {
         caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
             && std::string(error.what()).find("same length") != std::string::npos;

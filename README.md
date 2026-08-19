@@ -137,7 +137,7 @@ The Python binding owns its reusable native workspace:
 ```python
 from dynibo import Robot
 
-with Robot("robot.urdf") as robot:
+with Robot.from_urdf("robot.urdf") as robot:
     tool = robot.link_id("tool")
     q = [0.0] * robot.joint_count
     pose = robot.forward_kinematics(q, tool)
@@ -167,8 +167,9 @@ If dynibo was installed to a custom prefix, configure the consumer with
 
 ## Examples
 
-Complete usage examples are available in the [`examples/`](examples/)
-directory.
+Complete Rust, Python, and C examples are available in the
+[`examples/`](examples/) directory. Each example exercises all of the main
+kinematics and dynamics methods listed above.
 
 ## Supported models
 

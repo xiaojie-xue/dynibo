@@ -127,7 +127,7 @@ Python binding 会在内部持有并复用原生 workspace：
 ```python
 from dynibo import Robot
 
-with Robot("robot.urdf") as robot:
+with Robot.from_urdf("robot.urdf") as robot:
     tool = robot.link_id("tool")
     q = [0.0] * robot.joint_count
     pose = robot.forward_kinematics(q, tool)
@@ -156,7 +156,8 @@ target_link_libraries(my_robot PRIVATE dynibo::dynibo)
 
 ## 示例
 
-完整调用示例见 [`examples/`](examples/) 目录。
+Rust、Python 和 C 的完整调用示例见 [`examples/`](examples/) 目录；每个示例均覆盖
+上文列出的全部主要运动学与动力学方法。
 
 ## 支持的模型
 

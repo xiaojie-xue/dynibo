@@ -38,9 +38,14 @@ int main(int argc, char **argv) {
     CHECK(defaults.damping > 0.0);
     CHECK(defaults.max_step_norm > 0.0);
 
+    DyniboRobot *invalid_mode_robot = (DyniboRobot *)(uintptr_t)1;
+    CHECK(dynibo_robot_from_urdf_with_base(
+        argv[1], 99, &invalid_mode_robot) == DYNIBO_STATUS_INVALID_ARGUMENT);
+    CHECK(invalid_mode_robot == NULL);
+
     DyniboRobot *robot = NULL;
     DyniboWorkspace *workspace = NULL;
-    check(dynibo_robot_load_urdf(argv[1], &robot));
+    check(dynibo_robot_from_urdf(argv[1], &robot));
     check(dynibo_workspace_create(robot, &workspace));
     CHECK(strcmp(dynibo_robot_name(robot), "test_arm") == 0);
     CHECK(dynibo_robot_joint_count(robot) == 4);
@@ -65,17 +70,22 @@ int main(int argc, char **argv) {
     check(dynibo_jacobian(robot, workspace, q, n, target, jacobian, 6 * n));
 
     const DyniboPose identity = {{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0, 1.0}};
-    const DyniboTwist zero_twist = {{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}};
+    DyniboPose shifted_base = identity;
+    shifted_base.translation[0] = 0.25;
+    check(dynibo_robot_set_base_frame(robot, &shifted_base));
+    check(dynibo_forward_kinematics(robot, workspace, q, n, target, &pose));
+    CHECK(fabs(pose.translation[0] - 0.87) < 1.0e-12);
+    check(dynibo_robot_set_base_frame(robot, &identity));
+    check(dynibo_forward_kinematics(robot, workspace, q, n, target, &pose));
     DyniboTwist twist;
-    check(dynibo_forward_velocity(
-        robot, workspace, q, q, n, target, &identity, &identity, &twist));
-    check(dynibo_forward_acceleration(
+    check(dynibo_forward_velocity_kinematics(
+        robot, workspace, q, q, n, target, &identity, &twist));
+    check(dynibo_forward_acceleration_kinematics(
         robot, workspace, q, q, q, n, target, &twist));
     check(dynibo_gravity(
-        robot, workspace, q, n, &identity, NULL, 0, output, n));
+        robot, workspace, q, n, NULL, 0, output, n));
     check(dynibo_inverse_dynamics(
-        robot, workspace, q, q, q, n, &identity, zero_twist, zero_twist,
-        NULL, 0, output, n));
+        robot, workspace, q, q, q, n, NULL, 0, output, n));
 
     DyniboIkOptions options = defaults;
     check(dynibo_inverse_kinematics(
@@ -93,14 +103,14 @@ int main(int argc, char **argv) {
     const double expected_dynamics[4] = {
         1.7649236924309104, 38.319908179086525,
         17.136450444507805, 0.05169960944426318};
-    check(dynibo_gravity(robot, workspace, reference_q, n, &identity,
-                       NULL, 0, output, n));
+    check(dynibo_gravity(
+        robot, workspace, reference_q, n, NULL, 0, output, n));
     for (size_t index = 0; index < n; ++index) {
         CHECK(fabs(output[index] - expected_gravity[index]) < 2.0e-10);
     }
     check(dynibo_inverse_dynamics(
         robot, workspace, reference_q, reference_qd, reference_qdd, n,
-        &identity, zero_twist, zero_twist, NULL, 0, output, n));
+        NULL, 0, output, n));
     for (size_t index = 0; index < n; ++index) {
         CHECK(fabs(output[index] - expected_dynamics[index]) < 2.0e-10);
     }
@@ -118,10 +128,10 @@ int main(int argc, char **argv) {
     double gravity_vec[4];
     double bias_vec[4];
     check(dynibo_gravity(
-        robot, workspace, reference_q, n, &identity, NULL, 0, gravity_vec, n));
+        robot, workspace, reference_q, n, NULL, 0, gravity_vec, n));
     check(dynibo_inverse_dynamics(
         robot, workspace, reference_q, reference_qd, zero_qdd, n,
-        &identity, zero_twist, zero_twist, NULL, 0, bias_vec, n));
+        NULL, 0, bias_vec, n));
     for (size_t row = 0; row < n; ++row) {
         const double reconstructed = gravity_vec[row] + velocity_product[row];
         CHECK(fabs(reconstructed - bias_vec[row]) < 1.0e-10);
@@ -130,7 +140,7 @@ int main(int argc, char **argv) {
         robot, workspace, reference_q, reference_qd, n, target,
         jacobian_derivative, 6 * n));
     DyniboTwist origin_acceleration;
-    check(dynibo_forward_acceleration(
+    check(dynibo_forward_acceleration_kinematics(
         robot, workspace, reference_q, reference_qd, zero_qdd, n, target,
         &origin_acceleration));
     for (size_t row = 0; row < 6; ++row) {
@@ -168,11 +178,11 @@ int main(int argc, char **argv) {
         robot, workspace, q, n, target, &invalid_pose, options, output, n)
         == DYNIBO_STATUS_INVALID_ARGUMENT);
     CHECK(dynibo_gravity(
-        robot, workspace, q, n, &identity, NULL, 1, output, n)
+        robot, workspace, q, n, NULL, 1, output, n)
         == DYNIBO_STATUS_INVALID_ARGUMENT);
     const DyniboLoad invalid_load = {SIZE_MAX, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}};
     CHECK(dynibo_gravity(
-        robot, workspace, q, n, &identity, &invalid_load, 1, output, n)
+        robot, workspace, q, n, &invalid_load, 1, output, n)
         == DYNIBO_STATUS_INVALID_ARGUMENT);
     CHECK(dynibo_mass_matrix(
         robot, workspace, reference_q, n, square, n * n - 1)

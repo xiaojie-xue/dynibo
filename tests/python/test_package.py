@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import unittest
 from pathlib import Path
 
@@ -21,7 +22,7 @@ if Path(dynibo.__file__).resolve().parent == SOURCE_PACKAGE:
 
 class PackageTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.robot = dynibo.Robot(URDF)
+        self.robot = dynibo.Robot.from_urdf(URDF)
         self.addCleanup(self.robot.close)
         self.target = self.robot.link_id("test_link_4")
         self.q = [0.0] * self.robot.joint_count
@@ -36,9 +37,15 @@ class PackageTests(unittest.TestCase):
         self.assertAlmostEqual(pose.translation[1], 0.0)
         self.assertAlmostEqual(pose.translation[2], 0.108)
         self.assertEqual(len(self.robot.jacobian(self.q, self.target)), 24)
-        self.assertEqual(self.robot.forward_velocity(self.q, self.q, self.target), dynibo.Twist())
         self.assertEqual(
-            self.robot.forward_acceleration(self.q, self.q, self.q, self.target), dynibo.Twist()
+            self.robot.forward_velocity_kinematics(self.q, self.q, self.target),
+            dynibo.Twist(),
+        )
+        self.assertEqual(
+            self.robot.forward_acceleration_kinematics(
+                self.q, self.q, self.q, self.target
+            ),
+            dynibo.Twist(),
         )
 
     def test_dynamics_and_inverse_kinematics(self) -> None:
@@ -80,17 +87,21 @@ class PackageTests(unittest.TestCase):
             reconstructed = gravity[row] + velocity_product[row]
             self.assertAlmostEqual(reconstructed, bias[row], delta=1.0e-10)
 
-        acceleration = self.robot.forward_acceleration(q, qd, zero, self.target)
+        acceleration = self.robot.forward_acceleration_kinematics(
+            q, qd, zero, self.target
+        )
         expected = tuple(acceleration.angular) + tuple(acceleration.linear)
         for row in range(6):
             contracted = sum(derivative[column * 6 + row] * qd[column] for column in range(n))
             self.assertAlmostEqual(contracted, expected[row], delta=1.0e-10)
 
     def test_floating_base_shapes_state_and_ik_contract(self) -> None:
-        with dynibo.Robot(URDF, base_mode=dynibo.BaseMode.FLOATING) as robot:
+        with dynibo.Robot.from_urdf_with_base(
+            URDF, dynibo.BaseMode.FLOATING
+        ) as robot:
             target = robot.link_id("test_link_4")
             q = [0.0] * robot.joint_count
-            robot.set_base_state(
+            robot.set_floating_base_state(
                 dynibo.Pose(translation=(0.2, -0.3, 0.4)),
                 dynibo.Twist(angular=(0.1, -0.2, 0.3), linear=(0.4, 0.2, -0.1)),
                 dynibo.Twist(angular=(-0.1, 0.05, 0.2), linear=(0.3, -0.2, 0.1)),
@@ -115,7 +126,7 @@ class PackageTests(unittest.TestCase):
             self.robot.inverse_kinematics(self.q, self.target, pose)
 
         with self.assertRaises(dynibo.ModelError):
-            dynibo.Robot(URDF.with_name("missing-model.urdf"))
+            dynibo.Robot.from_urdf(URDF.with_name("missing-model.urdf"))
 
         unreachable = dynibo.Pose(translation=(100.0, 0.0, 0.0))
         options = dynibo.IkOptions(max_iterations=1)
@@ -126,12 +137,19 @@ class PackageTests(unittest.TestCase):
         moving = [0.1, -0.2, 0.3, -0.4]
         base = dynibo.Pose(rotation_xyzw=(2**-0.5, 0.0, 0.0, 2**-0.5))
         tool = dynibo.Pose(translation=(0.1, -0.03, 0.2))
-        origin_velocity = self.robot.forward_velocity(self.q, moving, self.target)
-        tool_velocity = self.robot.forward_velocity(
-            self.q, moving, self.target, base=base, tool=tool
+        identity_pose = self.robot.forward_kinematics(self.q, self.target)
+        origin_velocity = self.robot.forward_velocity_kinematics(
+            self.q, moving, self.target
         )
+        identity_gravity = self.robot.gravity(self.q)
+        self.robot.set_base_frame(base)
+        transformed_pose = self.robot.forward_kinematics(self.q, self.target)
+        tool_velocity = self.robot.forward_velocity_kinematics(
+            self.q, moving, self.target, tool=tool
+        )
+        self.assertNotEqual(transformed_pose, identity_pose)
         self.assertNotEqual(tool_velocity, origin_velocity)
-        self.assertNotEqual(self.robot.gravity(self.q, base=base), self.robot.gravity(self.q))
+        self.assertNotEqual(self.robot.gravity(self.q), identity_gravity)
 
         pose = self.robot.forward_kinematics(self.q, self.target)
         options = dynibo.IkOptions(
@@ -192,9 +210,11 @@ class PackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "expected 4 elements"):
             self.robot.mass_matrix(ChangingLengthSequence())
         with self.assertRaisesRegex(ValueError, "q and qd must have the same length"):
-            self.robot.forward_velocity(self.q, self.q[:-1], self.target)
+            self.robot.forward_velocity_kinematics(self.q, self.q[:-1], self.target)
         with self.assertRaisesRegex(ValueError, "q and qdd must have the same length"):
-            self.robot.forward_acceleration(self.q, self.q, self.q[:-1], self.target)
+            self.robot.forward_acceleration_kinematics(
+                self.q, self.q, self.q[:-1], self.target
+            )
         with self.assertRaisesRegex(ValueError, "q and qd must have the same length"):
             self.robot.inverse_dynamics(self.q, self.q[:-1], self.q)
         with self.assertRaisesRegex(ValueError, "q and qd must have the same length"):
@@ -204,15 +224,39 @@ class PackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "expected 4 elements"):
             self.robot.mass_matrix(self.q[:-1])
         with self.assertRaisesRegex(ValueError, "pose translation must contain exactly 3"):
-            self.robot.gravity(self.q, base=dynibo.Pose(translation=(0.0, 0.0)))
+            self.robot.set_base_frame(dynibo.Pose(translation=(0.0, 0.0)))
         with self.assertRaisesRegex(ValueError, "load force must contain exactly 3"):
             self.robot.gravity(self.q, loads=[dynibo.Load(self.target, force=(1.0, 2.0))])
+        with self.assertRaisesRegex(TypeError, "base_mode must be"):
+            dynibo.Robot.from_urdf_with_base(URDF, 2)
 
-        with dynibo.Robot(URDF) as managed:
+        with dynibo.Robot.from_urdf(URDF) as managed:
             self.assertEqual(managed.name, "test_arm")
         managed.close()
         with self.assertRaisesRegex(ValueError, "robot must not be null"):
             managed.forward_kinematics(self.q, self.target)
+
+    def test_shared_robot_serializes_native_workspace_access(self) -> None:
+        expected = self.robot.jacobian(self.q, self.target)
+        barrier = threading.Barrier(4)
+        failures: list[BaseException] = []
+
+        def calculate() -> None:
+            try:
+                barrier.wait()
+                for _ in range(50):
+                    self.assertEqual(self.robot.jacobian(self.q, self.target), expected)
+                    self.robot.mass_matrix(self.q)
+            except BaseException as error:
+                failures.append(error)
+
+        threads = [threading.Thread(target=calculate) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        if failures:
+            raise failures[0]
 
 
 if __name__ == "__main__":

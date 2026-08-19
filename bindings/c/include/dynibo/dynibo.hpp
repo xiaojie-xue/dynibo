@@ -40,7 +40,7 @@ public:
     explicit Robot(
         const std::string& urdf_path,
         DyniboBaseMode base_mode = DYNIBO_BASE_FIXED) {
-        check(dynibo_robot_load_urdf_with_base(
+        check(dynibo_robot_from_urdf_with_base(
             urdf_path.c_str(), base_mode, &robot_));
         try {
             check(dynibo_workspace_create(robot_, &workspace_));
@@ -152,29 +152,32 @@ public:
         return result;
     }
 
-    DyniboTwist forward_velocity(
+    DyniboTwist forward_velocity_kinematics(
         const std::vector<double>& q, const std::vector<double>& qd,
-        std::size_t target, const DyniboPose& base = identity_pose(),
-        const DyniboPose& tool = identity_pose()) {
+        std::size_t target, const DyniboPose& tool = identity_pose()) {
         if (q.size() != qd.size()) {
             throw Error(DYNIBO_STATUS_INVALID_ARGUMENT,
                         "q and qd must have the same length");
         }
         DyniboTwist result{};
-        check(dynibo_forward_velocity(robot_, workspace_, q.data(), qd.data(),
-                                    q.size(), target, &base, &tool, &result));
+        check(dynibo_forward_velocity_kinematics(robot_, workspace_, q.data(), qd.data(),
+                                    q.size(), target, &tool, &result));
         return result;
     }
 
-    void set_base_state(
+    void set_base_frame(const DyniboPose& frame) {
+        check(dynibo_robot_set_base_frame(robot_, &frame));
+    }
+
+    void set_floating_base_state(
         const DyniboPose& frame,
         DyniboTwist velocity = {},
         DyniboTwist acceleration = {}) {
-        check(dynibo_robot_set_base_state(
+        check(dynibo_robot_set_floating_base_state(
             robot_, &frame, velocity, acceleration));
     }
 
-    DyniboTwist forward_acceleration(
+    DyniboTwist forward_acceleration_kinematics(
         const std::vector<double>& q, const std::vector<double>& qd,
         const std::vector<double>& qdd, std::size_t target) {
         if (q.size() != qd.size() || q.size() != qdd.size()) {
@@ -182,7 +185,7 @@ public:
                         "q, qd, and qdd must have the same length");
         }
         DyniboTwist result{};
-        check(dynibo_forward_acceleration(
+        check(dynibo_forward_acceleration_kinematics(
             robot_, workspace_, q.data(), qd.data(), qdd.data(), q.size(),
             target, &result));
         return result;
@@ -190,10 +193,9 @@ public:
 
     std::vector<double> gravity(
         const std::vector<double>& q,
-        const DyniboPose& base = identity_pose(),
         const std::vector<DyniboLoad>& loads = {}) {
         std::vector<double> result(generalized_count());
-        check(dynibo_gravity(robot_, workspace_, q.data(), q.size(), &base,
+        check(dynibo_gravity(robot_, workspace_, q.data(), q.size(),
                            loads.data(), loads.size(), result.data(), result.size()));
         return result;
     }
@@ -201,8 +203,6 @@ public:
     std::vector<double> inverse_dynamics(
         const std::vector<double>& q, const std::vector<double>& qd,
         const std::vector<double>& qdd,
-        const DyniboPose& base = identity_pose(),
-        DyniboTwist base_velocity = {}, DyniboTwist base_acceleration = {},
         const std::vector<DyniboLoad>& loads = {}) {
         if (q.size() != qd.size() || q.size() != qdd.size()) {
             throw Error(DYNIBO_STATUS_INVALID_ARGUMENT,
@@ -211,8 +211,7 @@ public:
         std::vector<double> result(generalized_count());
         check(dynibo_inverse_dynamics(
             robot_, workspace_, q.data(), qd.data(), qdd.data(), q.size(),
-            &base, base_velocity, base_acceleration, loads.data(), loads.size(),
-            result.data(), result.size()));
+            loads.data(), loads.size(), result.data(), result.size()));
         return result;
     }
 

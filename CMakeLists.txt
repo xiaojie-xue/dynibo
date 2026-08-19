@@ -65,7 +65,7 @@ add_dependencies(dynibo_c dynibo_c_build)
 add_library(dynibo::dynibo ALIAS dynibo_c)
 
 if(DYNIBO_BUILD_EXAMPLES)
-    add_executable(dynibo_c_example bindings/c/examples/basic.c)
+    add_executable(dynibo_c_example examples/c/franka.c)
     target_link_libraries(dynibo_c_example PRIVATE dynibo::dynibo)
     add_executable(dynibo_cpp_example bindings/c/examples/basic.cpp)
     target_compile_features(dynibo_cpp_example PRIVATE cxx_std_17)

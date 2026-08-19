@@ -8,8 +8,8 @@ use std::{
 
 use dynibo_c::{
     DyniboLoad, DyniboPose, DyniboRobot, DyniboStatus, DyniboTwist, DyniboWorkspace,
-    dynibo_forward_velocity, dynibo_gravity, dynibo_inverse_dynamics, dynibo_robot_destroy,
-    dynibo_robot_joint_count, dynibo_robot_link_id, dynibo_robot_load_urdf,
+    dynibo_forward_velocity_kinematics, dynibo_gravity, dynibo_inverse_dynamics,
+    dynibo_robot_destroy, dynibo_robot_from_urdf, dynibo_robot_joint_count, dynibo_robot_link_id,
     dynibo_workspace_create, dynibo_workspace_destroy,
 };
 
@@ -58,7 +58,7 @@ fn fixed_base_abi_hot_paths_do_not_allocate() {
     let mut workspace: *mut DyniboWorkspace = ptr::null_mut();
     unsafe {
         assert_eq!(
-            dynibo_robot_load_urdf(path.as_ptr(), &mut robot),
+            dynibo_robot_from_urdf(path.as_ptr(), &mut robot),
             DyniboStatus::Ok
         );
         assert_eq!(
@@ -74,8 +74,7 @@ fn fixed_base_abi_hot_paths_do_not_allocate() {
         let q = [0.2, 1.0, -0.7, 0.4];
         let qd = [-0.3, 0.5, -0.2, 0.8];
         let qdd = [0.7, -0.4, 0.1, 0.3];
-        let pose = DyniboPose::default();
-        let zero = DyniboTwist::default();
+        let tool = DyniboPose::default();
         let load = DyniboLoad {
             link_id: target,
             torque: [0.1, -0.2, 0.3],
@@ -88,15 +87,14 @@ fn fixed_base_abi_hot_paths_do_not_allocate() {
         COUNTING.store(true, Ordering::SeqCst);
         for _ in 0..10 {
             assert_eq!(
-                dynibo_forward_velocity(
+                dynibo_forward_velocity_kinematics(
                     robot,
                     workspace,
                     q.as_ptr(),
                     qd.as_ptr(),
                     n,
                     target,
-                    &pose,
-                    &pose,
+                    &tool,
                     &mut twist,
                 ),
                 DyniboStatus::Ok
@@ -107,7 +105,6 @@ fn fixed_base_abi_hot_paths_do_not_allocate() {
                     workspace,
                     q.as_ptr(),
                     n,
-                    &pose,
                     &load,
                     1,
                     output.as_mut_ptr(),
@@ -123,9 +120,6 @@ fn fixed_base_abi_hot_paths_do_not_allocate() {
                     qd.as_ptr(),
                     qdd.as_ptr(),
                     n,
-                    &pose,
-                    zero,
-                    zero,
                     &load,
                     1,
                     output.as_mut_ptr(),

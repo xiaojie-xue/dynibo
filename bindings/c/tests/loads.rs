@@ -1,8 +1,8 @@
 use std::{ffi::CString, path::PathBuf, ptr};
 
 use dynibo_c::{
-    DyniboLoad, DyniboPose, DyniboRobot, DyniboStatus, DyniboWorkspace, dynibo_gravity,
-    dynibo_robot_destroy, dynibo_robot_joint_count, dynibo_robot_link_id, dynibo_robot_load_urdf,
+    DyniboLoad, DyniboRobot, DyniboStatus, DyniboWorkspace, dynibo_gravity, dynibo_robot_destroy,
+    dynibo_robot_from_urdf, dynibo_robot_joint_count, dynibo_robot_link_id,
     dynibo_workspace_create, dynibo_workspace_destroy,
 };
 
@@ -21,7 +21,7 @@ impl Fixture {
         let mut workspace = ptr::null_mut();
         unsafe {
             assert_eq!(
-                dynibo_robot_load_urdf(path.as_ptr(), &mut robot),
+                dynibo_robot_from_urdf(path.as_ptr(), &mut robot),
                 DyniboStatus::Ok
             );
             assert_eq!(
@@ -57,7 +57,6 @@ impl Fixture {
                     self.workspace,
                     q.as_ptr(),
                     q.len(),
-                    &DyniboPose::default(),
                     load_pointer,
                     loads.len(),
                     output.as_mut_ptr(),
