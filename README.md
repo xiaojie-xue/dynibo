@@ -56,7 +56,7 @@ dynamics interfaces:
 - `forward_acceleration_kinematics` — spatial acceleration
 - `inverse_kinematics` — damped least-squares IK
 - `mass_matrix` — joint-space mass matrix
-- `coriolis_matrix` — Coriolis and centrifugal matrix
+- `velocity_product_forces` — Coriolis and centrifugal generalized forces
 - `gravity` — gravity compensation with optional external loads
 - `inverse_dynamics` — recursive Newton–Euler inverse dynamics
 
@@ -70,7 +70,7 @@ Dynibo is thoroughly unit-tested. Tests cover finite-difference kinematics,
 dynamics regressions, branched robots and external loads, inverse kinematics,
 invalid inputs, workspace ownership and reuse, and allocation-free calculation.
 An independent Pinocchio oracle also compares complete FK, Jacobian, Jacobian
-time-derivative, mass matrix, Coriolis matrix, gravity, and RNEA outputs over
+time-derivative, mass matrix, velocity-product forces, gravity, and RNEA outputs over
 deterministic robot states.
 
 The Rust core contains no project-owned `unsafe` code. CI requires at least 85%

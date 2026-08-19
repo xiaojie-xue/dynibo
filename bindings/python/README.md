@@ -13,6 +13,7 @@ with Robot("robot.urdf") as robot:
     pose = robot.forward_kinematics(q, tool)
     jacobian = robot.jacobian(q, tool)
     gravity = robot.gravity(q)
+    velocity_forces = robot.velocity_product_forces(q, [0.0] * robot.joint_count)
 ```
 
 The Jacobian is a flat column-major `6 x N` tuple. With NumPy, convert it using

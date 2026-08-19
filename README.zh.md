@@ -49,7 +49,7 @@ Dynibo 专注于最常用的机器人运动学与动力学接口：
 - `forward_acceleration_kinematics` — 空间加速度
 - `inverse_kinematics` — 阻尼最小二乘逆运动学
 - `mass_matrix` — 关节空间质量矩阵
-- `coriolis_matrix` — 离心力 + 科氏力矩阵
+- `velocity_product_forces` — 离心力 + 科氏广义力
 - `gravity` — 重力补偿，可附加外部载荷
 - `inverse_dynamics` — 递归 Newton–Euler 逆动力学
 
@@ -60,7 +60,7 @@ API 围绕少量核心类型构建：`Robot`、`Workspace`、`LinkId`、`Frame`�
 
 Dynibo 经过了深入的单元测试。测试覆盖有限差分运动学、动力学回归、树状机器人与外部
 载荷、逆运动学、非法输入、Workspace 归属与复用，以及计算期零分配。独立的 Pinocchio
-oracle 还会在确定性机器人状态下完整对比 FK、Jacobian、Jacobian 时间导数、质量矩阵、科氏矩阵、gravity 和 RNEA 输出。
+oracle 还会在确定性机器人状态下完整对比 FK、Jacobian、Jacobian 时间导数、质量矩阵、速度乘积力、gravity 和 RNEA 输出。
 
 Rust 核心不包含项目自身的 `unsafe` 代码。CI 要求 Rust workspace 的行覆盖率不低于
 85%，分支覆盖率不低于 75%。
