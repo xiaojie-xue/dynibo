@@ -148,7 +148,7 @@ impl PinocchioContext {
         let joint_mappings = robot
             .joints()
             .iter()
-            .map(|joint| {
+            .filter_map(|joint| {
                 let name = CString::new(joint.name()).unwrap();
                 // SAFETY: the context and name are valid for each query.
                 let configuration_index = unsafe {
@@ -162,11 +162,12 @@ impl PinocchioContext {
                 let velocity_index = unsafe {
                     dynibo_pinocchio_joint_velocity_index(pointer.as_ptr(), name.as_ptr())
                 };
-                JointMapping {
+                let mapping = JointMapping {
                     configuration_index,
                     configuration_dimension,
                     velocity_index: (velocity_index < velocity_size).then_some(velocity_index),
-                }
+                };
+                mapping.velocity_index.map(|_| mapping)
             })
             .collect();
         Self {
@@ -444,9 +445,7 @@ impl PinocchioContext {
         output[..3].copy_from_slice(world_torque.as_slice());
         output[3..6].copy_from_slice(world_force.as_slice());
         for (joint, mapping) in self.joint_mappings.iter().enumerate() {
-            if let Some(index) = mapping.velocity_index {
-                output[6 + joint] = pinocchio[index];
-            }
+            output[6 + joint] = pinocchio[mapping.velocity_index.expect("active joint")];
         }
         output
     }
@@ -660,39 +659,35 @@ impl PinocchioContext {
     fn dynibo_joint_order(&self, pinocchio: &[f64]) -> Vec<f64> {
         self.joint_mappings
             .iter()
-            .map(|mapping| mapping.velocity_index.map_or(0.0, |index| pinocchio[index]))
+            .map(|mapping| pinocchio[mapping.velocity_index.expect("active joint")])
             .collect()
     }
 
     /// Reorders a column-major `6 x nv` Pinocchio matrix into dynibo's joint
     /// order, swapping the linear-first Pinocchio rows into dynibo's
-    /// angular-first layout and keeping zero columns for fixed joints.
+    /// angular-first layout.
     fn dynibo_spatial_matrix_order(&self, pinocchio: &[f64]) -> Vec<f64> {
         let mut dynibo_order = vec![0.0; 6 * self.joint_mappings.len()];
         for (joint, mapping) in self.joint_mappings.iter().enumerate() {
-            if let Some(column) = mapping.velocity_index {
-                for row in 0..6 {
-                    let pinocchio_row = if row < 3 { row + 3 } else { row - 3 };
-                    dynibo_order[6 * joint + row] = pinocchio[6 * column + pinocchio_row];
-                }
+            let column = mapping.velocity_index.expect("active joint");
+            for row in 0..6 {
+                let pinocchio_row = if row < 3 { row + 3 } else { row - 3 };
+                dynibo_order[6 * joint + row] = pinocchio[6 * column + pinocchio_row];
             }
         }
         dynibo_order
     }
 
-    /// Reorders a column-major `nv x nv` Pinocchio matrix into dynibo's
-    /// joint order, keeping zero rows and columns for fixed joints.
+    /// Reorders a column-major `nv x nv` Pinocchio matrix into dynibo's joint order.
     fn dynibo_square_order(&self, pinocchio: &[f64]) -> Vec<f64> {
         let joint_count = self.joint_mappings.len();
         let mut dynibo_order = vec![0.0; joint_count * joint_count];
         for (row, row_mapping) in self.joint_mappings.iter().enumerate() {
             for (column, column_mapping) in self.joint_mappings.iter().enumerate() {
-                if let (Some(row_index), Some(column_index)) =
-                    (row_mapping.velocity_index, column_mapping.velocity_index)
-                {
-                    dynibo_order[column * joint_count + row] =
-                        pinocchio[column_index * self.velocity_size + row_index];
-                }
+                let row_index = row_mapping.velocity_index.expect("active joint");
+                let column_index = column_mapping.velocity_index.expect("active joint");
+                dynibo_order[column * joint_count + row] =
+                    pinocchio[column_index * self.velocity_size + row_index];
             }
         }
         dynibo_order
@@ -726,6 +721,15 @@ fn deterministic_state(sample: usize) -> ([f64; 4], [f64; 4], [f64; 4]) {
         ],
         std::array::from_fn(|joint| 0.8 * wave(joint, 0.9)),
         std::array::from_fn(|joint| 1.1 * wave(joint, 1.7)),
+    )
+}
+
+fn deterministic_mixed_state(sample: usize) -> ([f64; 3], [f64; 3], [f64; 3]) {
+    let (q, qd, qdd) = deterministic_state(sample);
+    (
+        [q[0], q[2], q[3]],
+        [qd[0], qd[2], qd[3]],
+        [qdd[0], qdd[2], qdd[3]],
     )
 }
 
@@ -851,14 +855,14 @@ fn serial_arm_calculations_match_pinocchio() {
 fn mixed_link_kinematics_match_pinocchio() {
     let path = fixture();
     let robot = Robot::from_urdf(&path).unwrap();
-    assert_eq!(robot.joint_count(), 4);
+    assert_eq!(robot.joint_count(), 3);
     let mut workspace = robot.workspace();
 
     for link_name in ["base", "link_a", "mounted_link", "slider_link", "tool"] {
         let target = robot.link_id(link_name).unwrap();
         let mut pinocchio = PinocchioContext::new(&robot, &path, link_name);
         for sample in 0..32 {
-            let (q, qd, qdd) = deterministic_state(sample);
+            let (q, qd, qdd) = deterministic_mixed_state(sample);
             let (pin_q, pin_qd, pin_qdd) = pinocchio.state(&q, &qd, &qdd);
             let (expected_rotation, expected_translation) = pinocchio.frame(&pin_q);
             let actual_frame = robot
@@ -948,10 +952,11 @@ fn mass_matrices_match_pinocchio() {
     let robot = Robot::from_urdf(&path).unwrap();
     let mut workspace = robot.workspace();
     let mut pinocchio = PinocchioContext::new(&robot, &path, "tool");
+    let zero3 = [0.0; 3];
     for sample in 0..64 {
-        let (q, _, _) = deterministic_state(sample);
-        let (pin_q, _, _) = pinocchio.state(&q, &zero4, &zero4);
-        let mut mass = vec![f64::NAN; 16];
+        let (q, _, _) = deterministic_mixed_state(sample);
+        let (pin_q, _, _) = pinocchio.state(&q, &zero3, &zero3);
+        let mut mass = vec![f64::NAN; 9];
         robot.mass_matrix(&q, &mut workspace, &mut mass).unwrap();
         assert_close(
             &mass,
@@ -1018,17 +1023,18 @@ fn velocity_products_match_pinocchio() {
     let mut workspace = robot.workspace();
     let mut pinocchio = PinocchioContext::new(&robot, &path, "tool");
     for sample in 0..64 {
-        let (q, qd, _) = deterministic_state(sample);
-        let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero4);
-        let mut velocity_product = vec![f64::NAN; 4];
+        let (q, qd, _) = deterministic_mixed_state(sample);
+        let zero = [0.0; 3];
+        let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero);
+        let mut velocity_product = vec![f64::NAN; 3];
         robot
             .velocity_product_forces(&q, &qd, &mut workspace, &mut velocity_product)
             .unwrap();
         let coriolis = pinocchio.coriolis_matrix(&pin_q, &pin_qd);
-        let expected: Vec<f64> = (0..4)
+        let expected: Vec<f64> = (0..3)
             .map(|row| {
-                (0..4)
-                    .map(|column| coriolis[column * 4 + row] * qd[column])
+                (0..3)
+                    .map(|column| coriolis[column * 3 + row] * qd[column])
                     .sum()
             })
             .collect();
@@ -1102,9 +1108,10 @@ fn jacobian_time_variations_match_pinocchio() {
         let target = robot.link_id(link_name).unwrap();
         let mut pinocchio = PinocchioContext::new(&robot, &path, link_name);
         for sample in 0..32 {
-            let (q, qd, _) = deterministic_state(sample);
-            let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero4);
-            let mut derivative = vec![f64::NAN; 24];
+            let (q, qd, _) = deterministic_mixed_state(sample);
+            let zero = [0.0; 3];
+            let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero);
+            let mut derivative = vec![f64::NAN; 18];
             robot
                 .jacobian_derivative(&q, &qd, target, &mut workspace, &mut derivative)
                 .unwrap();
@@ -1157,9 +1164,9 @@ fn mixed_joint_gravity_and_rnea_match_pinocchio() {
     let mut pinocchio = PinocchioContext::new(&robot, &path, "tool");
 
     for sample in 0..64 {
-        let (q, qd, qdd) = deterministic_state(sample);
+        let (q, qd, qdd) = deterministic_mixed_state(sample);
         let (pin_q, pin_qd, pin_qdd) = pinocchio.state(&q, &qd, &qdd);
-        let mut actual_gravity = [f64::NAN; 4];
+        let mut actual_gravity = [f64::NAN; 3];
         robot
             .gravity(&q, &[], &mut workspace, &mut actual_gravity)
             .unwrap();
@@ -1172,7 +1179,7 @@ fn mixed_joint_gravity_and_rnea_match_pinocchio() {
             &format!("gravity sample {sample}"),
         );
 
-        let mut actual_torque = [f64::NAN; 4];
+        let mut actual_torque = [f64::NAN; 3];
         robot
             .inverse_dynamics(&q, &qd, &qdd, &[], &mut workspace, &mut actual_torque)
             .unwrap();
@@ -1205,9 +1212,9 @@ fn mixed_joint_external_loads_match_pinocchio() {
         };
         let mut pinocchio = PinocchioContext::new(&robot, &path, link_name);
         for sample in 0..16 {
-            let (q, qd, qdd) = deterministic_state(sample);
+            let (q, qd, qdd) = deterministic_mixed_state(sample);
             let (pin_q, pin_qd, pin_qdd) = pinocchio.state(&q, &qd, &qdd);
-            let mut actual = [f64::NAN; 4];
+            let mut actual = [f64::NAN; 3];
             robot
                 .inverse_dynamics(&q, &qd, &qdd, &[indexed_load], &mut workspace, &mut actual)
                 .unwrap();
@@ -1399,11 +1406,10 @@ fn mixed_joint_ik_reaches_pinocchio_generated_targets() {
         let phase = (sample + 1) as f64;
         let target_q = [
             1.0 * (phase * 0.47).sin(),
-            0.0,
             0.22 * (phase * 0.31).sin(),
             1.7 * (phase * 0.59).sin(),
         ];
-        let zero = [0.0; 4];
+        let zero = [0.0; 3];
         let (pin_target_q, _, _) = pinocchio.state(&target_q, &zero, &zero);
         let (rotation, translation) = pinocchio.frame(&pin_target_q);
         let desired = Frame::from_parts(
@@ -1412,11 +1418,10 @@ fn mixed_joint_ik_reaches_pinocchio_generated_targets() {
         );
         let initial = [
             target_q[0] + 0.12 * (phase * 0.73).sin(),
-            0.0,
-            target_q[2] + 0.05 * (phase * 0.41).cos(),
-            target_q[3] - 0.15 * (phase * 0.37).sin(),
+            target_q[1] + 0.05 * (phase * 0.41).cos(),
+            target_q[2] - 0.15 * (phase * 0.37).sin(),
         ];
-        let mut solution = [f64::NAN; 4];
+        let mut solution = [f64::NAN; 3];
         robot
             .inverse_kinematics(
                 &initial,
@@ -1444,7 +1449,6 @@ fn mixed_joint_ik_reaches_pinocchio_generated_targets() {
             1.0e-10,
             &format!("IK translation sample {sample}"),
         );
-        assert_eq!(solution[1], 0.0, "fixed coordinate changed");
     }
 }
 
@@ -1457,7 +1461,7 @@ fn floating_base_kinematics_and_dynamics_match_free_flyer_pinocchio() {
     let mut pinocchio = PinocchioContext::new_floating(&robot, &path, "tool");
 
     for sample in 0..12 {
-        let (q, qd, qdd) = deterministic_state(sample);
+        let (q, qd, qdd) = deterministic_mixed_state(sample);
         let phase = sample as f64 + 1.0;
         let base = Frame::from_parts(
             Translation3::new(0.2, -0.3, 0.4),
@@ -1588,7 +1592,6 @@ fn floating_base_kinematics_and_dynamics_match_free_flyer_pinocchio() {
             qd[0],
             qd[1],
             qd[2],
-            qd[3],
         ];
         let expected: Vec<f64> = (0..n)
             .map(|row| {
@@ -1615,7 +1618,7 @@ fn mixed_joint_moving_base_rnea_matches_free_flyer_pinocchio() {
     let mut pinocchio = PinocchioContext::new_floating(&robot, &path, "tool");
 
     for sample in 0..16 {
-        let (q, qd, qdd) = deterministic_state(sample);
+        let (q, qd, qdd) = deterministic_mixed_state(sample);
         let (pin_q, pin_qd, pin_qdd) = pinocchio.state(&q, &qd, &qdd);
         let phase = sample as f64 + 1.0;
         let base = Frame::from_parts(
@@ -1637,7 +1640,7 @@ fn mixed_joint_moving_base_rnea_matches_free_flyer_pinocchio() {
         robot
             .set_floating_base_state(base, base_velocity, base_acceleration)
             .unwrap();
-        let mut actual = [f64::NAN; 10];
+        let mut actual = [f64::NAN; 9];
         robot
             .inverse_dynamics(&q, &qd, &qdd, &[], &mut workspace, &mut actual)
             .unwrap();

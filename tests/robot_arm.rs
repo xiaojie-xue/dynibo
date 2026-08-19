@@ -843,9 +843,10 @@ fn forward_acceleration_matches_finite_difference() {
 #[test]
 fn fixed_joint_has_constant_pose_and_no_motion_or_generalized_force() {
     let arm = Robot::from_urdf(urdf_path("fixed_arm.urdf")).unwrap();
+    assert_eq!(arm.joints().len(), 1);
+    assert_eq!(arm.joint_count(), 0);
     let target = end_link(&arm);
-    let zero = JointVector::<1>::zeros();
-    let arbitrary = JointVector::<1>::new(123.0);
+    let zero = JointVector::<0>::zeros();
     let expected = Isometry3::from_parts(
         Translation3::new(0.2, 0.1, 0.3),
         UnitQuaternion::from_euler_angles(0.1, -0.2, 0.3),
@@ -857,26 +858,19 @@ fn fixed_joint_has_constant_pose_and_no_motion_or_generalized_force() {
         epsilon = 1.0e-12
     );
     assert_relative_eq!(
-        arm.test_forward_kinematics(&arbitrary, target).unwrap(),
-        expected,
+        arm.test_jacobian(&zero, target).unwrap(),
+        Jacobian::<0>::zeros(),
         epsilon = 1.0e-12
     );
     assert_relative_eq!(
-        arm.test_jacobian(&arbitrary, target).unwrap(),
-        Jacobian::<1>::zeros(),
-        epsilon = 1.0e-12
-    );
-    assert_relative_eq!(
-        arm.test_forward_acceleration_kinematics(&arbitrary, &arbitrary, &arbitrary, target)
+        arm.test_forward_acceleration_kinematics(&zero, &zero, &zero, target)
             .unwrap()
             .to_vector(),
         Twist::zeros().to_vector(),
         epsilon = 1.0e-12
     );
 
-    let torque = arm
-        .test_inverse_dynamics(&arbitrary, &arbitrary, &arbitrary, &[])
-        .unwrap();
+    let torque = arm.test_inverse_dynamics(&zero, &zero, &zero, &[]).unwrap();
     assert_relative_eq!(torque, zero, epsilon = 1.0e-12);
 }
 

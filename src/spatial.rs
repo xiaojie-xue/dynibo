@@ -2,7 +2,11 @@ use nalgebra::{Isometry3, SVector, Vector3};
 
 /// A rigid-body transform in three-dimensional space.
 pub type Frame = Isometry3<f64>;
-/// Angular-first spatial twist vector `[angular, linear]`.
+/// Angular-first spatial twist vector `[angular_x, angular_y, angular_z,
+/// linear_x, linear_y, linear_z]`.
+///
+/// The coordinate frame is selected by the API that produces or consumes the
+/// value; kinematics outputs use the world frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Twist {
     /// Angular velocity or angular acceleration component.
@@ -28,7 +32,12 @@ impl Twist {
     }
 }
 
-/// Torque-first spatial force vector `[torque, force]`.
+/// Torque-first spatial force vector `[torque_x, torque_y, torque_z, force_x,
+/// force_y, force_z]`.
+///
+/// External-load APIs interpret a wrench in its associated link frame at that
+/// link origin; floating-base generalized-force outputs use the world frame at
+/// the root origin.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Wrench {
     /// Torque component of the wrench.

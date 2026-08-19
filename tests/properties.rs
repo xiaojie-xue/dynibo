@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use approx::assert_relative_eq;
-use dynibo::{Frame, IndexedLoad, JointType, Robot, Workspace, Wrench};
+use dynibo::{Frame, IndexedLoad, Robot, Workspace, Wrench};
 use nalgebra::{DMatrix, Vector3};
 
 fn tree_arm() -> Robot {
@@ -78,27 +78,17 @@ fn mass_matrix_matches_rnea_columns_and_keeps_structural_guarantees() {
                     );
                 }
             }
-            let mut moving = Vec::new();
-            for (index, joint) in robot.joints().iter().enumerate() {
-                if joint.joint_type() == JointType::Fixed {
-                    for other in 0..joint_count {
-                        assert_eq!(mass[index * joint_count + other], 0.0);
-                        assert_eq!(mass[other * joint_count + index], 0.0);
-                    }
-                } else {
-                    assert!(
-                        mass[index * joint_count + index] > 0.0,
-                        "mass matrix diagonal must be positive on moving joints: sample={sample}, joint={index}"
-                    );
-                    moving.push(index);
-                }
+            for index in 0..joint_count {
+                assert!(
+                    mass[index * joint_count + index] > 0.0,
+                    "mass matrix diagonal must be positive: sample={sample}, joint={index}"
+                );
             }
-            let moving_mass = DMatrix::from_fn(moving.len(), moving.len(), |row, column| {
-                mass[moving[column] * joint_count + moving[row]]
-            });
             assert!(
-                moving_mass.cholesky().is_some(),
-                "moving-joint mass submatrix must be positive definite: sample={sample}"
+                DMatrix::from_column_slice(joint_count, joint_count, &mass)
+                    .cholesky()
+                    .is_some(),
+                "mass matrix must be positive definite: sample={sample}"
             );
         }
     }
@@ -193,16 +183,6 @@ fn velocity_product_matches_rnea_minus_gravity() {
                 &vec![0.0; robot.generalized_count()],
                 1.0e-14,
             );
-            for fixed in robot
-                .joints()
-                .iter()
-                .enumerate()
-                .filter_map(|(index, joint)| {
-                    (joint.joint_type() == JointType::Fixed).then_some(index)
-                })
-            {
-                assert_eq!(velocity_product[fixed], 0.0);
-            }
         }
     }
 }
@@ -332,25 +312,24 @@ fn deterministic_dynamics_preserve_gravity_and_load_invariants() {
 fn mixed_joint_mass_matrix_is_symmetric_and_positive_on_moving_coordinates() {
     let robot = mixed_oracle_arm();
     let mut workspace = robot.workspace();
-    let zero = [0.0; 4];
+    let zero = [0.0; 3];
 
     for sample in 0..16 {
         let q = [
             1.4 * ((sample + 1) as f64 * 0.71).sin(),
-            3.0 * ((sample + 1) as f64 * 0.53).sin(),
             0.3 * ((sample + 1) as f64 * 0.37).sin(),
             2.5 * ((sample + 1) as f64 * 0.29).sin(),
         ];
-        let mut bias = [0.0; 4];
+        let mut bias = [0.0; 3];
         robot
             .inverse_dynamics(&q, &zero, &zero, &[], &mut workspace, &mut bias)
             .unwrap();
 
-        let mut mass = DMatrix::<f64>::zeros(4, 4);
-        for column in 0..4 {
-            let mut unit_acceleration = [0.0; 4];
+        let mut mass = DMatrix::<f64>::zeros(3, 3);
+        for column in 0..3 {
+            let mut unit_acceleration = [0.0; 3];
             unit_acceleration[column] = 1.0;
-            let mut torque = [0.0; 4];
+            let mut torque = [0.0; 3];
             robot
                 .inverse_dynamics(
                     &q,
@@ -361,18 +340,13 @@ fn mixed_joint_mass_matrix_is_symmetric_and_positive_on_moving_coordinates() {
                     &mut torque,
                 )
                 .unwrap();
-            for row in 0..4 {
+            for row in 0..3 {
                 mass[(row, column)] = torque[row] - bias[row];
             }
         }
 
         assert_relative_eq!(mass, mass.transpose(), epsilon = 2.0e-11);
-        // Joint 1 is fixed and intentionally occupies a zero row and column.
-        for direction in [
-            [1.0, 0.0, -0.4, 0.7],
-            [-0.3, 0.0, 1.2, -0.8],
-            [0.6, 0.0, 0.2, 1.4],
-        ] {
+        for direction in [[1.0, -0.4, 0.7], [-0.3, 1.2, -0.8], [0.6, 0.2, 1.4]] {
             let direction = nalgebra::DVector::from_column_slice(&direction);
             let energy = direction.dot(&(&mass * &direction));
             assert!(

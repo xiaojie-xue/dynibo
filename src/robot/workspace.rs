@@ -38,6 +38,7 @@ pub struct IndexedLoad {
 pub struct Workspace {
     pub(super) model_id: u64,
     pub(super) joint_count: usize,
+    pub(super) model_joint_count: usize,
     pub(super) generalized_count: usize,
     pub(super) frames: Vec<Frame>,
     pub(super) angular_velocities: Vec<Vector3<f64>>,
@@ -57,30 +58,36 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    pub(super) fn new(model_id: u64, joint_count: usize, generalized_count: usize) -> Self {
+    pub(super) fn new(
+        model_id: u64,
+        joint_count: usize,
+        model_joint_count: usize,
+        generalized_count: usize,
+    ) -> Self {
         Self {
             model_id,
             joint_count,
+            model_joint_count,
             generalized_count,
-            frames: vec![Frame::identity(); joint_count],
-            angular_velocities: vec![Vector3::zeros(); joint_count],
-            angular_accelerations: vec![Vector3::zeros(); joint_count],
-            origin_accelerations: vec![Vector3::zeros(); joint_count],
-            link_accelerations: vec![Vector3::zeros(); joint_count],
-            link_loads: vec![Wrench::zeros(); joint_count],
-            composite_masses: vec![0.0; joint_count],
-            composite_moments: vec![Vector3::zeros(); joint_count],
-            composite_inertias: vec![Matrix3::zeros(); joint_count],
-            origin_velocities: vec![Vector3::zeros(); joint_count],
+            frames: vec![Frame::identity(); model_joint_count],
+            angular_velocities: vec![Vector3::zeros(); model_joint_count],
+            angular_accelerations: vec![Vector3::zeros(); model_joint_count],
+            origin_accelerations: vec![Vector3::zeros(); model_joint_count],
+            link_accelerations: vec![Vector3::zeros(); model_joint_count],
+            link_loads: vec![Wrench::zeros(); model_joint_count],
+            composite_masses: vec![0.0; model_joint_count],
+            composite_moments: vec![Vector3::zeros(); model_joint_count],
+            composite_inertias: vec![Matrix3::zeros(); model_joint_count],
+            origin_velocities: vec![Vector3::zeros(); model_joint_count],
             jacobian: vec![0.0; 6 * joint_count],
             jacobian_derivative: vec![0.0; 6 * joint_count],
             q_work: vec![0.0; joint_count],
             step: vec![0.0; joint_count],
-            ancestor_path: vec![0; joint_count],
+            ancestor_path: vec![0; model_joint_count],
         }
     }
 
-    /// Returns the joint count for which this workspace was allocated.
+    /// Returns the non-fixed joint count for which this workspace was allocated.
     pub const fn joint_count(&self) -> usize {
         self.joint_count
     }

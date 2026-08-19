@@ -7,6 +7,8 @@ pub enum BaseMode {
     #[default]
     Fixed,
     /// The root link has a world pose and an independently prescribed spatial motion.
+    /// Its generalized-vector prefix is `[angular_x, angular_y, angular_z,
+    /// linear_x, linear_y, linear_z]`, all expressed in the world frame.
     Floating,
 }
 

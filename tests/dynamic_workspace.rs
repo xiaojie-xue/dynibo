@@ -22,7 +22,7 @@ fn tree_arm() -> Robot {
 #[test]
 fn active_dof_mapping_excludes_fixed_joints() {
     let robot = Robot::from_urdf(urdf_path("oracle_mixed.urdf")).unwrap();
-    assert_eq!(robot.joint_count(), 4);
+    assert_eq!(robot.joint_count(), 3);
     assert_eq!(robot.dof_count(), 3);
     assert_eq!(robot.active_joint_indices(), &[0, 2, 3]);
     assert_eq!(robot.joint_dof_index(0), Some(0));
@@ -33,81 +33,102 @@ fn active_dof_mapping_excludes_fixed_joints() {
 }
 
 #[test]
-fn explicit_base_frame_entry_points_match_robot_base_state() {
-    let robot = test_arm();
-    let mut stateful = robot.clone();
+fn stored_base_frame_is_used_consistently_by_fixed_base_calculations() {
+    let identity_robot = test_arm();
+    let mut transformed_robot = identity_robot.clone();
     let base = Frame::from_parts(
         Translation3::new(0.4, -0.3, 0.7),
         UnitQuaternion::from_euler_angles(0.35, -0.2, 0.45),
     );
-    stateful.set_base_frame(base).unwrap();
-    let target = robot.link_id("test_link_4").unwrap();
+    transformed_robot.set_base_frame(base).unwrap();
+
+    let target = identity_robot.link_id("test_link_4").unwrap();
     let tool = Frame::translation(0.12, -0.04, 0.09);
     let q = [0.2, 1.0, -0.7, 0.4];
     let qd = [-0.3, 0.5, -0.2, 0.8];
     let qdd = [0.7, -0.4, 0.1, 0.3];
-    let mut explicit_workspace = robot.workspace();
-    let mut stateful_workspace = stateful.workspace();
+    let mut identity_workspace = identity_robot.workspace();
+    let mut transformed_workspace = transformed_robot.workspace();
 
-    let explicit_velocity = robot
-        .forward_velocity_kinematics_at_base_frame(
-            &q,
-            &qd,
-            target,
-            &base,
-            &tool,
-            &mut explicit_workspace,
-        )
+    let identity_frame = identity_robot
+        .forward_kinematics(&q, target, &mut identity_workspace)
         .unwrap();
-    let stateful_velocity = stateful
-        .forward_velocity_kinematics(&q, &qd, target, &tool, &mut stateful_workspace)
+    let transformed_frame = transformed_robot
+        .forward_kinematics(&q, target, &mut transformed_workspace)
         .unwrap();
+    let expected_frame = base * identity_frame;
     assert_relative_eq!(
-        explicit_velocity.to_vector(),
-        stateful_velocity.to_vector(),
+        transformed_frame.translation.vector,
+        expected_frame.translation.vector,
+        epsilon = 2.0e-12
+    );
+    assert_relative_eq!(
+        transformed_frame.rotation.to_rotation_matrix().matrix(),
+        expected_frame.rotation.to_rotation_matrix().matrix(),
         epsilon = 2.0e-12
     );
 
-    let mut explicit_gravity = [0.0; 4];
-    let mut stateful_gravity = [0.0; 4];
-    robot
-        .gravity_at_base_frame(
-            &q,
-            &base,
-            &[],
-            &mut explicit_workspace,
-            &mut explicit_gravity,
-        )
+    let identity_velocity = identity_robot
+        .forward_velocity_kinematics(&q, &qd, target, &tool, &mut identity_workspace)
         .unwrap();
-    stateful
-        .gravity(&q, &[], &mut stateful_workspace, &mut stateful_gravity)
+    let transformed_velocity = transformed_robot
+        .forward_velocity_kinematics(&q, &qd, target, &tool, &mut transformed_workspace)
         .unwrap();
-    assert_slice_close(&explicit_gravity, &stateful_gravity);
+    assert_relative_eq!(
+        transformed_velocity.angular,
+        base.rotation * identity_velocity.angular,
+        epsilon = 2.0e-12
+    );
+    assert_relative_eq!(
+        transformed_velocity.linear,
+        base.rotation * identity_velocity.linear,
+        epsilon = 2.0e-12
+    );
 
-    let mut explicit_dynamics = [0.0; 4];
-    let mut stateful_dynamics = [0.0; 4];
-    robot
-        .inverse_dynamics_at_base_frame(
+    let identity_acceleration = identity_robot
+        .forward_acceleration_kinematics(&q, &qd, &qdd, target, &mut identity_workspace)
+        .unwrap();
+    let transformed_acceleration = transformed_robot
+        .forward_acceleration_kinematics(&q, &qd, &qdd, target, &mut transformed_workspace)
+        .unwrap();
+    assert_relative_eq!(
+        transformed_acceleration.angular,
+        base.rotation * identity_acceleration.angular,
+        epsilon = 2.0e-12
+    );
+    assert_relative_eq!(
+        transformed_acceleration.linear,
+        base.rotation * identity_acceleration.linear,
+        epsilon = 2.0e-12
+    );
+
+    let mut identity_gravity = [0.0; 4];
+    let mut transformed_gravity = [0.0; 4];
+    transformed_robot
+        .gravity(
             &q,
-            &qd,
-            &qdd,
-            &base,
             &[],
-            &mut explicit_workspace,
-            &mut explicit_dynamics,
+            &mut transformed_workspace,
+            &mut transformed_gravity,
         )
         .unwrap();
-    stateful
+    identity_robot
+        .gravity(&q, &[], &mut identity_workspace, &mut identity_gravity)
+        .unwrap();
+    assert_ne!(transformed_gravity, identity_gravity);
+
+    let mut transformed_inverse = [0.0; 4];
+    transformed_robot
         .inverse_dynamics(
             &q,
-            &qd,
-            &qdd,
+            &[0.0; 4],
+            &[0.0; 4],
             &[],
-            &mut stateful_workspace,
-            &mut stateful_dynamics,
+            &mut transformed_workspace,
+            &mut transformed_inverse,
         )
         .unwrap();
-    assert_slice_close(&explicit_dynamics, &stateful_dynamics);
+    assert_slice_close(&transformed_inverse, &transformed_gravity);
 }
 
 fn assert_slice_close(actual: &[f64], expected: &[f64]) {
@@ -716,14 +737,14 @@ fn inverse_kinematics_skips_fixed_joints_on_the_ancestor_path() {
     let robot = Robot::from_urdf(urdf_path("oracle_mixed.urdf")).expect("oracle URDF must load");
     let target = robot.link_id("tool").unwrap();
     let mut workspace = robot.workspace();
-    let q = [0.3, 0.0, 0.12, -0.4];
+    let q = [0.3, 0.12, -0.4];
     let desired = robot
         .forward_kinematics(&q, target, &mut workspace)
         .unwrap();
-    let mut solution = [0.0; 4];
+    let mut solution = [0.0; 3];
     robot
         .inverse_kinematics(
-            &[0.0; 4],
+            &[0.0; 3],
             target,
             &desired,
             InverseKinematicsOptions::default(),
