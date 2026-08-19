@@ -27,11 +27,13 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: pyproject.toml
+      - name: Install Doxygen
+        run: sudo apt-get update && sudo apt-get install --yes doxygen
       - name: Install documentation dependencies
         run: |
           python -m pip install "pip>=25.1"
           python -m pip install --group docs
       - name: Build Rust documentation with KaTeX
         run: cargo doc-katex
-      - name: Build Python documentation
+      - name: Build documentation
         run: mkdocs build --strict

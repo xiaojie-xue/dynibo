@@ -1,5 +1,5 @@
 site_name: dynibo
-site_description: Python API documentation for dynibo robot kinematics and dynamics
+site_description: API documentation for dynibo robot kinematics and dynamics
 site_url: !ENV READTHEDOCS_CANONICAL_URL
 repo_url: https://github.com/xiaojie-xue/dynibo
 repo_name: xiaojie-xue/dynibo
@@ -12,7 +12,9 @@ theme:
     - content.code.copy
 
 nav:
-  - Python API: index.md
+  - Home: index.md
+  - Python API: python.md
+  - C API: c-api/dynibo_8h.md
   - Rust API: https://docs.rs/dynibo
   - GitHub source code: https://github.com/xiaojie-xue/dynibo
 
@@ -35,6 +37,21 @@ plugins:
             show_source: false
             show_symbol_type_heading: true
             show_symbol_type_toc: true
+  - mkdoxy:
+      projects:
+        dyniboC:
+          src-dirs: bindings/c/include/dynibo
+          api-path: c-api
+          full-doc: true
+          doxy-cfg:
+            FILE_PATTERNS: "*.h"
+            RECURSIVE: false
+            EXTRACT_ALL: false
+            OPTIMIZE_OUTPUT_FOR_C: true
+            PREDEFINED: "DYNIBO_API="
+            FULL_PATH_NAMES: false
+            SHOW_INCLUDE_FILES: false
+            SOURCE_BROWSER: false
 
 markdown_extensions:
   - admonition

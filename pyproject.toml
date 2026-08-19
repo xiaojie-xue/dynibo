@@ -29,6 +29,7 @@ Documentation = "https://dynibo.readthedocs.io/"
 docs = [
     "mkdocs>=1.6,<2",
     "mkdocs-material>=9.6,<10",
+    "mkdoxy>=1.2.8,<2",
     "mkdocstrings[python]>=0.30,<1",
     "pymdown-extensions>=10.2,<12",
 ]
