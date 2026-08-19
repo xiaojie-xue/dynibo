@@ -28,6 +28,8 @@ jobs:
           components: rustfmt, clippy
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Compile core Criterion benchmarks
+        run: cargo check --locked --features core-bench --bench core
 
   coverage:
     name: Rust line and branch coverage
@@ -92,6 +94,12 @@ jobs:
           export PKG_CONFIG_PATH="${CONDA_PREFIX}/lib/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
           export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
           cargo test -p dynibo --locked --features pinocchio-tests --tests
+      - name: Compile Pinocchio Criterion benchmarks
+        shell: micromamba-shell {0}
+        run: |
+          export PKG_CONFIG_PATH="${CONDA_PREFIX}/lib/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
+          export LD_LIBRARY_PATH="${CONDA_PREFIX}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+          cargo check --locked --features pinocchio-bench --bench pinocchio
 
   rust-package:
     name: Rust crate package tests

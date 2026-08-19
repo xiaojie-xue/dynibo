@@ -1,7 +1,7 @@
 use std::{hint::black_box, path::PathBuf};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use dynibo::{Frame, IndexedLoad, InverseKinematicsOptions, LinkId, Robot, Twist, Wrench};
+use dynibo::{Frame, IndexedLoad, InverseKinematicsOptions, LinkId, Robot, Wrench};
 use nalgebra::Vector3;
 
 struct BenchmarkCase {
@@ -10,7 +10,6 @@ struct BenchmarkCase {
     q: Vec<f64>,
     qd: Vec<f64>,
     qdd: Vec<f64>,
-    base: Frame,
 }
 
 impl BenchmarkCase {
@@ -37,7 +36,6 @@ impl BenchmarkCase {
             qdd: (0..n)
                 .map(|index| (0.41 * (index + 1) as f64).sin() * 0.3)
                 .collect(),
-            base: Frame::identity(),
         }
     }
 }
@@ -110,7 +108,6 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
                         black_box(&case.q),
                         black_box(&case.qd),
                         case.target,
-                        &case.base,
                         &Frame::identity(),
                         &mut workspace,
                     )
@@ -149,7 +146,6 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
             case.arm
                 .gravity(
                     black_box(&case.q),
-                    &case.base,
                     black_box(&[]),
                     &mut workspace,
                     black_box(&mut output),
@@ -171,9 +167,6 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
                     black_box(&case.q),
                     black_box(&case.qd),
                     black_box(&case.qdd),
-                    &case.base,
-                    Twist::zeros(),
-                    Twist::zeros(),
                     black_box(&[]),
                     &mut workspace,
                     black_box(&mut output),
@@ -202,24 +195,24 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
     });
     mass.finish();
 
-    let mut coriolis = c.benchmark_group(format!("coriolis_matrix/{size}"));
-    coriolis.throughput(Throughput::Elements(1));
+    let mut velocity_product = c.benchmark_group(format!("velocity_product_forces/{size}"));
+    velocity_product.throughput(Throughput::Elements(1));
     let mut workspace = case.arm.workspace();
-    let mut coriolis_output = vec![0.0; n * n];
-    coriolis.bench_function("dynibo", |b| {
+    let mut velocity_product_output = vec![0.0; n];
+    velocity_product.bench_function("dynibo", |b| {
         b.iter(|| {
             case.arm
-                .coriolis_matrix(
+                .velocity_product_forces(
                     black_box(&case.q),
                     black_box(&case.qd),
                     &mut workspace,
-                    black_box(&mut coriolis_output),
+                    black_box(&mut velocity_product_output),
                 )
                 .unwrap();
-            black_box(&coriolis_output);
+            black_box(&velocity_product_output);
         });
     });
-    coriolis.finish();
+    velocity_product.finish();
 }
 
 fn benchmark_tree_case(c: &mut Criterion) {
@@ -247,7 +240,6 @@ fn benchmark_tree_case(c: &mut Criterion) {
             case.arm
                 .gravity(
                     black_box(&case.q),
-                    &case.base,
                     black_box(&loads),
                     &mut workspace,
                     black_box(&mut output),
@@ -268,9 +260,6 @@ fn benchmark_tree_case(c: &mut Criterion) {
                     black_box(&case.q),
                     black_box(&case.qd),
                     black_box(&case.qdd),
-                    &case.base,
-                    Twist::zeros(),
-                    Twist::zeros(),
                     black_box(&loads),
                     &mut workspace,
                     black_box(&mut output),
@@ -337,7 +326,6 @@ fn benchmark_target_depths(c: &mut Criterion) {
                             black_box(&case.q),
                             black_box(&case.qd),
                             target,
-                            &case.base,
                             &Frame::identity(),
                             &mut workspace,
                         )

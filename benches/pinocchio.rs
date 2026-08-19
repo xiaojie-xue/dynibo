@@ -6,7 +6,7 @@ use std::{
 };
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use dynibo::{Frame, LinkId, Robot, Twist};
+use dynibo::{LinkId, Robot};
 
 unsafe extern "C" {
     fn dynibo_pinocchio_create(urdf_path: *const std::ffi::c_char) -> *mut std::ffi::c_void;
@@ -27,7 +27,7 @@ unsafe extern "C" {
         qdd: *const f64,
     ) -> f64;
     fn dynibo_pinocchio_crba(context: *mut std::ffi::c_void, q: *const f64) -> f64;
-    fn dynibo_pinocchio_coriolis(
+    fn dynibo_pinocchio_velocity_product(
         context: *mut std::ffi::c_void,
         q: *const f64,
         qd: *const f64,
@@ -74,7 +74,6 @@ struct TreeBenchmarkCase<const N: usize> {
     q: [f64; N],
     qd: [f64; N],
     qdd: [f64; N],
-    base: Frame,
 }
 
 impl<const N: usize> TreeBenchmarkCase<N> {
@@ -95,7 +94,6 @@ impl<const N: usize> TreeBenchmarkCase<N> {
             q: [0.2; N],
             qd: [-0.1; N],
             qdd: [0.15; N],
-            base: Frame::identity(),
         }
     }
 }
@@ -114,7 +112,6 @@ struct BenchmarkCase<const N: usize> {
     q: [f64; N],
     qd: [f64; N],
     qdd: [f64; N],
-    base: Frame,
 }
 
 impl<const N: usize> BenchmarkCase<N> {
@@ -142,7 +139,6 @@ impl<const N: usize> BenchmarkCase<N> {
             q: std::array::from_fn(|row| (0.37 * (row + 1) as f64).sin() * 0.5),
             qd: std::array::from_fn(|row| (0.23 * (row + 1) as f64).cos() * 0.4),
             qdd: std::array::from_fn(|row| (0.41 * (row + 1) as f64).sin() * 0.3),
-            base: Frame::identity(),
         }
     }
 }
@@ -231,7 +227,6 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
             case.arm
                 .gravity(
                     black_box(q),
-                    &case.base,
                     black_box(&[]),
                     &mut workspace,
                     black_box(&mut output),
@@ -261,9 +256,6 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
                     black_box(&case.q),
                     black_box(&case.qd),
                     black_box(&case.qdd),
-                    &case.base,
-                    Twist::zeros(),
-                    Twist::zeros(),
                     black_box(&[]),
                     &mut workspace,
                     black_box(&mut output),
@@ -341,27 +333,28 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
     });
     mass.finish();
 
-    let mut coriolis = c.benchmark_group(format!("coriolis_matrix/{size}"));
-    coriolis.throughput(Throughput::Elements(1));
+    let mut velocity_product = c.benchmark_group(format!("velocity_product_forces/{size}"));
+    velocity_product.throughput(Throughput::Elements(1));
     let mut workspace = case.arm.workspace();
-    coriolis.bench_function("dynibo", |b| {
+    let mut velocity_output = [0.0; N];
+    velocity_product.bench_function("dynibo", |b| {
         b.iter(|| {
             case.arm
-                .coriolis_matrix(
+                .velocity_product_forces(
                     black_box(&case.q),
                     black_box(&case.qd),
                     &mut workspace,
-                    black_box(&mut output),
+                    black_box(&mut velocity_output),
                 )
                 .unwrap();
-            black_box(&output);
+            black_box(&velocity_output);
         })
     });
-    coriolis.bench_function("pinocchio", |b| {
+    velocity_product.bench_function("pinocchio", |b| {
         b.iter(|| {
             // SAFETY: context and input vectors remain valid for the duration of every call.
             black_box(unsafe {
-                dynibo_pinocchio_coriolis(
+                dynibo_pinocchio_velocity_product(
                     case.pinocchio.0.as_ptr(),
                     black_box(case.q.as_ptr()),
                     black_box(case.qd.as_ptr()),
@@ -369,7 +362,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, case: &BenchmarkCase<N>) {
             })
         });
     });
-    coriolis.finish();
+    velocity_product.finish();
 }
 
 fn benchmark_tree_case<const N: usize>(c: &mut Criterion, case: &TreeBenchmarkCase<N>) {
@@ -436,7 +429,6 @@ fn benchmark_tree_case<const N: usize>(c: &mut Criterion, case: &TreeBenchmarkCa
             case.arm
                 .gravity(
                     black_box(&case.q),
-                    &case.base,
                     black_box(&[]),
                     &mut workspace,
                     black_box(&mut output),
@@ -466,9 +458,6 @@ fn benchmark_tree_case<const N: usize>(c: &mut Criterion, case: &TreeBenchmarkCa
                     black_box(&case.q),
                     black_box(&case.qd),
                     black_box(&case.qdd),
-                    &case.base,
-                    Twist::zeros(),
-                    Twist::zeros(),
                     black_box(&[]),
                     &mut workspace,
                     black_box(&mut output),

@@ -26,9 +26,13 @@ struct PinocchioBenchContext {
         data(model),
         end_joint(end_joint_in),
         target_frame(target_frame_in),
-        jacobian(6, model.nv) {
+        jacobian(6, model.nv),
+        force(model.nv),
+        zero(model.nv) {
     model.gravity.linear() = Eigen::Vector3d(0.0, 0.0, -9.80665);
     jacobian.setZero();
+    force.setZero();
+    zero.setZero();
   }
 
   pinocchio::Model model;
@@ -36,6 +40,8 @@ struct PinocchioBenchContext {
   pinocchio::JointIndex end_joint;
   pinocchio::FrameIndex target_frame;
   Eigen::Matrix<double, 6, Eigen::Dynamic> jacobian;
+  Eigen::VectorXd force;
+  Eigen::VectorXd zero;
 };
 
 using ConfigMap = Eigen::Map<const Eigen::VectorXd>;
@@ -207,12 +213,16 @@ double dynibo_pinocchio_crba(void* raw_context, const double* q) noexcept {
   return pinocchio::crba(context->model, context->data, configuration).sum();
 }
 
-double dynibo_pinocchio_coriolis(void* raw_context, const double* q, const double* qd) noexcept {
+double dynibo_pinocchio_velocity_product(void* raw_context, const double* q,
+                                        const double* qd) noexcept {
   auto* context = static_cast<PinocchioBenchContext*>(raw_context);
   const ConfigMap configuration(q, context->model.nq);
   const ConfigMap velocity(qd, context->model.nv);
-  return pinocchio::computeCoriolisMatrix(context->model, context->data, configuration, velocity)
-      .sum();
+  context->force = pinocchio::rnea(context->model, context->data, configuration, velocity,
+                                   context->zero);
+  context->force -=
+      pinocchio::computeGeneralizedGravity(context->model, context->data, configuration);
+  return context->force.sum();
 }
 
 double dynibo_pinocchio_jacobian_time_variation(void* raw_context, const double* q,
