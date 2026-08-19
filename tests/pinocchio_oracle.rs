@@ -983,7 +983,7 @@ fn mass_matrices_match_pinocchio() {
 }
 
 #[test]
-fn coriolis_matrices_match_pinocchio() {
+fn velocity_products_match_pinocchio() {
     let path = serial_fixture();
     let robot = Robot::from_urdf(&path).unwrap();
     let mut workspace = robot.workspace();
@@ -992,16 +992,24 @@ fn coriolis_matrices_match_pinocchio() {
     for sample in 0..32 {
         let (q, qd, _) = deterministic_state(sample);
         let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero4);
-        let mut coriolis = vec![f64::NAN; 16];
+        let mut velocity_product = vec![f64::NAN; 4];
         robot
-            .coriolis_matrix(&q, &qd, &mut workspace, &mut coriolis)
+            .velocity_product_forces(&q, &qd, &mut workspace, &mut velocity_product)
             .unwrap();
+        let coriolis = pinocchio.coriolis_matrix(&pin_q, &pin_qd);
+        let expected: Vec<f64> = (0..4)
+            .map(|row| {
+                (0..4)
+                    .map(|column| coriolis[column * 4 + row] * qd[column])
+                    .sum()
+            })
+            .collect();
         assert_close(
-            &coriolis,
-            &pinocchio.coriolis_matrix(&pin_q, &pin_qd),
+            &velocity_product,
+            &expected,
             1.0e-9,
             1.0e-10,
-            &format!("serial coriolis matrix sample {sample}"),
+            &format!("serial velocity product sample {sample}"),
         );
     }
 
@@ -1012,16 +1020,24 @@ fn coriolis_matrices_match_pinocchio() {
     for sample in 0..64 {
         let (q, qd, _) = deterministic_state(sample);
         let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero4);
-        let mut coriolis = vec![f64::NAN; 16];
+        let mut velocity_product = vec![f64::NAN; 4];
         robot
-            .coriolis_matrix(&q, &qd, &mut workspace, &mut coriolis)
+            .velocity_product_forces(&q, &qd, &mut workspace, &mut velocity_product)
             .unwrap();
+        let coriolis = pinocchio.coriolis_matrix(&pin_q, &pin_qd);
+        let expected: Vec<f64> = (0..4)
+            .map(|row| {
+                (0..4)
+                    .map(|column| coriolis[column * 4 + row] * qd[column])
+                    .sum()
+            })
+            .collect();
         assert_close(
-            &coriolis,
-            &pinocchio.coriolis_matrix(&pin_q, &pin_qd),
+            &velocity_product,
+            &expected,
             1.0e-9,
             1.0e-10,
-            &format!("mixed coriolis matrix sample {sample}"),
+            &format!("mixed velocity product sample {sample}"),
         );
     }
 
@@ -1033,16 +1049,24 @@ fn coriolis_matrices_match_pinocchio() {
     for sample in 0..32 {
         let (q, qd, _) = deterministic_tree_state(sample);
         let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero7);
-        let mut coriolis = vec![f64::NAN; 49];
+        let mut velocity_product = vec![f64::NAN; 7];
         robot
-            .coriolis_matrix(&q, &qd, &mut workspace, &mut coriolis)
+            .velocity_product_forces(&q, &qd, &mut workspace, &mut velocity_product)
             .unwrap();
+        let coriolis = pinocchio.coriolis_matrix(&pin_q, &pin_qd);
+        let expected: Vec<f64> = (0..7)
+            .map(|row| {
+                (0..7)
+                    .map(|column| coriolis[column * 7 + row] * qd[column])
+                    .sum()
+            })
+            .collect();
         assert_close(
-            &coriolis,
-            &pinocchio.coriolis_matrix(&pin_q, &pin_qd),
+            &velocity_product,
+            &expected,
             1.0e-9,
             1.0e-10,
-            &format!("tree coriolis matrix sample {sample}"),
+            &format!("tree velocity product sample {sample}"),
         );
     }
 }
@@ -1549,16 +1573,36 @@ fn floating_base_kinematics_and_dynamics_match_free_flyer_pinocchio() {
             1.0e-9,
             &format!("floating gravity sample {sample}"),
         );
-        let mut actual_coriolis = vec![0.0; n * n];
+        let mut actual_velocity_product = vec![0.0; n];
         robot
-            .coriolis_matrix(&q, &qd, &mut workspace, &mut actual_coriolis)
+            .velocity_product_forces(&q, &qd, &mut workspace, &mut actual_velocity_product)
             .unwrap();
+        let coriolis = pinocchio.floating_coriolis_from_rnea(&q, &qd, &base, base_velocity);
+        let generalized_velocity = [
+            base_velocity.angular[0],
+            base_velocity.angular[1],
+            base_velocity.angular[2],
+            base_velocity.linear[0],
+            base_velocity.linear[1],
+            base_velocity.linear[2],
+            qd[0],
+            qd[1],
+            qd[2],
+            qd[3],
+        ];
+        let expected: Vec<f64> = (0..n)
+            .map(|row| {
+                (0..n)
+                    .map(|column| coriolis[column * n + row] * generalized_velocity[column])
+                    .sum()
+            })
+            .collect();
         assert_close(
-            &actual_coriolis,
-            &pinocchio.floating_coriolis_from_rnea(&q, &qd, &base, base_velocity),
+            &actual_velocity_product,
+            &expected,
             3.0e-9,
             1.0e-9,
-            &format!("floating Coriolis sample {sample}"),
+            &format!("floating velocity product sample {sample}"),
         );
     }
 }

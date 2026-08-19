@@ -88,7 +88,7 @@ fn floating_calculations_do_not_allocate_after_workspace_creation() {
         );
         robot.mass_matrix(&q, &mut workspace, &mut matrix).unwrap();
         robot
-            .coriolis_matrix(&q, &qd, &mut workspace, &mut matrix)
+            .velocity_product_forces(&q, &qd, &mut workspace, &mut output)
             .unwrap();
         robot.gravity(&q, &[], &mut workspace, &mut output).unwrap();
         robot
@@ -117,7 +117,7 @@ fn dynamic_calculations_do_not_allocate_after_workspace_creation() {
     let mut jacobian = [0.0; 24];
     let mut jacobian_derivative = [0.0; 24];
     let mut mass = [0.0; 16];
-    let mut coriolis = [0.0; 16];
+    let mut velocity_product = [0.0; 4];
     let mut output = [0.0; 4];
     let desired = robot
         .forward_kinematics(&q, target_id, &mut workspace)
@@ -150,7 +150,7 @@ fn dynamic_calculations_do_not_allocate_after_workspace_creation() {
             .unwrap();
         robot.mass_matrix(&q, &mut workspace, &mut mass).unwrap();
         robot
-            .coriolis_matrix(&q, &qd, &mut workspace, &mut coriolis)
+            .velocity_product_forces(&q, &qd, &mut workspace, &mut velocity_product)
             .unwrap();
         robot
             .jacobian_derivative(&q, &qd, target_id, &mut workspace, &mut jacobian_derivative)

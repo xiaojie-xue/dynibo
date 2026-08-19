@@ -17,9 +17,16 @@ pub enum JointType {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Link {
     name: String,
-    mass: f64,
-    center_of_mass: Vector3<f64>,
-    inertia: Matrix3<f64>,
+    dynamics: LinkDynamics,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct LinkDynamics {
+    pub(crate) mass: f64,
+    pub(crate) center_of_mass: Vector3<f64>,
+    pub(crate) inertia: Matrix3<f64>,
+    pub(crate) first_moment: Vector3<f64>,
+    pub(crate) origin_inertia: Matrix3<f64>,
 }
 
 impl Link {
@@ -30,11 +37,20 @@ impl Link {
         center_of_mass: Vector3<f64>,
         inertia: Matrix3<f64>,
     ) -> Self {
+        let first_moment = mass * center_of_mass;
+        let origin_inertia = inertia
+            + mass
+                * (center_of_mass.norm_squared() * Matrix3::identity()
+                    - center_of_mass * center_of_mass.transpose());
         Self {
             name: name.into(),
-            mass,
-            center_of_mass,
-            inertia,
+            dynamics: LinkDynamics {
+                mass,
+                center_of_mass,
+                inertia,
+                first_moment,
+                origin_inertia,
+            },
         }
     }
 
@@ -45,17 +61,21 @@ impl Link {
 
     /// Returns the link mass in kilograms.
     pub const fn mass(&self) -> f64 {
-        self.mass
+        self.dynamics.mass
     }
 
     /// Returns the center of mass expressed in the link frame, in metres.
     pub const fn center_of_mass(&self) -> &Vector3<f64> {
-        &self.center_of_mass
+        &self.dynamics.center_of_mass
     }
 
     /// Returns the rotational inertia about the center of mass in the link frame.
     pub const fn inertia(&self) -> &Matrix3<f64> {
-        &self.inertia
+        &self.dynamics.inertia
+    }
+
+    pub(crate) const fn dynamics(&self) -> LinkDynamics {
+        self.dynamics
     }
 }
 
@@ -63,9 +83,7 @@ impl Link {
 #[derive(Clone, Debug)]
 pub struct Joint {
     name: String,
-    joint_type: JointType,
-    origin: Frame,
-    axis: Unit<Vector3<f64>>,
+    kinematics: JointKinematics,
     lower_limit: f64,
     upper_limit: f64,
     velocity_limit: f64,
@@ -73,6 +91,30 @@ pub struct Joint {
     velocity: f64,
     acceleration: f64,
     home_offset: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct JointKinematics {
+    pub(crate) joint_type: JointType,
+    pub(crate) origin: Frame,
+    pub(crate) axis: Unit<Vector3<f64>>,
+}
+
+impl JointKinematics {
+    #[inline]
+    pub(crate) fn frame(&self, q: f64) -> Frame {
+        match self.joint_type {
+            JointType::Revolute => {
+                self.origin
+                    * Isometry3::from_parts(
+                        Translation3::identity(),
+                        UnitQuaternion::from_axis_angle(&self.axis, q),
+                    )
+            }
+            JointType::Prismatic => self.origin * Translation3::from(self.axis.as_ref() * q),
+            JointType::Fixed => self.origin,
+        }
+    }
 }
 
 impl Joint {
@@ -126,9 +168,11 @@ impl Joint {
         };
         Ok(Self {
             name,
-            joint_type,
-            origin,
-            axis,
+            kinematics: JointKinematics {
+                joint_type,
+                origin,
+                axis,
+            },
             lower_limit,
             upper_limit,
             velocity_limit,
@@ -146,7 +190,7 @@ impl Joint {
 
     /// Returns the joint motion type.
     pub const fn joint_type(&self) -> JointType {
-        self.joint_type
+        self.kinematics.joint_type
     }
 
     /// Returns the minimum joint position, in radians or metres.
@@ -166,29 +210,19 @@ impl Joint {
 
     /// Returns the fixed transform from the parent link to the joint.
     pub const fn origin(&self) -> &Frame {
-        &self.origin
+        &self.kinematics.origin
     }
 
     /// Returns the normalized motion axis expressed in the joint frame.
     ///
     /// Fixed joints have no motion axis and return an internal placeholder.
     pub const fn axis(&self) -> &Unit<Vector3<f64>> {
-        &self.axis
+        &self.kinematics.axis
     }
 
     /// Computes the parent-to-child transform at position `q`.
     pub fn frame(&self, q: f64) -> Frame {
-        match self.joint_type {
-            JointType::Revolute => {
-                self.origin
-                    * Isometry3::from_parts(
-                        Translation3::identity(),
-                        UnitQuaternion::from_axis_angle(&self.axis, q),
-                    )
-            }
-            JointType::Prismatic => self.origin * Translation3::from(self.axis.as_ref() * q),
-            JointType::Fixed => self.origin,
-        }
+        self.kinematics.frame(q)
     }
 
     /// Projects a spatial load onto the joint's active degree of freedom.
@@ -196,11 +230,15 @@ impl Joint {
     /// Revolute joints return torque and prismatic joints return force. Fixed
     /// joints always return zero.
     pub fn active_force(&self, load: Wrench) -> f64 {
-        match self.joint_type {
-            JointType::Revolute => load.torque.dot(self.axis.as_ref()),
-            JointType::Prismatic => load.force.dot(self.axis.as_ref()),
+        match self.kinematics.joint_type {
+            JointType::Revolute => load.torque.dot(self.kinematics.axis.as_ref()),
+            JointType::Prismatic => load.force.dot(self.kinematics.axis.as_ref()),
             JointType::Fixed => 0.0,
         }
+    }
+
+    pub(crate) const fn kinematics(&self) -> JointKinematics {
+        self.kinematics
     }
 
     /// Returns whether `q` lies outside the joint position limits.
@@ -250,5 +288,36 @@ impl Joint {
     pub fn set_home_offset(&mut self, offset: f64) -> f64 {
         self.home_offset = offset;
         offset
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use approx::assert_relative_eq;
+    use nalgebra::{Matrix3, Vector3};
+
+    use super::Link;
+
+    #[test]
+    fn link_precomputes_first_moment_and_origin_inertia() {
+        let mass = 2.5;
+        let center = Vector3::new(0.3, -0.2, 0.4);
+        let inertia = Matrix3::new(1.2, 0.1, -0.2, 0.1, 1.5, 0.05, -0.2, 0.05, 1.8);
+        let link = Link::new("body", mass, center, inertia);
+        let dynamics = link.dynamics();
+
+        let expected_first_moment = mass * center;
+        let expected_origin_inertia = inertia
+            + mass * (center.norm_squared() * Matrix3::identity() - center * center.transpose());
+        assert_relative_eq!(
+            dynamics.first_moment,
+            expected_first_moment,
+            epsilon = 1.0e-14
+        );
+        assert_relative_eq!(
+            dynamics.origin_inertia,
+            expected_origin_inertia,
+            epsilon = 1.0e-14
+        );
     }
 }

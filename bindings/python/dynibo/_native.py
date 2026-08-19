@@ -200,10 +200,10 @@ _lib.dynibo_mass_matrix.argtypes = [
     _robot_p, _workspace_p, _double_p, ct.c_size_t, _double_p, ct.c_size_t,
 ]
 _lib.dynibo_mass_matrix.restype = ct.c_int
-_lib.dynibo_coriolis_matrix.argtypes = [
+_lib.dynibo_velocity_product_forces.argtypes = [
     _robot_p, _workspace_p, _double_p, _double_p, ct.c_size_t, _double_p, ct.c_size_t,
 ]
-_lib.dynibo_coriolis_matrix.restype = ct.c_int
+_lib.dynibo_velocity_product_forces.restype = ct.c_int
 _lib.dynibo_inverse_kinematics.argtypes = [
     _robot_p, _workspace_p, _double_p, ct.c_size_t, ct.c_size_t,
     ct.POINTER(_Pose), _IkOptions, _double_p, ct.c_size_t,
@@ -523,14 +523,13 @@ class Robot:
         ))
         return tuple(output)
 
-    def coriolis_matrix(self, q: Sequence[float], qd: Sequence[float]) -> tuple[float, ...]:
-        r"""Compute the Coriolis and centrifugal matrix.
+    def velocity_product_forces(
+        self, q: Sequence[float], qd: Sequence[float]
+    ) -> tuple[float, ...]:
+        r"""Compute velocity-induced generalized forces.
 
         \[
-        C_{ij}(q, \dot q) = \frac{1}{2}\sum_k
-        \left(\frac{\partial M_{ij}}{\partial q_k}
-        + \frac{\partial M_{ik}}{\partial q_j}
-        - \frac{\partial M_{jk}}{\partial q_i}\right) \dot q_k.
+        \tau_v = C(q, \dot q)\dot q.
         \]
 
         Args:
@@ -538,10 +537,8 @@ class Robot:
             qd: Joint velocities in model joint order.
 
         Returns:
-            A flat, column-major `generalized_count x generalized_count` tuple using the
-            Christoffel factorization: `C(q, qd) @ qd + gravity(q)` equals the
-            zero-acceleration inverse dynamics, and `dM/dt - 2C` is
-            skew-symmetric. Rows and columns of fixed joints are zero.
+            A generalized-force tuple equal to `C(q, qd) @ qd`. Gravity is
+            excluded.
 
         Raises:
             ValueError: If an input length is invalid.
@@ -550,8 +547,8 @@ class Robot:
         q_array = _array(q, "q")
         qd_array = _array(qd, "qd")
         _require_same_length(q_array, qd=qd_array)
-        output = (ct.c_double * (self.generalized_count * self.generalized_count))()
-        _check(_lib.dynibo_coriolis_matrix(
+        output = (ct.c_double * self.generalized_count)()
+        _check(_lib.dynibo_velocity_product_forces(
             self._robot, self._workspace, q_array, qd_array, len(q_array),
             output, len(output),
         ))

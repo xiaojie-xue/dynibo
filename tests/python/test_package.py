@@ -62,8 +62,8 @@ class PackageTests(unittest.TestCase):
         zero = [0.0] * self.robot.joint_count
         mass = self.robot.mass_matrix(q)
         self.assertEqual(len(mass), self.robot.joint_count**2)
-        coriolis = self.robot.coriolis_matrix(q, qd)
-        self.assertEqual(len(coriolis), self.robot.joint_count**2)
+        velocity_product = self.robot.velocity_product_forces(q, qd)
+        self.assertEqual(len(velocity_product), self.robot.generalized_count)
         derivative = self.robot.jacobian_derivative(q, qd, self.target)
         self.assertEqual(len(derivative), 6 * self.robot.joint_count)
 
@@ -77,9 +77,7 @@ class PackageTests(unittest.TestCase):
         gravity = self.robot.gravity(q)
         bias = self.robot.inverse_dynamics(q, qd, zero)
         for row in range(n):
-            reconstructed = gravity[row] + sum(
-                coriolis[column * n + row] * qd[column] for column in range(n)
-            )
+            reconstructed = gravity[row] + velocity_product[row]
             self.assertAlmostEqual(reconstructed, bias[row], delta=1.0e-10)
 
         acceleration = self.robot.forward_acceleration(q, qd, zero, self.target)
@@ -200,7 +198,7 @@ class PackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "q and qd must have the same length"):
             self.robot.inverse_dynamics(self.q, self.q[:-1], self.q)
         with self.assertRaisesRegex(ValueError, "q and qd must have the same length"):
-            self.robot.coriolis_matrix(self.q, self.q[:-1])
+            self.robot.velocity_product_forces(self.q, self.q[:-1])
         with self.assertRaisesRegex(ValueError, "q and qd must have the same length"):
             self.robot.jacobian_derivative(self.q, self.q[:-1], self.target)
         with self.assertRaisesRegex(ValueError, "expected 4 elements"):

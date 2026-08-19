@@ -19,6 +19,97 @@ fn tree_arm() -> Robot {
         .expect("tree URDF must load")
 }
 
+#[test]
+fn active_dof_mapping_excludes_fixed_joints() {
+    let robot = Robot::from_urdf(urdf_path("oracle_mixed.urdf")).unwrap();
+    assert_eq!(robot.joint_count(), 4);
+    assert_eq!(robot.dof_count(), 3);
+    assert_eq!(robot.active_joint_indices(), &[0, 2, 3]);
+    assert_eq!(robot.joint_dof_index(0), Some(0));
+    assert_eq!(robot.joint_dof_index(1), None);
+    assert_eq!(robot.joint_dof_index(2), Some(1));
+    assert_eq!(robot.joint_dof_index(3), Some(2));
+    assert_eq!(robot.joint_dof_index(4), None);
+}
+
+#[test]
+fn explicit_base_frame_entry_points_match_robot_base_state() {
+    let robot = test_arm();
+    let mut stateful = robot.clone();
+    let base = Frame::from_parts(
+        Translation3::new(0.4, -0.3, 0.7),
+        UnitQuaternion::from_euler_angles(0.35, -0.2, 0.45),
+    );
+    stateful.set_base_frame(base).unwrap();
+    let target = robot.link_id("test_link_4").unwrap();
+    let tool = Frame::translation(0.12, -0.04, 0.09);
+    let q = [0.2, 1.0, -0.7, 0.4];
+    let qd = [-0.3, 0.5, -0.2, 0.8];
+    let qdd = [0.7, -0.4, 0.1, 0.3];
+    let mut explicit_workspace = robot.workspace();
+    let mut stateful_workspace = stateful.workspace();
+
+    let explicit_velocity = robot
+        .forward_velocity_kinematics_at_base_frame(
+            &q,
+            &qd,
+            target,
+            &base,
+            &tool,
+            &mut explicit_workspace,
+        )
+        .unwrap();
+    let stateful_velocity = stateful
+        .forward_velocity_kinematics(&q, &qd, target, &tool, &mut stateful_workspace)
+        .unwrap();
+    assert_relative_eq!(
+        explicit_velocity.to_vector(),
+        stateful_velocity.to_vector(),
+        epsilon = 2.0e-12
+    );
+
+    let mut explicit_gravity = [0.0; 4];
+    let mut stateful_gravity = [0.0; 4];
+    robot
+        .gravity_at_base_frame(
+            &q,
+            &base,
+            &[],
+            &mut explicit_workspace,
+            &mut explicit_gravity,
+        )
+        .unwrap();
+    stateful
+        .gravity(&q, &[], &mut stateful_workspace, &mut stateful_gravity)
+        .unwrap();
+    assert_slice_close(&explicit_gravity, &stateful_gravity);
+
+    let mut explicit_dynamics = [0.0; 4];
+    let mut stateful_dynamics = [0.0; 4];
+    robot
+        .inverse_dynamics_at_base_frame(
+            &q,
+            &qd,
+            &qdd,
+            &base,
+            &[],
+            &mut explicit_workspace,
+            &mut explicit_dynamics,
+        )
+        .unwrap();
+    stateful
+        .inverse_dynamics(
+            &q,
+            &qd,
+            &qdd,
+            &[],
+            &mut stateful_workspace,
+            &mut stateful_dynamics,
+        )
+        .unwrap();
+    assert_slice_close(&explicit_dynamics, &stateful_dynamics);
+}
+
 fn assert_slice_close(actual: &[f64], expected: &[f64]) {
     assert_eq!(actual.len(), expected.len());
     for (actual, expected) in actual.iter().zip(expected) {
@@ -558,6 +649,8 @@ fn matrix_and_jacobian_derivative_apis_validate_workspace_link_and_slices() {
     let mut short_derivative = [0.0; 23];
     let mut matrix = [0.0; 16];
     let mut short_matrix = [0.0; 15];
+    let mut output = [0.0; 4];
+    let mut short_output = [0.0; 3];
 
     let mut foreign_workspace = other.workspace();
     assert_invalid_workspace(robot.jacobian_derivative(
@@ -568,7 +661,12 @@ fn matrix_and_jacobian_derivative_apis_validate_workspace_link_and_slices() {
         &mut derivative,
     ));
     assert_invalid_workspace(robot.mass_matrix(&q, &mut foreign_workspace, &mut matrix));
-    assert_invalid_workspace(robot.coriolis_matrix(&q, &q, &mut foreign_workspace, &mut matrix));
+    assert_invalid_workspace(robot.velocity_product_forces(
+        &q,
+        &q,
+        &mut foreign_workspace,
+        &mut output,
+    ));
 
     let mut workspace = robot.workspace();
     assert_wrong_length(
@@ -598,16 +696,16 @@ fn matrix_and_jacobian_derivative_apis_validate_workspace_link_and_slices() {
     );
 
     assert_wrong_length(
-        robot.coriolis_matrix(&short, &q, &mut workspace, &mut matrix),
+        robot.velocity_product_forces(&short, &q, &mut workspace, &mut output),
         "q",
     );
     assert_wrong_length(
-        robot.coriolis_matrix(&q, &short, &mut workspace, &mut matrix),
+        robot.velocity_product_forces(&q, &short, &mut workspace, &mut output),
         "qd",
     );
     assert_wrong_length(
-        robot.coriolis_matrix(&q, &q, &mut workspace, &mut short_matrix),
-        "coriolis matrix output",
+        robot.velocity_product_forces(&q, &q, &mut workspace, &mut short_output),
+        "velocity product output",
     );
 }
 

@@ -128,15 +128,14 @@ public:
         return result;
     }
 
-    std::vector<double> coriolis_matrix(
+    std::vector<double> velocity_product_forces(
         const std::vector<double>& q, const std::vector<double>& qd) {
         if (q.size() != qd.size()) {
             throw Error(DYNIBO_STATUS_INVALID_ARGUMENT,
                         "q and qd must have the same length");
         }
-        const std::size_t n = generalized_count();
-        std::vector<double> result(n * n);
-        check(dynibo_coriolis_matrix(
+        std::vector<double> result(generalized_count());
+        check(dynibo_velocity_product_forces(
             robot_, workspace_, q.data(), qd.data(), q.size(),
             result.data(), result.size()));
         return result;

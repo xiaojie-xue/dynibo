@@ -117,7 +117,7 @@ DYNIBO_API DyniboStatus dynibo_mass_matrix(
     const DyniboRobot *robot, DyniboWorkspace *workspace,
     const double *q, size_t q_len, double *output, size_t output_len);
 /* State inputs must not overlap the output buffer. */
-DYNIBO_API DyniboStatus dynibo_coriolis_matrix(
+DYNIBO_API DyniboStatus dynibo_velocity_product_forces(
     const DyniboRobot *robot, DyniboWorkspace *workspace,
     const double *q, const double *qd, size_t state_len,
     double *output, size_t output_len);

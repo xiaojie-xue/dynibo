@@ -9,7 +9,7 @@ publish = false
 
 [lib]
 name = "dynibo_c"
-crate-type = ["cdylib", "staticlib"]
+crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
 dynibo = { path = "../..", version = "0.2.0" }

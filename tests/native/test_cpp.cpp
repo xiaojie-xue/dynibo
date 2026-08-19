@@ -60,15 +60,13 @@ int main(int argc, char** argv) {
             CHECK(std::abs(mass[column * 4 + row] - mass[row * 4 + column]) < 1.0e-12);
         }
     }
-    const auto coriolis = assigned.coriolis_matrix(reference_q, reference_qd);
-    CHECK(coriolis.size() == reference_q.size() * reference_q.size());
+    const auto velocity_product =
+        assigned.velocity_product_forces(reference_q, reference_qd);
+    CHECK(velocity_product.size() == reference_q.size());
     const std::vector<double> zero_qdd(reference_q.size(), 0.0);
     const auto bias = assigned.inverse_dynamics(reference_q, reference_qd, zero_qdd);
     for (std::size_t row = 0; row < reference_q.size(); ++row) {
-        double reconstructed = reference_gravity[row];
-        for (std::size_t column = 0; column < reference_q.size(); ++column) {
-            reconstructed += coriolis[column * 4 + row] * reference_qd[column];
-        }
+        const double reconstructed = reference_gravity[row] + velocity_product[row];
         CHECK(std::abs(reconstructed - bias[row]) < 1.0e-10);
     }
     const auto derivative =
@@ -135,7 +133,7 @@ int main(int argc, char** argv) {
     CHECK(caught);
     caught = false;
     try {
-        static_cast<void>(assigned.coriolis_matrix(q, short_q));
+        static_cast<void>(assigned.velocity_product_forces(q, short_q));
     } catch (const dynibo::Error& error) {
         caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
             && std::string(error.what()).find("same length") != std::string::npos;

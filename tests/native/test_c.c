@@ -112,8 +112,9 @@ int main(int argc, char **argv) {
             CHECK(fabs(square[col * n + row] - square[row * n + col]) < 1.0e-12);
         }
     }
-    check(dynibo_coriolis_matrix(
-        robot, workspace, reference_q, reference_qd, n, square, n * n));
+    double velocity_product[4];
+    check(dynibo_velocity_product_forces(
+        robot, workspace, reference_q, reference_qd, n, velocity_product, n));
     double gravity_vec[4];
     double bias_vec[4];
     check(dynibo_gravity(
@@ -122,10 +123,7 @@ int main(int argc, char **argv) {
         robot, workspace, reference_q, reference_qd, zero_qdd, n,
         &identity, zero_twist, zero_twist, NULL, 0, bias_vec, n));
     for (size_t row = 0; row < n; ++row) {
-        double reconstructed = gravity_vec[row];
-        for (size_t col = 0; col < n; ++col) {
-            reconstructed += square[col * n + row] * reference_qd[col];
-        }
+        const double reconstructed = gravity_vec[row] + velocity_product[row];
         CHECK(fabs(reconstructed - bias_vec[row]) < 1.0e-10);
     }
     check(dynibo_jacobian_derivative(
@@ -179,8 +177,8 @@ int main(int argc, char **argv) {
     CHECK(dynibo_mass_matrix(
         robot, workspace, reference_q, n, square, n * n - 1)
         == DYNIBO_STATUS_INVALID_ARGUMENT);
-    CHECK(dynibo_coriolis_matrix(
-        robot, workspace, reference_q, reference_qd, n - 1, square, n * n)
+    CHECK(dynibo_velocity_product_forces(
+        robot, workspace, reference_q, reference_qd, n - 1, output, n)
         == DYNIBO_STATUS_INVALID_ARGUMENT);
     CHECK(dynibo_jacobian_derivative(
         robot, workspace, reference_q, reference_qd, n, target,

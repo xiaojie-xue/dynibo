@@ -19,7 +19,7 @@ use dynibo::{
 use nalgebra::{Quaternion, Translation3, UnitQuaternion, Vector3};
 
 thread_local! {
-    static LAST_ERROR: RefCell<CString> = RefCell::new(CString::default());
+    static LAST_ERROR: RefCell<Vec<u8>> = RefCell::new(vec![0]);
 }
 
 /// Status returned by every fallible C function.
@@ -138,17 +138,31 @@ pub struct DyniboRobot {
 /// Opaque reusable calculation workspace.
 pub struct DyniboWorkspace {
     inner: Workspace,
+    indexed_loads: Box<[IndexedLoad]>,
 }
 
 fn set_error(message: impl Into<String>) {
-    let message = message.into().replace('\0', "\\0");
+    let message = message.into();
     LAST_ERROR.with(|slot| {
-        *slot.borrow_mut() = CString::new(message).expect("NUL bytes were replaced");
+        let mut output = slot.borrow_mut();
+        output.clear();
+        for byte in message.bytes() {
+            if byte == 0 {
+                output.extend_from_slice(b"\\0");
+            } else {
+                output.push(byte);
+            }
+        }
+        output.push(0);
     });
 }
 
 fn call(function: impl FnOnce() -> Result<(), (DyniboStatus, String)>) -> DyniboStatus {
-    LAST_ERROR.with(|slot| *slot.borrow_mut() = CString::default());
+    LAST_ERROR.with(|slot| {
+        let mut output = slot.borrow_mut();
+        output.clear();
+        output.push(0);
+    });
     match catch_unwind(AssertUnwindSafe(function)) {
         Ok(Ok(())) => DyniboStatus::Ok,
         Ok(Err((status, message))) => {
@@ -293,11 +307,15 @@ fn twist_to_c(value: Twist) -> DyniboTwist {
     }
 }
 
-unsafe fn load_slice(
+unsafe fn load_slice<'a>(
     robot: &DyniboRobot,
+    output: &'a mut [IndexedLoad],
     pointer: *const DyniboLoad,
     length: usize,
-) -> Result<Vec<IndexedLoad>, (DyniboStatus, String)> {
+) -> Result<&'a [IndexedLoad], (DyniboStatus, String)> {
+    for load in output.iter_mut() {
+        load.wrench = Wrench::zeros();
+    }
     let loads = if length == 0 {
         &[]
     } else {
@@ -309,26 +327,27 @@ unsafe fn load_slice(
         // SAFETY: Validity for `length` readable elements is part of the C contract.
         unsafe { std::slice::from_raw_parts(pointer, length) }
     };
-    loads
-        .iter()
-        .map(|load| {
-            let link = robot
-                .link_ids
-                .get(load.link_id)
-                .copied()
-                .ok_or_else(|| invalid(format!("invalid link id {}", load.link_id)))?;
-            Ok(IndexedLoad {
-                link,
-                wrench: Wrench::new(Vector3::from(load.torque), Vector3::from(load.force)),
-            })
-        })
-        .collect()
+    for load in loads {
+        if load.link_id >= robot.link_ids.len() {
+            return Err(invalid(format!("invalid link id {}", load.link_id)));
+        }
+        let current = output[load.link_id].wrench;
+        output[load.link_id].wrench = Wrench::new(
+            current.torque + Vector3::from(load.torque),
+            current.force + Vector3::from(load.force),
+        );
+    }
+    Ok(if loads.is_empty() {
+        &output[..0]
+    } else {
+        output
+    })
 }
 
 /// Returns the last error message for the calling thread.
 #[unsafe(no_mangle)]
 pub extern "C" fn dynibo_last_error_message() -> *const c_char {
-    LAST_ERROR.with(|slot| slot.borrow().as_ptr())
+    LAST_ERROR.with(|slot| slot.borrow().as_ptr().cast())
 }
 
 /// Returns the linked ABI version string.
@@ -506,6 +525,15 @@ pub unsafe extern "C" fn dynibo_workspace_create(
         let output = unsafe { required_mut(output, "output") }?;
         *output = Box::into_raw(Box::new(DyniboWorkspace {
             inner: robot.inner.workspace(),
+            indexed_loads: robot
+                .link_ids
+                .iter()
+                .copied()
+                .map(|link| IndexedLoad {
+                    link,
+                    wrench: Wrench::zeros(),
+                })
+                .collect(),
         }));
         Ok(())
     })
@@ -649,9 +677,9 @@ pub unsafe extern "C" fn dynibo_mass_matrix(
     })
 }
 
-/// Writes the column-major `joint_count x joint_count` Coriolis matrix.
+/// Writes velocity-product generalized forces `C(q, qd) * qd`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn dynibo_coriolis_matrix(
+pub unsafe extern "C" fn dynibo_velocity_product_forces(
     robot: *const DyniboRobot,
     workspace: *mut DyniboWorkspace,
     q: *const f64,
@@ -675,7 +703,7 @@ pub unsafe extern "C" fn dynibo_coriolis_matrix(
         let output = unsafe { output_slice(output, output_len, "output") }?;
         robot
             .inner
-            .coriolis_matrix(q, qd, &mut workspace.inner, output)
+            .velocity_product_forces(q, qd, &mut workspace.inner, output)
             .map_err(core_error)
     })
 }
@@ -767,9 +795,14 @@ pub unsafe extern "C" fn dynibo_forward_velocity(
                 .inner
                 .forward_velocity_kinematics(q, qd, link, &tool, &mut workspace.inner)
         } else {
-            let mut calculation_robot = robot.inner.clone();
-            calculation_robot.set_base_frame(base).map_err(core_error)?;
-            calculation_robot.forward_velocity_kinematics(q, qd, link, &tool, &mut workspace.inner)
+            robot.inner.forward_velocity_kinematics_at_base_frame(
+                q,
+                qd,
+                link,
+                &base,
+                &tool,
+                &mut workspace.inner,
+            )
         }
         .map_err(core_error)?;
         *output = twist_to_c(value);
@@ -839,19 +872,18 @@ pub unsafe extern "C" fn dynibo_gravity(
         // SAFETY: Pointer validation is performed by the helpers.
         let base = frame_from_pose(unsafe { required_ref(base, "base") }?)?;
         // SAFETY: Pointer validation is performed by the helper.
-        let loads = unsafe { load_slice(robot, loads, load_count) }?;
+        let loads = unsafe { load_slice(robot, &mut workspace.indexed_loads, loads, load_count) }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let output = unsafe { output_slice(output, output_len, "output") }?;
         if robot.inner.base_mode() == BaseMode::Floating {
             robot
                 .inner
-                .gravity(q, &loads, &mut workspace.inner, output)
+                .gravity(q, loads, &mut workspace.inner, output)
                 .map_err(core_error)
         } else {
-            let mut calculation_robot = robot.inner.clone();
-            calculation_robot.set_base_frame(base).map_err(core_error)?;
-            calculation_robot
-                .gravity(q, &loads, &mut workspace.inner, output)
+            robot
+                .inner
+                .gravity_at_base_frame(q, &base, loads, &mut workspace.inner, output)
                 .map_err(core_error)
         }
     })
@@ -889,19 +921,26 @@ pub unsafe extern "C" fn dynibo_inverse_dynamics(
         // SAFETY: Pointer validation is performed by the helpers.
         let base = frame_from_pose(unsafe { required_ref(base, "base") }?)?;
         // SAFETY: Pointer validation is performed by the helper.
-        let loads = unsafe { load_slice(robot, loads, load_count) }?;
+        let loads = unsafe { load_slice(robot, &mut workspace.indexed_loads, loads, load_count) }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let output = unsafe { output_slice(output, output_len, "output") }?;
         if robot.inner.base_mode() == BaseMode::Floating {
             robot
                 .inner
-                .inverse_dynamics(q, qd, qdd, &loads, &mut workspace.inner, output)
+                .inverse_dynamics(q, qd, qdd, loads, &mut workspace.inner, output)
                 .map_err(core_error)
         } else {
-            let mut calculation_robot = robot.inner.clone();
-            calculation_robot.set_base_frame(base).map_err(core_error)?;
-            calculation_robot
-                .inverse_dynamics(q, qd, qdd, &loads, &mut workspace.inner, output)
+            robot
+                .inner
+                .inverse_dynamics_at_base_frame(
+                    q,
+                    qd,
+                    qdd,
+                    &base,
+                    loads,
+                    &mut workspace.inner,
+                    output,
+                )
                 .map_err(core_error)
         }
     })
@@ -1136,14 +1175,14 @@ mod tests {
                 DyniboStatus::Ok
             );
             assert_eq!(
-                dynibo_coriolis_matrix(
+                dynibo_velocity_product_forces(
                     floating,
                     workspace,
                     q.as_ptr(),
                     q.as_ptr(),
                     q.len(),
-                    matrix.as_mut_ptr(),
-                    matrix.len(),
+                    generalized.as_mut_ptr(),
+                    generalized.len(),
                 ),
                 DyniboStatus::Ok
             );
@@ -1289,14 +1328,14 @@ mod tests {
                 DyniboStatus::Ok
             );
             assert_eq!(
-                dynibo_coriolis_matrix(
+                dynibo_velocity_product_forces(
                     robot,
                     workspace,
                     q.as_ptr(),
                     q.as_ptr(),
                     4,
                     square.as_mut_ptr(),
-                    16,
+                    4,
                 ),
                 DyniboStatus::Ok
             );
@@ -1482,14 +1521,14 @@ mod tests {
                 DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dynibo_coriolis_matrix(
+                dynibo_velocity_product_forces(
                     robot,
                     workspace,
                     q.as_ptr(),
                     q.as_ptr(),
                     3,
                     square.as_mut_ptr(),
-                    16,
+                    4,
                 ),
                 DyniboStatus::InvalidArgument
             );
@@ -1799,93 +1838,93 @@ mod tests {
             );
             assert!(last_error().contains("q and output must not overlap"));
 
-            // dynibo_coriolis_matrix: every validation arm.
+            // dynibo_velocity_product_forces: every validation arm.
             assert_eq!(
-                dynibo_coriolis_matrix(
+                dynibo_velocity_product_forces(
                     ptr::null(),
                     workspace,
                     q.as_ptr(),
                     q.as_ptr(),
                     4,
                     square.as_mut_ptr(),
-                    16,
+                    4,
                 ),
                 DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dynibo_coriolis_matrix(
+                dynibo_velocity_product_forces(
                     robot,
                     ptr::null_mut(),
                     q.as_ptr(),
                     q.as_ptr(),
                     4,
                     square.as_mut_ptr(),
-                    16,
+                    4,
                 ),
                 DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dynibo_coriolis_matrix(
+                dynibo_velocity_product_forces(
                     robot,
                     workspace,
                     ptr::null(),
                     q.as_ptr(),
                     4,
                     square.as_mut_ptr(),
-                    16,
+                    4,
                 ),
                 DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dynibo_coriolis_matrix(
+                dynibo_velocity_product_forces(
                     robot,
                     workspace,
                     q.as_ptr(),
                     ptr::null(),
                     4,
                     square.as_mut_ptr(),
-                    16,
+                    4,
                 ),
                 DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dynibo_coriolis_matrix(
+                dynibo_velocity_product_forces(
                     robot,
                     workspace,
                     q.as_ptr(),
                     q.as_ptr(),
                     4,
                     ptr::null_mut(),
-                    16,
+                    4,
                 ),
                 DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dynibo_coriolis_matrix(
+                dynibo_velocity_product_forces(
                     robot,
                     workspace,
                     q.as_ptr(),
                     q.as_ptr(),
                     4,
                     square.as_mut_ptr(),
-                    15,
+                    3,
                 ),
                 DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dynibo_coriolis_matrix(
+                dynibo_velocity_product_forces(
                     robot,
                     workspace,
                     ptr::null(),
                     ptr::null(),
                     0,
                     square.as_mut_ptr(),
-                    16,
+                    4,
                 ),
                 DyniboStatus::InvalidArgument
             );
             assert_eq!(
-                dynibo_coriolis_matrix(
+                dynibo_velocity_product_forces(
                     robot,
                     workspace,
                     q.as_ptr(),
@@ -1896,33 +1935,33 @@ mod tests {
                 ),
                 DyniboStatus::InvalidArgument
             );
-            let mut overlapping_coriolis = [0.0; 16];
-            let overlapping_q = overlapping_coriolis.as_ptr();
-            let overlapping_output = overlapping_coriolis.as_mut_ptr();
+            let mut overlapping_velocity_product = [0.0; 4];
+            let overlapping_q = overlapping_velocity_product.as_ptr();
+            let overlapping_output = overlapping_velocity_product.as_mut_ptr();
             assert_eq!(
-                dynibo_coriolis_matrix(
+                dynibo_velocity_product_forces(
                     robot,
                     workspace,
                     overlapping_q,
                     q.as_ptr(),
                     4,
                     overlapping_output,
-                    16,
+                    4,
                 ),
                 DyniboStatus::InvalidArgument
             );
             assert!(last_error().contains("q and output must not overlap"));
-            let overlapping_qd = overlapping_coriolis.as_ptr();
-            let overlapping_output = overlapping_coriolis.as_mut_ptr();
+            let overlapping_qd = overlapping_velocity_product.as_ptr();
+            let overlapping_output = overlapping_velocity_product.as_mut_ptr();
             assert_eq!(
-                dynibo_coriolis_matrix(
+                dynibo_velocity_product_forces(
                     robot,
                     workspace,
                     q.as_ptr(),
                     overlapping_qd,
                     4,
                     overlapping_output,
-                    16,
+                    4,
                 ),
                 DyniboStatus::InvalidArgument
             );
@@ -1952,6 +1991,28 @@ mod tests {
         });
         assert_eq!(child.join().unwrap(), "child thread");
         assert_eq!(last_error(), "main thread");
+    }
+
+    #[test]
+    fn error_buffer_and_overlap_checks_cover_nul_and_overflow_paths() {
+        set_error("left\0right");
+        assert_eq!(last_error(), "left\\0right");
+
+        let input = ptr::dangling::<f64>();
+        let output = ptr::dangling_mut::<f64>();
+        let error = reject_f64_overlap(input, usize::MAX, "q", output, 1).unwrap_err();
+        assert!(error.1.contains("q length is too large"));
+
+        let error = reject_f64_overlap(input, 1, "q", output, usize::MAX).unwrap_err();
+        assert!(error.1.contains("output length is too large"));
+
+        let overflowing_input = ptr::without_provenance::<f64>(usize::MAX - 3);
+        let error = reject_f64_overlap(overflowing_input, 1, "q", output, 1).unwrap_err();
+        assert!(error.1.contains("q address range overflows"));
+
+        let overflowing_output = ptr::without_provenance_mut::<f64>(usize::MAX - 3);
+        let error = reject_f64_overlap(input, 1, "q", overflowing_output, 1).unwrap_err();
+        assert!(error.1.contains("output address range overflows"));
     }
 
     #[test]

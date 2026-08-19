@@ -7,6 +7,7 @@ use nalgebra::{Matrix3, SMatrix, SVector, Vector3};
 
 use crate::{
     BaseMode, BaseState, Error, Frame, Joint, JointType, Link, Result, Twist, Wrench,
+    model::{JointKinematics, LinkDynamics},
     urdf::tree_model,
 };
 
@@ -53,8 +54,13 @@ pub struct Robot {
     name: String,
     joints: Box<[Joint]>,
     links: Box<[Link]>,
+    // Compact copies keep names, limits, and mutable presentation state out of
+    // the cache lines traversed by kinematics and dynamics kernels.
+    joint_kinematics: Box<[JointKinematics]>,
+    link_dynamics: Box<[LinkDynamics]>,
+    active_joint_indices: Box<[usize]>,
+    joint_dof_indices: Box<[Option<usize>]>,
     joint_parents: Box<[usize]>,
-    link_depths: Box<[usize]>,
     leaf_links: Box<[usize]>,
     base: BaseState,
 }
@@ -97,17 +103,28 @@ impl Robot {
             model_id, UNOWNED_MODEL_ID,
             "robot model identifier overflow"
         );
-        let mut link_depths = vec![0; model.links.len()];
-        for (joint_index, &parent) in model.joint_parents.iter().enumerate() {
-            link_depths[joint_index + 1] = link_depths[parent] + 1;
+        let joint_kinematics: Box<[_]> = model.joints.iter().map(Joint::kinematics).collect();
+        let link_dynamics: Box<[_]> = model.links.iter().map(Link::dynamics).collect();
+        let active_joint_indices: Box<[_]> = model
+            .joints
+            .iter()
+            .enumerate()
+            .filter_map(|(index, joint)| (joint.joint_type() != JointType::Fixed).then_some(index))
+            .collect();
+        let mut joint_dof_indices = vec![None; model.joints.len()];
+        for (dof_index, &joint_index) in active_joint_indices.iter().enumerate() {
+            joint_dof_indices[joint_index] = Some(dof_index);
         }
         Ok(Self {
             model_id,
             name: robot.name,
             joints: model.joints.into_boxed_slice(),
             links: model.links.into_boxed_slice(),
+            joint_kinematics,
+            link_dynamics,
+            active_joint_indices,
+            joint_dof_indices: joint_dof_indices.into_boxed_slice(),
             joint_parents: model.joint_parents.into_boxed_slice(),
-            link_depths: link_depths.into_boxed_slice(),
             leaf_links: model.leaf_links.into_boxed_slice(),
             base: BaseState::new(base_mode),
         })
@@ -226,6 +243,23 @@ impl Robot {
     /// Returns the number of joints in the model.
     pub fn joint_count(&self) -> usize {
         self.joints.len()
+    }
+
+    /// Returns the number of non-fixed joint degrees of freedom.
+    pub fn dof_count(&self) -> usize {
+        self.active_joint_indices.len()
+    }
+
+    /// Returns model-joint indices for all non-fixed degrees of freedom.
+    pub fn active_joint_indices(&self) -> &[usize] {
+        &self.active_joint_indices
+    }
+
+    /// Maps a model-joint index to its compact active-DOF index.
+    ///
+    /// Returns `None` for fixed joints and out-of-range indices.
+    pub fn joint_dof_index(&self, joint_index: usize) -> Option<usize> {
+        self.joint_dof_indices.get(joint_index).copied().flatten()
     }
 
     /// Returns the number of generalized base coordinates used by calculations.
@@ -410,7 +444,6 @@ impl Robot {
         )?;
         let depth = self.prepare_ancestor_path(target_index, &mut workspace.ancestor_path);
         let path = &workspace.ancestor_path[..depth];
-        self.target_frames_kernel(q, path, &mut workspace.frames)?;
         let local_target = self.jacobian_kernel(
             &workspace.frames,
             target_index,
@@ -499,25 +532,49 @@ impl Robot {
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
         let target_index = self.validate_link_id(target)?;
-        let local_velocity = self.velocity_kernel(
+        Ok(self.forward_velocity_for_base(
             q,
             qd,
             target_index,
             tool,
-            &mut workspace.frames,
-            &mut workspace.jacobian,
+            self.base.frame(),
+            self.base.velocity(),
             &mut workspace.ancestor_path,
-        )?;
-        let depth = self.prepare_ancestor_path(target_index, &mut workspace.ancestor_path);
-        let local_target = self.target_frame_kernel(q, &workspace.ancestor_path[..depth])?;
-        let offset = self.base.frame().rotation
-            * (local_target.translation.vector + local_target.rotation * tool.translation.vector);
-        let relative_angular = self.base.frame().rotation * local_velocity.angular;
-        let relative_linear = self.base.frame().rotation * local_velocity.linear;
-        let base_velocity = self.base.velocity();
-        Ok(Twist::new(
-            base_velocity.angular + relative_angular,
-            base_velocity.linear + base_velocity.angular.cross(&offset) + relative_linear,
+        ))
+    }
+
+    /// Computes target/tool velocity using an explicit world base frame.
+    ///
+    /// This stateless fixed-base variant is intended for language bindings that
+    /// provide the base pose per call. Base velocity is zero.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid input lengths, base frame, link ID, or workspace.
+    #[doc(hidden)]
+    pub fn forward_velocity_kinematics_at_base_frame(
+        &self,
+        q: &[f64],
+        qd: &[f64],
+        target: LinkId,
+        base_frame: &Frame,
+        tool: &Frame,
+        workspace: &mut Workspace,
+    ) -> Result<Twist> {
+        self.validate_workspace(workspace)?;
+        self.validate_slice("q", q)?;
+        self.validate_slice("qd", qd)?;
+        let target_index = self.validate_link_id(target)?;
+        let mut base = BaseState::new(BaseMode::Fixed);
+        base.set_frame(*base_frame)?;
+        Ok(self.forward_velocity_for_base(
+            q,
+            qd,
+            target_index,
+            tool,
+            base.frame(),
+            Twist::zeros(),
+            &mut workspace.ancestor_path,
         ))
     }
 
@@ -545,19 +602,13 @@ impl Robot {
         self.validate_slice("qd", qd)?;
         self.validate_slice("qdd", qdd)?;
         let target_index = self.validate_link_id(target)?;
-        let relative_velocity = self.velocity_kernel(
+        let depth = self.prepare_ancestor_path(target_index, &mut workspace.ancestor_path);
+        let (local_target, relative_velocity, relative_acceleration) = self.motion_for_joints(
             q,
             qd,
-            target_index,
-            &Frame::identity(),
-            &mut workspace.frames,
-            &mut workspace.jacobian,
-            &mut workspace.ancestor_path,
-        )?;
-        let relative_acceleration =
-            self.acceleration_kernel(q, qd, qdd, target_index, &mut workspace.ancestor_path)?;
-        let depth = self.prepare_ancestor_path(target_index, &mut workspace.ancestor_path);
-        let local_target = self.target_frame_kernel(q, &workspace.ancestor_path[..depth])?;
+            qdd,
+            workspace.ancestor_path[..depth].iter().rev().copied(),
+        );
         let rotation = self.base.frame().rotation;
         let offset = rotation * local_target.translation.vector;
         let relative_angular = rotation * relative_velocity.angular;
@@ -615,26 +666,16 @@ impl Robot {
         Ok(())
     }
 
-    /// Writes the runtime-sized `G x G` Coriolis and centrifugal matrix in
-    /// column-major order.
+    /// Writes velocity-product generalized forces `C(q, qd) * qd`.
     ///
-    /// The matrix uses the Christoffel factorization, so `C(q, qd) qd + g(q)`
-    /// equals the RNEA bias `inverse_dynamics(q, qd, 0)` and `dM/dt - 2C` is
-    /// skew-symmetric. Rows and columns of fixed joints are zero.
-    /// Equivalently, for a Christoffel factorization,
-    ///
-    /// $$
-    /// C_{ij}(q, \dot q) = \frac{1}{2}\sum_k
-    /// \left(\frac{\partial M_{ij}}{\partial q_k}
-    /// {}+ \frac{\partial M_{ik}}{\partial q_j}
-    /// {}- \frac{\partial M_{jk}}{\partial q_i}\right) \dot q_k.
-    /// $$
+    /// Gravity, prescribed base acceleration, and external loads are excluded.
+    /// For a floating base, the stored base velocity participates in the result
+    /// and output is ordered `[base torque, base force, joint forces]`.
     ///
     /// # Errors
     ///
-    /// Returns an error unless `output.len() == generalized_count().pow(2)`,
-    /// or for invalid input lengths or workspace.
-    pub fn coriolis_matrix(
+    /// Returns an error for invalid input or output lengths or workspace.
+    pub fn velocity_product_forces(
         &self,
         q: &[f64],
         qd: &[f64],
@@ -644,15 +685,36 @@ impl Robot {
         self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
-        self.validate_slice_length(
-            "coriolis matrix output",
-            output.len(),
-            self.generalized_count() * self.generalized_count(),
+        self.validate_output("velocity product output", output)?;
+        workspace.step.fill(0.0);
+        workspace.link_loads.fill(Wrench::zeros());
+        output.fill(0.0);
+        let joint_offset = self.base_dof_count();
+        let base_load = self.inverse_dynamics_kernel(
+            q,
+            qd,
+            &workspace.step,
+            self.base.frame(),
+            self.base.velocity(),
+            Twist::zeros(),
+            Vector3::zeros(),
+            Wrench::zeros(),
+            DynamicsScratch {
+                transforms: &mut workspace.frames,
+                angular_velocities: &mut workspace.angular_velocities,
+                angular_accelerations: &mut workspace.angular_accelerations,
+                origin_accelerations: &mut workspace.origin_accelerations,
+                link_accelerations: &mut workspace.link_accelerations,
+                link_loads: &mut workspace.link_loads,
+            },
+            &mut output[joint_offset..],
         )?;
-        if self.base_mode() == BaseMode::Fixed {
-            self.coriolis_matrix_kernel(q, qd, workspace, output);
-        } else {
-            self.floating_coriolis_matrix_kernel(q, qd, workspace, output)?;
+        if joint_offset != 0 {
+            write_world_wrench(
+                self.base.frame(),
+                base_load,
+                &mut output[..FLOATING_BASE_DOF],
+            );
         }
         Ok(())
     }
@@ -684,35 +746,57 @@ impl Robot {
         self.validate_slice("qd", qd)?;
         self.validate_slice("qdd", qdd)?;
         self.validate_output("inverse dynamics output", output)?;
-        let root_load = self.prepare_indexed_loads(loads, &mut workspace.link_loads)?;
-        output.fill(0.0);
-        let joint_offset = self.base_dof_count();
-        let base_load = self.inverse_dynamics_kernel(
+        self.inverse_dynamics_for_base(
             q,
             qd,
             qdd,
             self.base.frame(),
             self.base.velocity(),
             self.base.acceleration(),
-            root_load,
-            DynamicsScratch {
-                transforms: &mut workspace.frames,
-                angular_velocities: &mut workspace.angular_velocities,
-                angular_accelerations: &mut workspace.angular_accelerations,
-                origin_accelerations: &mut workspace.origin_accelerations,
-                link_accelerations: &mut workspace.link_accelerations,
-                link_loads: &mut workspace.link_loads,
-            },
-            &mut output[joint_offset..],
-        )?;
-        if joint_offset != 0 {
-            write_world_wrench(
-                self.base.frame(),
-                base_load,
-                &mut output[..FLOATING_BASE_DOF],
-            );
-        }
-        Ok(())
+            loads,
+            workspace,
+            output,
+        )
+    }
+
+    /// Computes fixed-base inverse dynamics using an explicit world base frame.
+    ///
+    /// Base velocity and acceleration are zero. This stateless variant is
+    /// intended for language bindings that provide the base pose per call.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid lengths, base frame, link IDs, or workspace.
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn inverse_dynamics_at_base_frame(
+        &self,
+        q: &[f64],
+        qd: &[f64],
+        qdd: &[f64],
+        base_frame: &Frame,
+        loads: &[IndexedLoad],
+        workspace: &mut Workspace,
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.validate_workspace(workspace)?;
+        self.validate_slice("q", q)?;
+        self.validate_slice("qd", qd)?;
+        self.validate_slice("qdd", qdd)?;
+        self.validate_output("inverse dynamics output", output)?;
+        let mut base = BaseState::new(BaseMode::Fixed);
+        base.set_frame(*base_frame)?;
+        self.inverse_dynamics_for_base(
+            q,
+            qd,
+            qdd,
+            base.frame(),
+            Twist::zeros(),
+            Twist::zeros(),
+            loads,
+            workspace,
+            output,
+        )
     }
 
     /// Writes runtime-sized gravity generalized forces into caller-owned output.
@@ -737,12 +821,89 @@ impl Robot {
         self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         self.validate_output("gravity output", output)?;
+        self.gravity_for_base(q, self.base.frame(), loads, workspace, output)
+    }
+
+    /// Computes gravity forces using an explicit world base frame.
+    ///
+    /// This stateless fixed-base variant is intended for language bindings that
+    /// provide the base pose per call.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid lengths, base frame, link IDs, or workspace.
+    #[doc(hidden)]
+    pub fn gravity_at_base_frame(
+        &self,
+        q: &[f64],
+        base_frame: &Frame,
+        loads: &[IndexedLoad],
+        workspace: &mut Workspace,
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.validate_workspace(workspace)?;
+        self.validate_slice("q", q)?;
+        self.validate_output("gravity output", output)?;
+        let mut base = BaseState::new(BaseMode::Fixed);
+        base.set_frame(*base_frame)?;
+        self.gravity_for_base(q, base.frame(), loads, workspace, output)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn inverse_dynamics_for_base(
+        &self,
+        q: &[f64],
+        qd: &[f64],
+        qdd: &[f64],
+        base_frame: &Frame,
+        base_velocity: Twist,
+        base_acceleration: Twist,
+        loads: &[IndexedLoad],
+        workspace: &mut Workspace,
+        output: &mut [f64],
+    ) -> Result<()> {
+        let root_load = self.prepare_indexed_loads(loads, &mut workspace.link_loads)?;
+        output.fill(0.0);
+        let joint_offset = self.base_dof_count();
+        let base_load = self.inverse_dynamics_kernel(
+            q,
+            qd,
+            qdd,
+            base_frame,
+            base_velocity,
+            base_acceleration,
+            Vector3::new(0.0, 0.0, GRAVITY),
+            root_load,
+            DynamicsScratch {
+                transforms: &mut workspace.frames,
+                angular_velocities: &mut workspace.angular_velocities,
+                angular_accelerations: &mut workspace.angular_accelerations,
+                origin_accelerations: &mut workspace.origin_accelerations,
+                link_accelerations: &mut workspace.link_accelerations,
+                link_loads: &mut workspace.link_loads,
+            },
+            &mut output[joint_offset..],
+        )?;
+        if joint_offset != 0 {
+            write_world_wrench(base_frame, base_load, &mut output[..FLOATING_BASE_DOF]);
+        }
+        Ok(())
+    }
+
+    fn gravity_for_base(
+        &self,
+        q: &[f64],
+        base_frame: &Frame,
+        loads: &[IndexedLoad],
+        workspace: &mut Workspace,
+        output: &mut [f64],
+    ) -> Result<()> {
         let root_load = self.prepare_indexed_loads(loads, &mut workspace.link_loads)?;
         output.fill(0.0);
         let joint_offset = self.base_dof_count();
         let base_load = self.gravity_kernel(
             q,
-            self.base.frame(),
+            base_frame,
             root_load,
             GravityScratch {
                 transforms: &mut workspace.frames,
@@ -752,11 +913,7 @@ impl Robot {
             &mut output[joint_offset..],
         )?;
         if joint_offset != 0 {
-            write_world_wrench(
-                self.base.frame(),
-                base_load,
-                &mut output[..FLOATING_BASE_DOF],
-            );
+            write_world_wrench(base_frame, base_load, &mut output[..FLOATING_BASE_DOF]);
         }
         Ok(())
     }
@@ -777,7 +934,7 @@ impl Robot {
         self.validate_slice("q", q)?;
         let mut frame = Frame::identity();
         for &joint_index in path.iter().rev() {
-            frame *= self.joints[joint_index].frame(q[joint_index]);
+            frame *= self.joint_kinematics[joint_index].frame(q[joint_index]);
         }
         Ok(frame)
     }
@@ -801,7 +958,7 @@ impl Robot {
         self.validate_slice_length("frame workspace", frames.len(), self.joint_count())?;
         let mut frame = Frame::identity();
         for &joint_index in path.iter().rev() {
-            frame *= self.joints[joint_index].frame(q[joint_index]);
+            frame *= self.joint_kinematics[joint_index].frame(q[joint_index]);
             frames[joint_index] = frame;
         }
         Ok(())
@@ -824,16 +981,17 @@ impl Robot {
         for &joint_index in path {
             let joint_frame = frames[joint_index];
             let column = &mut output[6 * joint_index..6 * joint_index + 6];
-            match self.joints[joint_index].joint_type() {
+            let joint = self.joint_kinematics[joint_index];
+            match joint.joint_type {
                 JointType::Revolute => {
-                    let axis = joint_frame.rotation * self.joints[joint_index].axis().as_ref();
+                    let axis = joint_frame.rotation * joint.axis.as_ref();
                     let linear = axis
                         .cross(&(target_frame.translation.vector - joint_frame.translation.vector));
                     column[..3].copy_from_slice(axis.as_slice());
                     column[3..].copy_from_slice(linear.as_slice());
                 }
                 JointType::Prismatic => {
-                    let axis = joint_frame.rotation * self.joints[joint_index].axis().as_ref();
+                    let axis = joint_frame.rotation * joint.axis.as_ref();
                     column[3..].copy_from_slice(axis.as_slice());
                 }
                 JointType::Fixed => {}
@@ -895,13 +1053,13 @@ impl Robot {
         let mut linear = Vector3::zeros();
         let mut parent_frame = Frame::identity();
         for &joint_index in path.iter().rev() {
-            let joint = &self.joints[joint_index];
+            let joint = self.joint_kinematics[joint_index];
             let frame = frames[joint_index];
             let offset = frame.translation.vector - parent_frame.translation.vector;
-            let axis: Vector3<f64> = frame.rotation * joint.axis().as_ref();
+            let axis: Vector3<f64> = frame.rotation * joint.axis.as_ref();
             let mut child_angular = angular;
             let mut child_linear = linear + angular.cross(&offset);
-            match joint.joint_type() {
+            match joint.joint_type {
                 JointType::Revolute => child_angular += axis * qd[joint_index],
                 JointType::Prismatic => child_linear += axis * qd[joint_index],
                 JointType::Fixed => {}
@@ -916,12 +1074,12 @@ impl Robot {
         let end_position = target_frame.translation.vector;
         let end_velocity = linear;
         for &joint_index in path {
-            let joint = &self.joints[joint_index];
+            let joint = self.joint_kinematics[joint_index];
             let frame = frames[joint_index];
-            let axis: Vector3<f64> = frame.rotation * joint.axis().as_ref();
+            let axis: Vector3<f64> = frame.rotation * joint.axis.as_ref();
             let axis_rate = angular_velocities[joint_index].cross(&axis);
             let column = &mut output[6 * joint_index..6 * joint_index + 6];
-            match joint.joint_type() {
+            match joint.joint_type {
                 JointType::Revolute => {
                     let moment_arm = end_position - frame.translation.vector;
                     let origin_velocity = origin_velocities[joint_index];
@@ -979,101 +1137,104 @@ impl Robot {
         }
     }
 
+    #[inline]
     #[allow(clippy::too_many_arguments)]
-    fn velocity_kernel(
+    fn forward_velocity_for_base(
         &self,
         q: &[f64],
         qd: &[f64],
         target_index: usize,
         tool: &Frame,
-        frames: &mut [Frame],
-        jacobian: &mut [f64],
+        base_frame: &Frame,
+        base_velocity: Twist,
         path: &mut [usize],
-    ) -> Result<Twist> {
-        self.validate_slice("q", q)?;
-        self.validate_slice("qd", qd)?;
-        if target_index == 0 {
-            return Ok(Twist::zeros());
-        }
+    ) -> Twist {
         let depth = self.prepare_ancestor_path(target_index, path);
-        let path = &path[..depth];
-        self.target_frames_kernel(q, path, frames)?;
-        let end = self.jacobian_kernel(frames, target_index, path, jacobian, true)?;
-        let offset_world = end.rotation * tool.translation.vector;
-        let mut angular = Vector3::zeros();
-        let mut linear = Vector3::zeros();
-        for &joint_index in path {
-            let column = &jacobian[6 * joint_index..6 * joint_index + 6];
-            let column_angular = Vector3::new(column[0], column[1], column[2]);
-            let column_linear =
-                Vector3::new(column[3], column[4], column[5]) + column_angular.cross(&offset_world);
-            angular += column_angular * qd[joint_index];
-            linear += column_linear * qd[joint_index];
-        }
-        Ok(Twist::new(angular, linear))
-    }
-
-    fn acceleration_kernel(
-        &self,
-        q: &[f64],
-        qd: &[f64],
-        qdd: &[f64],
-        target_index: usize,
-        path: &mut [usize],
-    ) -> Result<Twist> {
-        self.validate_slice("q", q)?;
-        self.validate_slice("qd", qd)?;
-        self.validate_slice("qdd", qdd)?;
-        if target_index == 0 {
-            return Ok(Twist::zeros());
-        }
-        let target_depth = self.link_depths[target_index];
-        if target_depth == target_index {
-            return Ok(self.acceleration_for_joints(q, qd, qdd, 0..target_depth));
-        }
-        let depth = self.prepare_ancestor_path(target_index, path);
-        let path = &path[..depth];
-        Ok(self.acceleration_for_joints(q, qd, qdd, path.iter().rev().copied()))
+        let (local_target, local_velocity) =
+            self.velocity_for_joints(q, qd, path[..depth].iter().rev().copied(), tool);
+        let offset = base_frame.rotation
+            * (local_target.translation.vector + local_target.rotation * tool.translation.vector);
+        let relative_angular = base_frame.rotation * local_velocity.angular;
+        let relative_linear = base_frame.rotation * local_velocity.linear;
+        Twist::new(
+            base_velocity.angular + relative_angular,
+            base_velocity.linear + base_velocity.angular.cross(&offset) + relative_linear,
+        )
     }
 
     #[inline]
-    fn acceleration_for_joints(
+    fn velocity_for_joints(
+        &self,
+        q: &[f64],
+        qd: &[f64],
+        joint_indices: impl Iterator<Item = usize>,
+        tool: &Frame,
+    ) -> (Frame, Twist) {
+        let mut frame = Frame::identity();
+        let mut angular = Vector3::zeros();
+        let mut linear = Vector3::zeros();
+        for joint_index in joint_indices {
+            let parent_position = frame.translation.vector;
+            let joint = self.joint_kinematics[joint_index];
+            frame *= joint.frame(q[joint_index]);
+            linear += angular.cross(&(frame.translation.vector - parent_position));
+            let axis = frame.rotation * joint.axis.as_ref();
+            match joint.joint_type {
+                JointType::Revolute => angular += axis * qd[joint_index],
+                JointType::Prismatic => linear += axis * qd[joint_index],
+                JointType::Fixed => {}
+            }
+        }
+        linear += angular.cross(&(frame.rotation * tool.translation.vector));
+        (frame, Twist::new(angular, linear))
+    }
+
+    #[inline]
+    fn motion_for_joints(
         &self,
         q: &[f64],
         qd: &[f64],
         qdd: &[f64],
         joint_indices: impl Iterator<Item = usize>,
-    ) -> Twist {
+    ) -> (Frame, Twist, Twist) {
         let mut frame = Frame::identity();
         let mut omega = Vector3::zeros();
+        let mut velocity = Vector3::zeros();
         let mut alpha = Vector3::zeros();
-        let mut linear = Vector3::zeros();
+        let mut acceleration = Vector3::zeros();
         for joint_index in joint_indices {
-            let parent_frame = frame;
-            frame *= self.joints[joint_index].frame(q[joint_index]);
-            let offset = frame.translation.vector - parent_frame.translation.vector;
+            let parent_position = frame.translation.vector;
+            let joint = self.joint_kinematics[joint_index];
+            frame *= joint.frame(q[joint_index]);
+            let offset = frame.translation.vector - parent_position;
             let mut child_omega = omega;
+            let mut child_velocity = velocity + omega.cross(&offset);
             let mut child_alpha = alpha;
-            let mut child_linear =
-                linear + alpha.cross(&offset) + omega.cross(&omega.cross(&offset));
-            match self.joints[joint_index].joint_type() {
+            let mut child_acceleration =
+                acceleration + alpha.cross(&offset) + omega.cross(&omega.cross(&offset));
+            let axis = frame.rotation * joint.axis.as_ref();
+            match joint.joint_type {
                 JointType::Revolute => {
-                    let axis = frame.rotation * self.joints[joint_index].axis().as_ref();
                     child_alpha += axis * qdd[joint_index] + omega.cross(&axis) * qd[joint_index];
                     child_omega += axis * qd[joint_index];
                 }
                 JointType::Prismatic => {
-                    let axis = frame.rotation * self.joints[joint_index].axis().as_ref();
-                    child_linear +=
+                    child_velocity += axis * qd[joint_index];
+                    child_acceleration +=
                         axis * qdd[joint_index] + 2.0 * qd[joint_index] * omega.cross(&axis);
                 }
                 JointType::Fixed => {}
             }
             omega = child_omega;
+            velocity = child_velocity;
             alpha = child_alpha;
-            linear = child_linear;
+            acceleration = child_acceleration;
         }
-        Twist::new(alpha, linear)
+        (
+            frame,
+            Twist::new(omega, velocity),
+            Twist::new(alpha, acceleration),
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1085,6 +1246,7 @@ impl Robot {
         base_frame: &Frame,
         base_velocity: Twist,
         base_acceleration: Twist,
+        world_gravity: Vector3<f64>,
         root_load: Wrench,
         scratch: DynamicsScratch<'_>,
         output: &mut [f64],
@@ -1098,11 +1260,11 @@ impl Robot {
         let base_omega = base_rotation_inverse * base_velocity.angular;
         let base_angular_acceleration = base_rotation_inverse * base_acceleration.angular;
         let base_origin_acceleration =
-            base_rotation_inverse * (Vector3::new(0.0, 0.0, GRAVITY) + base_acceleration.linear);
+            base_rotation_inverse * (world_gravity + base_acceleration.linear);
 
         for i in 0..self.joint_count() {
-            let joint = &self.joints[i];
-            let link = &self.links[i + 1];
+            let joint = self.joint_kinematics[i];
+            let link = self.link_dynamics[i + 1];
             let parent = self.joint_parents[i];
             let (parent_omega, parent_alpha, parent_acceleration) = if parent == 0 {
                 (
@@ -1120,14 +1282,14 @@ impl Robot {
             let transform = joint.frame(q[i]);
             let rotation_inverse = transform.rotation.inverse();
             let translation = transform.translation.vector;
-            let axis = joint.axis().as_ref();
+            let axis = joint.axis.as_ref();
             let rotated_omega = rotation_inverse * parent_omega;
             let rotated_alpha = rotation_inverse * parent_alpha;
             let translated_acceleration = rotation_inverse
                 * (parent_acceleration
                     + parent_alpha.cross(&translation)
                     + parent_omega.cross(&parent_omega.cross(&translation)));
-            let (omega, alpha, acceleration) = match joint.joint_type() {
+            let (omega, alpha, acceleration) = match joint.joint_type {
                 JointType::Revolute => {
                     let alpha =
                         rotated_alpha + qdd[i] * axis + rotated_omega.cross(&(qd[i] * axis));
@@ -1145,39 +1307,43 @@ impl Robot {
             scratch.angular_velocities[i] = omega;
             scratch.angular_accelerations[i] = alpha;
             scratch.origin_accelerations[i] = acceleration;
-            let center = link.center_of_mass();
+            let center = &link.center_of_mass;
             scratch.link_accelerations[i] =
                 acceleration + alpha.cross(center) + omega.cross(&omega.cross(center));
             scratch.transforms[i] = transform;
         }
 
-        let root = self.root_link();
+        let root = self.link_dynamics[0];
         let root_center_acceleration = base_origin_acceleration
-            + base_angular_acceleration.cross(root.center_of_mass())
-            + base_omega.cross(&base_omega.cross(root.center_of_mass()));
-        let root_force = root.mass() * root_center_acceleration;
+            + base_angular_acceleration.cross(&root.center_of_mass)
+            + base_omega.cross(&base_omega.cross(&root.center_of_mass));
+        let root_force = root.mass * root_center_acceleration;
         let mut accumulated_root_load = add_wrench(
             root_load,
             Wrench::new(
-                root.center_of_mass().cross(&root_force)
-                    + root.inertia() * base_angular_acceleration
-                    + base_omega.cross(&(root.inertia() * base_omega)),
+                root.center_of_mass.cross(&root_force)
+                    + root.inertia * base_angular_acceleration
+                    + base_omega.cross(&(root.inertia * base_omega)),
                 root_force,
             ),
         );
         for i in (0..self.joint_count()).rev() {
-            let joint = &self.joints[i];
-            let link = &self.links[i + 1];
-            let inertial_force = link.mass() * scratch.link_accelerations[i];
-            let angular_momentum = link.inertia() * scratch.angular_velocities[i];
+            let joint = self.joint_kinematics[i];
+            let link = self.link_dynamics[i + 1];
+            let inertial_force = link.mass * scratch.link_accelerations[i];
+            let angular_momentum = link.inertia * scratch.angular_velocities[i];
             let inertial_load = Wrench::new(
-                link.center_of_mass().cross(&inertial_force)
-                    + link.inertia() * scratch.angular_accelerations[i]
+                link.center_of_mass.cross(&inertial_force)
+                    + link.inertia * scratch.angular_accelerations[i]
                     + scratch.angular_velocities[i].cross(&angular_momentum),
                 inertial_force,
             );
             scratch.link_loads[i] = add_wrench(scratch.link_loads[i], inertial_load);
-            output[i] = joint.active_force(scratch.link_loads[i]);
+            output[i] = match joint.joint_type {
+                JointType::Revolute => scratch.link_loads[i].torque.dot(joint.axis.as_ref()),
+                JointType::Prismatic => scratch.link_loads[i].force.dot(joint.axis.as_ref()),
+                JointType::Fixed => 0.0,
+            };
             let parent = self.joint_parents[i];
             if parent != 0 {
                 let parent_load = wrench_to_parent(&scratch.transforms[i], scratch.link_loads[i]);
@@ -1196,15 +1362,12 @@ impl Robot {
     fn mass_matrix_kernel(&self, q: &[f64], workspace: &mut Workspace, output: &mut [f64]) {
         let joint_count = self.joint_count();
         output.fill(0.0);
-        for (index, joint) in self.joints.iter().enumerate() {
-            workspace.frames[index] = joint.frame(q[index]);
-            let link = &self.links[index + 1];
-            let mass = link.mass();
-            let center = *link.center_of_mass();
-            workspace.composite_masses[index] = mass;
-            workspace.composite_moments[index] = mass * center;
-            // Rotational inertia about the link origin: I_o = I_com - m[c]x[c]x.
-            workspace.composite_inertias[index] = link.inertia() - mass * skew_square(center);
+        for (index, &position) in q.iter().enumerate() {
+            workspace.frames[index] = self.joint_kinematics[index].frame(position);
+            let link = self.link_dynamics[index + 1];
+            workspace.composite_masses[index] = link.mass;
+            workspace.composite_moments[index] = link.first_moment;
+            workspace.composite_inertias[index] = link.origin_inertia;
         }
         // Composite rigid-body pass: accumulate each subtree inertia, expressed
         // about the parent link origin, into the parent.
@@ -1233,24 +1396,22 @@ impl Robot {
         }
         // Mass-matrix entries: F = I^c S in the child link frame, then F is
         // propagated up the ancestor chain while M(i, j) = S_j^T F.
-        for (index, joint) in self.joints.iter().enumerate() {
-            if joint.joint_type() == JointType::Fixed {
-                continue;
-            }
-            let axis: Vector3<f64> = *joint.axis().as_ref();
+        for &index in self.active_joint_indices.iter() {
+            let joint = self.joint_kinematics[index];
+            let axis: Vector3<f64> = *joint.axis.as_ref();
             let mass = workspace.composite_masses[index];
             let moment = workspace.composite_moments[index];
             let inertia = workspace.composite_inertias[index];
-            let mut force = match joint.joint_type() {
+            let mut force = match joint.joint_type {
                 JointType::Revolute => Wrench::new(inertia * axis, axis.cross(&moment)),
                 JointType::Prismatic => Wrench::new(moment.cross(&axis), mass * axis),
                 JointType::Fixed => unreachable!("fixed joints were skipped above"),
             };
             let mut current = index;
             loop {
-                let current_joint = &self.joints[current];
-                let current_axis: Vector3<f64> = *current_joint.axis().as_ref();
-                let entry = match current_joint.joint_type() {
+                let current_joint = self.joint_kinematics[current];
+                let current_axis: Vector3<f64> = *current_joint.axis.as_ref();
+                let entry = match current_joint.joint_type {
                     JointType::Revolute => current_axis.dot(&force.torque),
                     JointType::Prismatic => current_axis.dot(&force.force),
                     JointType::Fixed => 0.0,
@@ -1277,18 +1438,16 @@ impl Robot {
         let generalized_count = self.generalized_count();
         output.fill(0.0);
 
-        let root = self.root_link();
-        let mut root_mass = root.mass();
-        let mut root_moment = root.mass() * root.center_of_mass();
-        let mut root_inertia = root.inertia() - root.mass() * skew_square(*root.center_of_mass());
-        for (index, joint) in self.joints.iter().enumerate() {
-            workspace.frames[index] = joint.frame(q[index]);
-            let link = &self.links[index + 1];
-            let mass = link.mass();
-            let center = *link.center_of_mass();
-            workspace.composite_masses[index] = mass;
-            workspace.composite_moments[index] = mass * center;
-            workspace.composite_inertias[index] = link.inertia() - mass * skew_square(center);
+        let root = self.link_dynamics[0];
+        let mut root_mass = root.mass;
+        let mut root_moment = root.first_moment;
+        let mut root_inertia = root.origin_inertia;
+        for (index, &position) in q.iter().enumerate() {
+            workspace.frames[index] = self.joint_kinematics[index].frame(position);
+            let link = self.link_dynamics[index + 1];
+            workspace.composite_masses[index] = link.mass;
+            workspace.composite_moments[index] = link.first_moment;
+            workspace.composite_inertias[index] = link.origin_inertia;
         }
         for index in (0..joint_count).rev() {
             let transform = &workspace.frames[index];
@@ -1334,15 +1493,13 @@ impl Robot {
             write_wrench_to_column(output, generalized_count, column, world_load);
         }
 
-        for (index, joint) in self.joints.iter().enumerate() {
-            if joint.joint_type() == JointType::Fixed {
-                continue;
-            }
-            let axis: Vector3<f64> = *joint.axis().as_ref();
+        for &index in self.active_joint_indices.iter() {
+            let joint = self.joint_kinematics[index];
+            let axis: Vector3<f64> = *joint.axis.as_ref();
             let mass = workspace.composite_masses[index];
             let moment = workspace.composite_moments[index];
             let inertia = workspace.composite_inertias[index];
-            let mut force = match joint.joint_type() {
+            let mut force = match joint.joint_type {
                 JointType::Revolute => Wrench::new(inertia * axis, axis.cross(&moment)),
                 JointType::Prismatic => Wrench::new(moment.cross(&axis), mass * axis),
                 JointType::Fixed => unreachable!("fixed joints were skipped"),
@@ -1350,9 +1507,9 @@ impl Robot {
             let joint_column = FLOATING_BASE_DOF + index;
             let mut current = index;
             loop {
-                let current_joint = &self.joints[current];
-                let current_axis: Vector3<f64> = *current_joint.axis().as_ref();
-                let entry = match current_joint.joint_type() {
+                let current_joint = self.joint_kinematics[current];
+                let current_axis: Vector3<f64> = *current_joint.axis.as_ref();
+                let entry = match current_joint.joint_type {
                     JointType::Revolute => current_axis.dot(&force.torque),
                     JointType::Prismatic => current_axis.dot(&force.force),
                     JointType::Fixed => 0.0,
@@ -1375,206 +1532,6 @@ impl Robot {
                 output[base_row * generalized_count + joint_column] = entry;
             }
         }
-    }
-
-    /// Computes `C(q, qd)` as half the velocity-Jacobian of the RNEA bias
-    /// force: the Christoffel factorization satisfies `C = (1/2) db/dv` for
-    /// `b(q, v) = RNEA(q, v, 0)`, so one directional-derivative pass along
-    /// `e_j` produces matrix column `j`. The base pass stores each link's
-    /// local transform and angular velocity; gravity drops out because it
-    /// does not depend on velocities.
-    fn coriolis_matrix_kernel(
-        &self,
-        q: &[f64],
-        qd: &[f64],
-        workspace: &mut Workspace,
-        output: &mut [f64],
-    ) {
-        let joint_count = self.joint_count();
-        output.fill(0.0);
-        for (index, (&position, &velocity)) in q.iter().zip(qd.iter()).enumerate() {
-            let joint = &self.joints[index];
-            let transform = joint.frame(position);
-            let parent = self.joint_parents[index];
-            let parent_omega = if parent == 0 {
-                Vector3::zeros()
-            } else {
-                workspace.angular_velocities[parent - 1]
-            };
-            let rotated_omega = transform.rotation.inverse() * parent_omega;
-            workspace.frames[index] = transform;
-            workspace.angular_velocities[index] = match joint.joint_type() {
-                JointType::Revolute => rotated_omega + velocity * joint.axis().as_ref(),
-                JointType::Prismatic | JointType::Fixed => rotated_omega,
-            };
-        }
-        for column in 0..joint_count {
-            if self.joints[column].joint_type() == JointType::Fixed {
-                continue;
-            }
-            for (index, &velocity) in qd.iter().enumerate() {
-                let joint = &self.joints[index];
-                let transform = &workspace.frames[index];
-                let rotation_inverse = transform.rotation.inverse();
-                let translation = transform.translation.vector;
-                let axis: Vector3<f64> = *joint.axis().as_ref();
-                let parent = self.joint_parents[index];
-                let (parent_omega, parent_domega, parent_dalpha, parent_dacceleration) =
-                    if parent == 0 {
-                        (
-                            Vector3::zeros(),
-                            Vector3::zeros(),
-                            Vector3::zeros(),
-                            Vector3::zeros(),
-                        )
-                    } else {
-                        (
-                            workspace.angular_velocities[parent - 1],
-                            workspace.derivative_omegas[parent - 1],
-                            workspace.derivative_alphas[parent - 1],
-                            workspace.derivative_accelerations[parent - 1],
-                        )
-                    };
-                let rotated_omega = rotation_inverse * parent_omega;
-                let rotated_domega = rotation_inverse * parent_domega;
-                let source = f64::from(index == column);
-                let mut dalpha = rotation_inverse * parent_dalpha;
-                let mut dacceleration = rotation_inverse
-                    * (parent_dacceleration
-                        + parent_dalpha.cross(&translation)
-                        + parent_domega.cross(&parent_omega.cross(&translation))
-                        + parent_omega.cross(&parent_domega.cross(&translation)));
-                let domega = match joint.joint_type() {
-                    JointType::Revolute => {
-                        dalpha += rotated_domega.cross(&(velocity * axis))
-                            + source * rotated_omega.cross(&axis);
-                        rotated_domega + source * axis
-                    }
-                    JointType::Prismatic => {
-                        dacceleration += 2.0
-                            * (source * rotated_omega.cross(&axis)
-                                + velocity * rotated_domega.cross(&axis));
-                        rotated_domega
-                    }
-                    JointType::Fixed => rotated_domega,
-                };
-                workspace.derivative_omegas[index] = domega;
-                workspace.derivative_alphas[index] = dalpha;
-                workspace.derivative_accelerations[index] = dacceleration;
-                let omega = workspace.angular_velocities[index];
-                let link = &self.links[index + 1];
-                let center = *link.center_of_mass();
-                let link_acceleration_derivative = dacceleration
-                    + dalpha.cross(&center)
-                    + domega.cross(&omega.cross(&center))
-                    + omega.cross(&domega.cross(&center));
-                let inertial_force = link.mass() * link_acceleration_derivative;
-                workspace.link_loads[index] = Wrench::new(
-                    center.cross(&inertial_force)
-                        + link.inertia() * dalpha
-                        + domega.cross(&(link.inertia() * omega))
-                        + omega.cross(&(link.inertia() * domega)),
-                    inertial_force,
-                );
-            }
-            for index in (0..joint_count).rev() {
-                let joint = &self.joints[index];
-                let load = workspace.link_loads[index];
-                output[column * joint_count + index] = 0.5 * joint.active_force(load);
-                let parent = self.joint_parents[index];
-                if parent != 0 {
-                    let parent_load = wrench_to_parent(&workspace.frames[index], load);
-                    workspace.link_loads[parent - 1] =
-                        add_wrench(workspace.link_loads[parent - 1], parent_load);
-                }
-            }
-        }
-    }
-
-    fn floating_coriolis_matrix_kernel(
-        &self,
-        q: &[f64],
-        qd: &[f64],
-        workspace: &mut Workspace,
-        output: &mut [f64],
-    ) -> Result<()> {
-        let generalized_count = self.generalized_count();
-        output.fill(0.0);
-        workspace.step.fill(0.0);
-        for column in 0..generalized_count {
-            workspace.q_work.copy_from_slice(qd);
-            let mut plus_base_velocity = self.base.velocity();
-            if column < 3 {
-                plus_base_velocity.angular[column] += 1.0;
-            } else if column < FLOATING_BASE_DOF {
-                plus_base_velocity.linear[column - 3] += 1.0;
-            } else {
-                workspace.q_work[column - FLOATING_BASE_DOF] += 1.0;
-            }
-            workspace.link_loads.fill(Wrench::zeros());
-            let plus_root = self.inverse_dynamics_kernel(
-                q,
-                &workspace.q_work,
-                &workspace.step,
-                self.base.frame(),
-                plus_base_velocity,
-                Twist::zeros(),
-                Wrench::zeros(),
-                DynamicsScratch {
-                    transforms: &mut workspace.frames,
-                    angular_velocities: &mut workspace.angular_velocities,
-                    angular_accelerations: &mut workspace.angular_accelerations,
-                    origin_accelerations: &mut workspace.origin_accelerations,
-                    link_accelerations: &mut workspace.link_accelerations,
-                    link_loads: &mut workspace.link_loads,
-                },
-                &mut workspace.generalized_work[FLOATING_BASE_DOF..],
-            )?;
-            write_world_wrench(
-                self.base.frame(),
-                plus_root,
-                &mut workspace.generalized_work[..FLOATING_BASE_DOF],
-            );
-
-            workspace.q_work.copy_from_slice(qd);
-            let mut minus_base_velocity = self.base.velocity();
-            if column < 3 {
-                minus_base_velocity.angular[column] -= 1.0;
-            } else if column < FLOATING_BASE_DOF {
-                minus_base_velocity.linear[column - 3] -= 1.0;
-            } else {
-                workspace.q_work[column - FLOATING_BASE_DOF] -= 1.0;
-            }
-            workspace.link_loads.fill(Wrench::zeros());
-            let minus_root = self.inverse_dynamics_kernel(
-                q,
-                &workspace.q_work,
-                &workspace.step,
-                self.base.frame(),
-                minus_base_velocity,
-                Twist::zeros(),
-                Wrench::zeros(),
-                DynamicsScratch {
-                    transforms: &mut workspace.frames,
-                    angular_velocities: &mut workspace.angular_velocities,
-                    angular_accelerations: &mut workspace.angular_accelerations,
-                    origin_accelerations: &mut workspace.origin_accelerations,
-                    link_accelerations: &mut workspace.link_accelerations,
-                    link_loads: &mut workspace.link_loads,
-                },
-                &mut workspace.generalized_step[FLOATING_BASE_DOF..],
-            )?;
-            write_world_wrench(
-                self.base.frame(),
-                minus_root,
-                &mut workspace.generalized_step[..FLOATING_BASE_DOF],
-            );
-            for row in 0..generalized_count {
-                output[column * generalized_count + row] =
-                    0.25 * (workspace.generalized_work[row] - workspace.generalized_step[row]);
-            }
-        }
-        Ok(())
     }
 
     fn gravity_kernel(
@@ -1604,7 +1561,7 @@ impl Robot {
         self.validate_joint_output("gravity joint output", output)?;
         let base_gravity = base_frame.rotation.inverse() * Vector3::new(0.0, 0.0, GRAVITY);
         for (i, &position) in q.iter().enumerate() {
-            scratch.transforms[i] = self.joints[i].frame(position);
+            scratch.transforms[i] = self.joint_kinematics[i].frame(position);
             let parent = self.joint_parents[i];
             let parent_gravity = if parent == 0 {
                 base_gravity
@@ -1613,19 +1570,23 @@ impl Robot {
             };
             scratch.gravity_at_link[i] = scratch.transforms[i].rotation.inverse() * parent_gravity;
         }
-        let root = self.root_link();
-        let root_force = root.mass() * base_gravity;
+        let root = self.link_dynamics[0];
+        let root_force = root.mass * base_gravity;
         let mut accumulated_root_load = add_wrench(
             root_load,
-            Wrench::new(root.center_of_mass().cross(&root_force), root_force),
+            Wrench::new(root.center_of_mass.cross(&root_force), root_force),
         );
         for i in (0..self.joint_count()).rev() {
-            let joint = &self.joints[i];
-            let link = &self.links[i + 1];
-            let force = link.mass() * scratch.gravity_at_link[i];
-            let gravity_load = Wrench::new(link.center_of_mass().cross(&force), force);
+            let joint = self.joint_kinematics[i];
+            let link = self.link_dynamics[i + 1];
+            let force = link.mass * scratch.gravity_at_link[i];
+            let gravity_load = Wrench::new(link.center_of_mass.cross(&force), force);
             scratch.link_loads[i] = add_wrench(scratch.link_loads[i], gravity_load);
-            output[i] = joint.active_force(scratch.link_loads[i]);
+            output[i] = match joint.joint_type {
+                JointType::Revolute => scratch.link_loads[i].torque.dot(joint.axis.as_ref()),
+                JointType::Prismatic => scratch.link_loads[i].force.dot(joint.axis.as_ref()),
+                JointType::Fixed => 0.0,
+            };
             let parent = self.joint_parents[i];
             if parent != 0 {
                 let parent_load = wrench_to_parent(&scratch.transforms[i], scratch.link_loads[i]);
@@ -1707,7 +1668,7 @@ impl Robot {
             );
             let mut regularized = SMatrix::<f64, 6, 6>::identity() * damping_squared;
             for &joint_index in path.iter().rev() {
-                if self.joints[joint_index].joint_type() == JointType::Fixed {
+                if self.joint_dof_indices[joint_index].is_none() {
                     continue;
                 }
                 let column = &jacobian[6 * joint_index..6 * joint_index + 6];
@@ -1726,7 +1687,7 @@ impl Robot {
             };
             let mut step_norm_squared = 0.0;
             for &joint_index in path.iter().rev() {
-                if self.joints[joint_index].joint_type() == JointType::Fixed {
+                if self.joint_dof_indices[joint_index].is_none() {
                     continue;
                 }
                 let column = &jacobian[6 * joint_index..6 * joint_index + 6];
@@ -1749,7 +1710,7 @@ impl Robot {
                 1.0
             };
             for &joint_index in path.iter().rev() {
-                if self.joints[joint_index].joint_type() != JointType::Fixed {
+                if self.joint_dof_indices[joint_index].is_some() {
                     q_work[joint_index] += scale * step[joint_index];
                 }
             }
@@ -1881,7 +1842,57 @@ fn write_wrench_to_column(output: &mut [f64], rows: usize, column: usize, wrench
     }
 }
 
-/// Returns the square `[v]x[v]x = v v^T - |v|^2 I` of the cross-product matrix.
-fn skew_square(vector: Vector3<f64>) -> Matrix3<f64> {
-    vector * vector.transpose() - vector.norm_squared() * Matrix3::identity()
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    fn robot() -> Robot {
+        Robot::from_urdf(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_arm.urdf"))
+            .unwrap()
+    }
+
+    #[test]
+    fn internal_identifier_and_workspace_guards_cover_each_short_circuit() {
+        let robot = robot();
+        assert_eq!(
+            robot
+                .validate_link_id(LinkId::new(robot.model_id, 0))
+                .unwrap(),
+            0
+        );
+        assert!(matches!(
+            robot.validate_link_id(LinkId::new(robot.model_id.wrapping_add(1), 0)),
+            Err(Error::InvalidLinkId)
+        ));
+        assert!(matches!(
+            robot.validate_link_id(LinkId::new(robot.model_id, robot.link_count())),
+            Err(Error::InvalidLinkId)
+        ));
+
+        let valid = robot.workspace();
+        assert!(robot.validate_workspace(&valid).is_ok());
+
+        let mut wrong_model = valid.clone();
+        wrong_model.model_id = robot.model_id.wrapping_add(1);
+        assert!(matches!(
+            robot.validate_workspace(&wrong_model),
+            Err(Error::InvalidWorkspace)
+        ));
+
+        let mut wrong_joint_count = valid.clone();
+        wrong_joint_count.joint_count += 1;
+        assert!(matches!(
+            robot.validate_workspace(&wrong_joint_count),
+            Err(Error::InvalidWorkspace)
+        ));
+
+        let mut wrong_generalized_count = valid;
+        wrong_generalized_count.generalized_count += 1;
+        assert!(matches!(
+            robot.validate_workspace(&wrong_generalized_count),
+            Err(Error::InvalidWorkspace)
+        ));
+    }
 }

@@ -186,7 +186,7 @@ fn generalized_jacobian_and_derivative_match_forward_motion() {
 }
 
 #[test]
-fn floating_mass_coriolis_gravity_and_rnea_obey_manipulator_identities() {
+fn floating_mass_velocity_product_gravity_and_rnea_obey_manipulator_identities() {
     let mut robot = robot();
     robot
         .set_floating_base_state(base_frame(), base_velocity(), Twist::zeros())
@@ -236,13 +236,12 @@ fn floating_mass_coriolis_gravity_and_rnea_obey_manipulator_identities() {
     robot
         .set_floating_base_state(base_frame(), base_velocity(), Twist::zeros())
         .unwrap();
-    let mut coriolis = vec![0.0; n * n];
+    let mut velocity_product = vec![0.0; n];
     robot
-        .coriolis_matrix(&q, &qd, &mut workspace, &mut coriolis)
+        .velocity_product_forces(&q, &qd, &mut workspace, &mut velocity_product)
         .unwrap();
-    let velocity = DVector::from_column_slice(&[0.21, -0.17, 0.13, -0.3, 0.2, 0.1, qd[0], qd[1]]);
-    let expected_bias = DMatrix::from_column_slice(n, n, &coriolis) * velocity
-        + DVector::from_column_slice(&gravity);
+    let expected_bias =
+        DVector::from_column_slice(&velocity_product) + DVector::from_column_slice(&gravity);
     let mut inverse = vec![0.0; n];
     robot
         .inverse_dynamics(&q, &qd, &[0.0; 2], &[], &mut workspace, &mut inverse)
