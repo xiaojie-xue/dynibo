@@ -28,5 +28,5 @@ fi
 
 echo "Testing extracted crate: ${manifest}"
 cargo test --manifest-path "${manifest}" --locked --all-targets
-RUSTDOCFLAGS="--html-in-header katex-header.html" \
+RUSTDOCFLAGS="--html-in-header docs/rustdoc/katex-header.html" \
     cargo doc --manifest-path "${manifest}" --locked --no-deps

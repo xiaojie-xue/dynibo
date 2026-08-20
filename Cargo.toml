@@ -23,7 +23,7 @@ exclude = [
 ]
 
 [package.metadata.docs.rs]
-rustdoc-args = ["--html-in-header", "katex-header.html"]
+rustdoc-args = ["--html-in-header", "docs/rustdoc/katex-header.html"]
 
 [workspace]
 members = ["bindings/c"]
