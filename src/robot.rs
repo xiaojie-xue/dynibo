@@ -80,6 +80,29 @@ struct GravityScratch<'a> {
     link_loads: &'a mut [Wrench],
 }
 
+struct JacobianScratch<'a> {
+    frames: &'a mut [Frame],
+    jacobian: &'a mut [f64],
+    ancestor_path: &'a mut [usize],
+}
+
+struct JacobianDerivativeScratch<'a> {
+    frames: &'a mut [Frame],
+    angular_velocities: &'a mut [Vector3<f64>],
+    origin_velocities: &'a mut [Vector3<f64>],
+    jacobian: &'a mut [f64],
+    jacobian_derivative: &'a mut [f64],
+    ancestor_path: &'a mut [usize],
+}
+
+struct IkScratch<'a> {
+    frames: &'a mut [Frame],
+    jacobian: &'a mut [f64],
+    q_work: &'a mut [f64],
+    step: &'a mut [f64],
+    ancestor_path: &'a mut [usize],
+}
+
 impl Robot {
     /// Loads and validates a tree robot model from a URDF file.
     ///
@@ -416,9 +439,11 @@ impl Robot {
         let local_target = self.forward_kinematics_and_jacobian_kernel(
             q,
             target_index,
-            &mut workspace.frames,
-            &mut workspace.jacobian,
-            &mut workspace.ancestor_path,
+            JacobianScratch {
+                frames: &mut workspace.frames,
+                jacobian: &mut workspace.jacobian,
+                ancestor_path: &mut workspace.ancestor_path,
+            },
             true,
         )?;
         self.write_generalized_jacobian(&workspace.jacobian, &local_target, output);
@@ -462,24 +487,18 @@ impl Robot {
             6 * self.generalized_count(),
         )?;
         let target_index = self.validate_link_id(target)?;
-        self.joint_jacobian_derivative_kernel(
+        let local_target = self.jacobian_derivative_kernel(
             q,
             qd,
             target_index,
-            &mut workspace.frames,
-            &mut workspace.angular_velocities,
-            &mut workspace.origin_velocities,
-            &mut workspace.ancestor_path,
-            &mut workspace.jacobian_derivative,
-        )?;
-        let depth = self.prepare_ancestor_path(target_index, &mut workspace.ancestor_path);
-        let path = &workspace.ancestor_path[..depth];
-        let local_target = self.jacobian_kernel(
-            &workspace.frames,
-            target_index,
-            path,
-            &mut workspace.jacobian,
-            true,
+            JacobianDerivativeScratch {
+                frames: &mut workspace.frames,
+                angular_velocities: &mut workspace.angular_velocities,
+                origin_velocities: &mut workspace.origin_velocities,
+                jacobian: &mut workspace.jacobian,
+                jacobian_derivative: &mut workspace.jacobian_derivative,
+                ancestor_path: &mut workspace.ancestor_path,
+            },
         )?;
         self.write_generalized_jacobian_derivative(
             qd,
@@ -528,11 +547,13 @@ impl Robot {
             target_index,
             &local_desired,
             options,
-            &mut workspace.frames,
-            &mut workspace.jacobian,
-            &mut workspace.q_work,
-            &mut workspace.step,
-            &mut workspace.ancestor_path,
+            IkScratch {
+                frames: &mut workspace.frames,
+                jacobian: &mut workspace.jacobian,
+                q_work: &mut workspace.q_work,
+                step: &mut workspace.step,
+                ancestor_path: &mut workspace.ancestor_path,
+            },
         )?;
         output.copy_from_slice(&workspace.q_work);
         Ok(())
@@ -879,14 +900,23 @@ impl Robot {
         &self,
         q: &[f64],
         target_index: usize,
-        frames: &mut [Frame],
-        output: &mut [f64],
-        path: &mut [usize],
+        scratch: JacobianScratch<'_>,
         clear_output: bool,
     ) -> Result<Frame> {
-        let depth = self.prepare_ancestor_path(target_index, path);
-        self.target_frames_kernel(q, &path[..depth], frames)?;
-        self.jacobian_kernel(frames, target_index, &path[..depth], output, clear_output)
+        let JacobianScratch {
+            frames,
+            jacobian,
+            ancestor_path,
+        } = scratch;
+        let depth = self.prepare_ancestor_path(target_index, ancestor_path);
+        self.target_frames_kernel(q, &ancestor_path[..depth], frames)?;
+        self.jacobian_kernel(
+            frames,
+            target_index,
+            &ancestor_path[..depth],
+            jacobian,
+            clear_output,
+        )
     }
 
     fn target_frames_kernel(&self, q: &[f64], path: &[usize], frames: &mut [Frame]) -> Result<()> {
@@ -969,24 +999,28 @@ impl Robot {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn joint_jacobian_derivative_kernel(
+    fn jacobian_derivative_kernel(
         &self,
         q: &[f64],
         qd: &[f64],
         target_index: usize,
-        frames: &mut [Frame],
-        angular_velocities: &mut [Vector3<f64>],
-        origin_velocities: &mut [Vector3<f64>],
-        path_workspace: &mut [usize],
-        output: &mut [f64],
-    ) -> Result<()> {
-        output.fill(0.0);
+        scratch: JacobianDerivativeScratch<'_>,
+    ) -> Result<Frame> {
+        let JacobianDerivativeScratch {
+            frames,
+            angular_velocities,
+            origin_velocities,
+            jacobian,
+            jacobian_derivative,
+            ancestor_path,
+        } = scratch;
+        jacobian_derivative.fill(0.0);
         if target_index == 0 {
-            return Ok(());
+            jacobian.fill(0.0);
+            return Ok(Frame::identity());
         }
-        let depth = self.prepare_ancestor_path(target_index, path_workspace);
-        let path = &path_workspace[..depth];
+        let depth = self.prepare_ancestor_path(target_index, ancestor_path);
+        let path = &ancestor_path[..depth];
         self.target_frames_kernel(q, path, frames)?;
         let mut angular = Vector3::zeros();
         let mut linear = Vector3::zeros();
@@ -1021,7 +1055,7 @@ impl Robot {
             let frame = frames[joint_index];
             let axis: Vector3<f64> = frame.rotation * joint.axis.as_ref();
             let axis_rate = angular_velocities[joint_index].cross(&axis);
-            let column = &mut output[6 * dof_index..6 * dof_index + 6];
+            let column = &mut jacobian_derivative[6 * dof_index..6 * dof_index + 6];
             match joint.joint_type {
                 JointType::Revolute => {
                     let moment_arm = end_position - frame.translation.vector;
@@ -1035,7 +1069,7 @@ impl Robot {
                 JointType::Fixed => unreachable!("fixed joints have no DOF index"),
             }
         }
-        Ok(())
+        self.jacobian_kernel(frames, target_index, path, jacobian, true)
     }
 
     fn write_generalized_jacobian_derivative(
@@ -1569,19 +1603,21 @@ impl Robot {
         Ok(accumulated_root_load)
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn inverse_kinematics_kernel(
         &self,
         initial_q: &[f64],
         target_index: usize,
         desired: &Frame,
         options: InverseKinematicsOptions,
-        frames: &mut [Frame],
-        jacobian: &mut [f64],
-        q_work: &mut [f64],
-        step: &mut [f64],
-        path: &mut [usize],
+        scratch: IkScratch<'_>,
     ) -> Result<()> {
+        let IkScratch {
+            frames,
+            jacobian,
+            q_work,
+            step,
+            ancestor_path,
+        } = scratch;
         self.validate_slice("initial_q", initial_q)?;
         self.validate_joint_output("IK joint workspace", q_work)?;
         self.validate_joint_output("IK step workspace", step)?;
@@ -1603,8 +1639,8 @@ impl Robot {
             });
         }
         q_work.copy_from_slice(initial_q);
-        let depth = self.prepare_ancestor_path(target_index, path);
-        let path = &path[..depth];
+        let depth = self.prepare_ancestor_path(target_index, ancestor_path);
+        let path = &ancestor_path[..depth];
         jacobian.fill(0.0);
         let damping_squared = options.damping * options.damping;
         for iteration in 0..=options.max_iterations {
