@@ -3,23 +3,90 @@ site_description: API documentation for dynibo robot kinematics and dynamics
 site_url: !ENV READTHEDOCS_CANONICAL_URL
 repo_url: https://github.com/xiaojie-xue/dynibo
 repo_name: xiaojie-xue/dynibo
+exclude_docs: TRANSLATING.md
+
+hooks:
+  - .docs/mkdocs_hooks.py
 
 theme:
   name: material
+  custom_dir: overrides
+  language: en
   features:
+    - navigation.indexes
     - navigation.sections
     - navigation.top
     - content.code.copy
+    - content.tabs.link
 
 nav:
   - Home: index.md
-  - Python API: python.md
-  - C API: c-api/dynibo_8h.md
-  - Rust API: https://docs.rs/dynibo
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quick-start.md
+  - User Guide:
+      - Overview: user-guide/index.md
+      - Robot Model and URDF: user-guide/robot-model-and-urdf.md
+      - Joint and Generalized Coordinates: user-guide/joint-and-generalized-coordinates.md
+      - Frames and Spatial Vectors: user-guide/frames-and-spatial-vectors.md
+      - Fixed and Floating Bases: user-guide/fixed-and-floating-bases.md
+      - Workspaces and Allocation: user-guide/workspaces-and-allocation.md
+      - Kinematics: user-guide/kinematics.md
+      - Dynamics: user-guide/dynamics.md
+      - External Loads: user-guide/external-loads.md
+      - Errors and Thread Safety: user-guide/errors-and-thread-safety.md
+  - Language APIs:
+      - API Mapping: languages/api-mapping.md
+      - Rust: languages/rust.md
+      - Python: languages/python.md
+      - C++: languages/cpp.md
+      - C: languages/c.md
+  - API Reference:
+      - Python: reference/python.md
+      - C++: cpp-api/dynibo_8hpp.md
+      - C: c-api/dynibo_8h.md
+      - Rust: https://docs.rs/dynibo
   - GitHub source code: https://github.com/xiaojie-xue/dynibo
 
 plugins:
   - search
+  - i18n:
+      docs_structure: suffix
+      fallback_to_default: true
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: en
+          name: English
+          default: true
+          build: true
+        - locale: zh
+          name: 简体中文
+          build: true
+          nav_translations:
+            Home: 首页
+            Getting Started: 快速开始
+            Installation: 安装
+            Quick Start: 入门示例
+            User Guide: 使用指南
+            Overview: 概览
+            Robot Model and URDF: 机器人模型与 URDF
+            Joint and Generalized Coordinates: 关节与广义坐标
+            Frames and Spatial Vectors: 参考系与空间向量
+            Fixed and Floating Bases: 固定基座与浮动基座
+            Workspaces and Allocation: Workspace 与内存分配
+            Kinematics: 运动学
+            Dynamics: 动力学
+            External Loads: 外部载荷
+            Errors and Thread Safety: 错误处理与线程安全
+            Language APIs: 语言接口
+            API Mapping: API 对照
+            API Reference: API 参考
+            Python: Python
+            C++: C++
+            C: C
+            Rust: Rust
+            GitHub source code: GitHub 源代码
   - mkdocstrings:
       handlers:
         python:
@@ -38,6 +105,10 @@ plugins:
             show_symbol_type_heading: true
             show_symbol_type_toc: true
   - mkdoxy:
+      doxygen-bin-path: !ENV [DYNIBO_DOXYGEN_BIN, doxygen]
+      # Keep generated Markdown under docs so the i18n plugin can classify it
+      # as shared, English API reference content.
+      save-api: docs/.doxy
       projects:
         dyniboC:
           src-dirs: bindings/c/include/dynibo
@@ -52,17 +123,36 @@ plugins:
             FULL_PATH_NAMES: false
             SHOW_INCLUDE_FILES: false
             SOURCE_BROWSER: false
+        dyniboCpp:
+          src-dirs: bindings/c/include/dynibo
+          api-path: cpp-api
+          full-doc: true
+          doxy-cfg:
+            FILE_PATTERNS: "*.hpp"
+            RECURSIVE: false
+            EXTRACT_ALL: false
+            OPTIMIZE_OUTPUT_FOR_C: false
+            PREDEFINED: "DYNIBO_API="
+            FULL_PATH_NAMES: false
+            SHOW_INCLUDE_FILES: false
+            SOURCE_BROWSER: false
 
 markdown_extensions:
   - admonition
+  - attr_list
   - pymdownx.arithmatex:
       generic: true
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
 
 extra_javascript:
   - javascripts/mathjax.js
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+extra_css:
+  - stylesheets/extra.css
 
 strict: true

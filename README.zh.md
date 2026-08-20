@@ -7,9 +7,7 @@
 <p><strong>Fast &middot; Lightweight &middot; Reliable</strong></p>
 
 <p>
-  <a href="https://docs.rs/dynibo">Rust API</a>
-  &nbsp;&middot;&nbsp;
-  <a href="https://dynibo.readthedocs.io/">Python API</a>
+  <a href="https://dynibo.readthedocs.io/en/latest/zh/">中文文档</a>
 </p>
 
 <p>

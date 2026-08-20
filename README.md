@@ -7,9 +7,7 @@
 <p><strong>Fast &middot; Lightweight &middot; Reliable</strong></p>
 
 <p>
-  <a href="https://docs.rs/dynibo">Rust doc</a>
-  &nbsp;&middot;&nbsp;
-  <a href="https://dynibo.readthedocs.io/">Python doc</a>
+  <a href="https://dynibo.readthedocs.io/">Documentation</a>
 </p>
 
 <p>

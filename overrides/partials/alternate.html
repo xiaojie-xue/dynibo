@@ -1,0 +1,29 @@
+{# Language selector: keep Material's menu behavior, but use a clear label. #}
+<div class="md-header__option">
+  <div class="md-select">
+    <button
+      class="md-header__button md-icon dynibo-language-selector"
+      aria-label="{{ lang.t('select.language') }}"
+    >
+      {% include ".icons/material/earth.svg" %}
+      <span class="dynibo-language-selector__label">
+        {% if config.theme.language == "zh" %}语言{% else %}language{% endif %}
+      </span>
+    </button>
+    <div class="md-select__inner">
+      <ul class="md-select__list">
+        {% for alt in config.extra.alternate %}
+          <li class="md-select__item">
+            <a
+              href="{{ alt.link | url }}"
+              hreflang="{{ alt.lang }}"
+              class="md-select__link"
+            >
+              {{ alt.name }}
+            </a>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
