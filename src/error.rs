@@ -45,8 +45,6 @@ pub enum Error {
         /// Constraint violated by the component.
         reason: &'static str,
     },
-    /// Motion was assigned to a robot whose root link is fixed.
-    FixedBaseMotion,
     /// Inverse kinematics is not defined for floating-base robots.
     FloatingBaseIkUnsupported,
     /// One of the inverse-kinematics options is zero, negative, or non-finite.
@@ -114,7 +112,6 @@ impl Error {
             | Self::InvalidLinkId
             | Self::InvalidWorkspace
             | Self::InvalidBaseState { .. }
-            | Self::FixedBaseMotion
             | Self::FloatingBaseIkUnsupported
             | Self::InvalidIkOptions { .. }
             | Self::NonFiniteIkInput { .. } => ErrorCategory::InvalidInput,
@@ -148,7 +145,6 @@ impl fmt::Display for Error {
             Self::InvalidBaseState { field, reason } => {
                 write!(f, "invalid base {field}: {reason}")
             }
-            Self::FixedBaseMotion => write!(f, "cannot assign motion to a fixed base"),
             Self::FloatingBaseIkUnsupported => {
                 write!(f, "inverse kinematics does not support a floating base")
             }
@@ -258,10 +254,6 @@ mod tests {
                     reason: "must be finite",
                 },
                 "invalid base velocity: must be finite".to_owned(),
-            ),
-            (
-                Error::FixedBaseMotion,
-                "cannot assign motion to a fixed base".to_owned(),
             ),
             (
                 Error::FloatingBaseIkUnsupported,

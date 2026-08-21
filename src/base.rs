@@ -18,25 +18,49 @@ pub enum BaseMode {
 /// in the world frame at the root-link origin.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BaseState {
-    mode: BaseMode,
     frame: Frame,
     velocity: Twist,
     acceleration: Twist,
 }
 
 impl BaseState {
-    pub(crate) fn new(mode: BaseMode) -> Self {
+    /// Creates the zero state of a fixed base at the world origin.
+    pub fn fixed() -> Self {
         Self {
-            mode,
             frame: Frame::identity(),
             velocity: Twist::zeros(),
             acceleration: Twist::zeros(),
         }
     }
 
-    /// Returns the immutable base mode selected when the robot was loaded.
-    pub const fn mode(&self) -> BaseMode {
-        self.mode
+    /// Creates a stationary fixed base at a prescribed world pose.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `frame` contains a non-finite value.
+    pub fn fixed_at(frame: Frame) -> Result<Self> {
+        validate_frame(&frame)?;
+        Ok(Self {
+            frame,
+            velocity: Twist::zeros(),
+            acceleration: Twist::zeros(),
+        })
+    }
+
+    /// Creates a base state expressed in the world frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any component is non-finite.
+    pub fn new(frame: Frame, velocity: Twist, acceleration: Twist) -> Result<Self> {
+        validate_frame(&frame)?;
+        validate_twist(velocity, "velocity")?;
+        validate_twist(acceleration, "acceleration")?;
+        Ok(Self {
+            frame,
+            velocity,
+            acceleration,
+        })
     }
 
     /// Returns the root-link pose in the world frame.
@@ -53,48 +77,11 @@ impl BaseState {
     pub const fn acceleration(&self) -> Twist {
         self.acceleration
     }
+}
 
-    pub(crate) fn set_frame(&mut self, frame: Frame) -> Result<()> {
-        validate_frame(&frame)?;
-        self.frame = frame;
-        Ok(())
-    }
-
-    pub(crate) fn set_velocity(&mut self, velocity: Twist) -> Result<()> {
-        self.require_floating_motion(velocity, "velocity")?;
-        self.velocity = velocity;
-        Ok(())
-    }
-
-    pub(crate) fn set_acceleration(&mut self, acceleration: Twist) -> Result<()> {
-        self.require_floating_motion(acceleration, "acceleration")?;
-        self.acceleration = acceleration;
-        Ok(())
-    }
-
-    pub(crate) fn set_floating(
-        &mut self,
-        frame: Frame,
-        velocity: Twist,
-        acceleration: Twist,
-    ) -> Result<()> {
-        if self.mode != BaseMode::Floating {
-            return Err(Error::FixedBaseMotion);
-        }
-        validate_frame(&frame)?;
-        validate_twist(velocity, "velocity")?;
-        validate_twist(acceleration, "acceleration")?;
-        self.frame = frame;
-        self.velocity = velocity;
-        self.acceleration = acceleration;
-        Ok(())
-    }
-
-    fn require_floating_motion(&self, value: Twist, field: &'static str) -> Result<()> {
-        if self.mode != BaseMode::Floating {
-            return Err(Error::FixedBaseMotion);
-        }
-        validate_twist(value, field)
+impl Default for BaseState {
+    fn default() -> Self {
+        Self::fixed()
     }
 }
 

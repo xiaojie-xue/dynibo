@@ -1,6 +1,6 @@
 use nalgebra::{Matrix3, Vector3};
 
-use crate::{BaseMode, JointType, Result, Wrench};
+use crate::{BaseMode, BaseState, JointType, Result, Wrench};
 
 use super::super::{FLOATING_BASE_DOF, Robot, Workspace};
 use super::{wrench_component, wrench_to_parent, write_wrench_to_column};
@@ -25,10 +25,12 @@ impl Robot {
     /// or for an invalid input length or workspace.
     pub fn mass_matrix(
         &self,
+        base: &BaseState,
         q: &[f64],
         workspace: &mut Workspace,
         output: &mut [f64],
     ) -> Result<()> {
+        self.validate_base_state(base)?;
         self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         self.validate_slice_length(
@@ -39,7 +41,7 @@ impl Robot {
         if self.base_mode() == BaseMode::Fixed {
             self.mass_matrix_kernel(q, workspace, output);
         } else {
-            self.floating_mass_matrix_kernel(q, workspace, output);
+            self.floating_mass_matrix_kernel(base, q, workspace, output);
         }
         Ok(())
     }
@@ -120,6 +122,7 @@ impl Robot {
 
     fn floating_mass_matrix_kernel(
         &self,
+        base: &BaseState,
         q: &[f64],
         workspace: &mut Workspace,
         output: &mut [f64],
@@ -168,7 +171,7 @@ impl Robot {
             }
         }
 
-        let base_rotation = self.base.frame().rotation;
+        let base_rotation = base.frame().rotation;
         for column in 0..FLOATING_BASE_DOF {
             let world_axis = Vector3::ith(column % 3, 1.0);
             let local_axis = base_rotation.inverse() * world_axis;

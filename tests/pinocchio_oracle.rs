@@ -772,7 +772,7 @@ fn serial_arm_calculations_match_pinocchio() {
 
     let (expected_rotation, expected_translation) = pinocchio.frame(&pin_q);
     let actual_frame = robot
-        .forward_kinematics(&q, target, &mut workspace)
+        .forward_kinematics(&dynibo::BaseState::fixed(), &q, target, &mut workspace)
         .unwrap();
     assert_close(
         actual_frame
@@ -795,7 +795,13 @@ fn serial_arm_calculations_match_pinocchio() {
 
     let mut actual_jacobian = [f64::NAN; 24];
     robot
-        .jacobian(&q, target, &mut workspace, &mut actual_jacobian)
+        .jacobian(
+            &dynibo::BaseState::fixed(),
+            &q,
+            target,
+            &mut workspace,
+            &mut actual_jacobian,
+        )
         .unwrap();
     assert_close(
         &actual_jacobian,
@@ -806,7 +812,14 @@ fn serial_arm_calculations_match_pinocchio() {
     );
     assert_close(
         robot
-            .forward_velocity_kinematics(&q, &qd, target, &Frame::identity(), &mut workspace)
+            .forward_velocity_kinematics(
+                &dynibo::BaseState::fixed(),
+                &q,
+                &qd,
+                target,
+                &Frame::identity(),
+                &mut workspace,
+            )
             .unwrap()
             .to_vector()
             .as_slice(),
@@ -817,7 +830,14 @@ fn serial_arm_calculations_match_pinocchio() {
     );
     assert_close(
         robot
-            .forward_acceleration_kinematics(&q, &qd, &qdd, target, &mut workspace)
+            .forward_acceleration_kinematics(
+                &dynibo::BaseState::fixed(),
+                &q,
+                &qd,
+                &qdd,
+                target,
+                &mut workspace,
+            )
             .unwrap()
             .to_vector()
             .as_slice(),
@@ -829,7 +849,13 @@ fn serial_arm_calculations_match_pinocchio() {
 
     let mut actual_gravity = [f64::NAN; 4];
     robot
-        .gravity(&q, &[], &mut workspace, &mut actual_gravity)
+        .gravity(
+            &dynibo::BaseState::fixed(),
+            &q,
+            &[],
+            &mut workspace,
+            &mut actual_gravity,
+        )
         .unwrap();
     assert_close(
         &actual_gravity,
@@ -840,7 +866,15 @@ fn serial_arm_calculations_match_pinocchio() {
     );
     let mut actual_torque = [f64::NAN; 4];
     robot
-        .inverse_dynamics(&q, &qd, &qdd, &[], &mut workspace, &mut actual_torque)
+        .inverse_dynamics(
+            &dynibo::BaseState::fixed(),
+            &q,
+            &qd,
+            &qdd,
+            &[],
+            &mut workspace,
+            &mut actual_torque,
+        )
         .unwrap();
     assert_close(
         &actual_torque,
@@ -866,7 +900,7 @@ fn mixed_link_kinematics_match_pinocchio() {
             let (pin_q, pin_qd, pin_qdd) = pinocchio.state(&q, &qd, &qdd);
             let (expected_rotation, expected_translation) = pinocchio.frame(&pin_q);
             let actual_frame = robot
-                .forward_kinematics(&q, target, &mut workspace)
+                .forward_kinematics(&dynibo::BaseState::fixed(), &q, target, &mut workspace)
                 .unwrap();
             assert_close(
                 actual_frame
@@ -889,7 +923,13 @@ fn mixed_link_kinematics_match_pinocchio() {
 
             let mut actual_jacobian = vec![f64::NAN; 6 * robot.joint_count()];
             robot
-                .jacobian(&q, target, &mut workspace, &mut actual_jacobian)
+                .jacobian(
+                    &dynibo::BaseState::fixed(),
+                    &q,
+                    target,
+                    &mut workspace,
+                    &mut actual_jacobian,
+                )
                 .unwrap();
             let expected_jacobian = pinocchio.jacobian(&pin_q);
             assert_close(
@@ -901,7 +941,14 @@ fn mixed_link_kinematics_match_pinocchio() {
             );
 
             let actual_velocity = robot
-                .forward_velocity_kinematics(&q, &qd, target, &Frame::identity(), &mut workspace)
+                .forward_velocity_kinematics(
+                    &dynibo::BaseState::fixed(),
+                    &q,
+                    &qd,
+                    target,
+                    &Frame::identity(),
+                    &mut workspace,
+                )
                 .unwrap();
             let expected_velocity = pinocchio.velocity(&pin_q, &pin_qd);
             assert_close(
@@ -913,7 +960,14 @@ fn mixed_link_kinematics_match_pinocchio() {
             );
 
             let actual_acceleration = robot
-                .forward_acceleration_kinematics(&q, &qd, &qdd, target, &mut workspace)
+                .forward_acceleration_kinematics(
+                    &dynibo::BaseState::fixed(),
+                    &q,
+                    &qd,
+                    &qdd,
+                    target,
+                    &mut workspace,
+                )
                 .unwrap();
             let expected_acceleration = pinocchio.acceleration(&pin_q, &pin_qd, &pin_qdd);
             assert_close(
@@ -938,7 +992,9 @@ fn mass_matrices_match_pinocchio() {
         let (q, _, _) = deterministic_state(sample);
         let (pin_q, _, _) = pinocchio.state(&q, &zero4, &zero4);
         let mut mass = vec![f64::NAN; 16];
-        robot.mass_matrix(&q, &mut workspace, &mut mass).unwrap();
+        robot
+            .mass_matrix(&dynibo::BaseState::fixed(), &q, &mut workspace, &mut mass)
+            .unwrap();
         assert_close(
             &mass,
             &pinocchio.mass_matrix(&pin_q),
@@ -957,7 +1013,9 @@ fn mass_matrices_match_pinocchio() {
         let (q, _, _) = deterministic_mixed_state(sample);
         let (pin_q, _, _) = pinocchio.state(&q, &zero3, &zero3);
         let mut mass = vec![f64::NAN; 9];
-        robot.mass_matrix(&q, &mut workspace, &mut mass).unwrap();
+        robot
+            .mass_matrix(&dynibo::BaseState::fixed(), &q, &mut workspace, &mut mass)
+            .unwrap();
         assert_close(
             &mass,
             &pinocchio.mass_matrix(&pin_q),
@@ -976,7 +1034,9 @@ fn mass_matrices_match_pinocchio() {
         let (q, _, _) = deterministic_tree_state(sample);
         let (pin_q, _, _) = pinocchio.state(&q, &zero7, &zero7);
         let mut mass = vec![f64::NAN; 49];
-        robot.mass_matrix(&q, &mut workspace, &mut mass).unwrap();
+        robot
+            .mass_matrix(&dynibo::BaseState::fixed(), &q, &mut workspace, &mut mass)
+            .unwrap();
         assert_close(
             &mass,
             &pinocchio.mass_matrix(&pin_q),
@@ -999,7 +1059,13 @@ fn velocity_products_match_pinocchio() {
         let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero4);
         let mut velocity_product = vec![f64::NAN; 4];
         robot
-            .velocity_product_forces(&q, &qd, &mut workspace, &mut velocity_product)
+            .velocity_product_forces(
+                &dynibo::BaseState::fixed(),
+                &q,
+                &qd,
+                &mut workspace,
+                &mut velocity_product,
+            )
             .unwrap();
         let coriolis = pinocchio.coriolis_matrix(&pin_q, &pin_qd);
         let expected: Vec<f64> = (0..4)
@@ -1028,7 +1094,13 @@ fn velocity_products_match_pinocchio() {
         let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero);
         let mut velocity_product = vec![f64::NAN; 3];
         robot
-            .velocity_product_forces(&q, &qd, &mut workspace, &mut velocity_product)
+            .velocity_product_forces(
+                &dynibo::BaseState::fixed(),
+                &q,
+                &qd,
+                &mut workspace,
+                &mut velocity_product,
+            )
             .unwrap();
         let coriolis = pinocchio.coriolis_matrix(&pin_q, &pin_qd);
         let expected: Vec<f64> = (0..3)
@@ -1057,7 +1129,13 @@ fn velocity_products_match_pinocchio() {
         let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero7);
         let mut velocity_product = vec![f64::NAN; 7];
         robot
-            .velocity_product_forces(&q, &qd, &mut workspace, &mut velocity_product)
+            .velocity_product_forces(
+                &dynibo::BaseState::fixed(),
+                &q,
+                &qd,
+                &mut workspace,
+                &mut velocity_product,
+            )
             .unwrap();
         let coriolis = pinocchio.coriolis_matrix(&pin_q, &pin_qd);
         let expected: Vec<f64> = (0..7)
@@ -1090,7 +1168,14 @@ fn jacobian_time_variations_match_pinocchio() {
         let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero4);
         let mut derivative = vec![f64::NAN; 24];
         robot
-            .jacobian_derivative(&q, &qd, target, &mut workspace, &mut derivative)
+            .jacobian_derivative(
+                &dynibo::BaseState::fixed(),
+                &q,
+                &qd,
+                target,
+                &mut workspace,
+                &mut derivative,
+            )
             .unwrap();
         assert_close(
             &derivative,
@@ -1113,7 +1198,14 @@ fn jacobian_time_variations_match_pinocchio() {
             let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero);
             let mut derivative = vec![f64::NAN; 18];
             robot
-                .jacobian_derivative(&q, &qd, target, &mut workspace, &mut derivative)
+                .jacobian_derivative(
+                    &dynibo::BaseState::fixed(),
+                    &q,
+                    &qd,
+                    target,
+                    &mut workspace,
+                    &mut derivative,
+                )
                 .unwrap();
             assert_close(
                 &derivative,
@@ -1143,7 +1235,14 @@ fn jacobian_time_variations_match_pinocchio() {
             let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero7);
             let mut derivative = vec![f64::NAN; 42];
             robot
-                .jacobian_derivative(&q, &qd, target, &mut workspace, &mut derivative)
+                .jacobian_derivative(
+                    &dynibo::BaseState::fixed(),
+                    &q,
+                    &qd,
+                    target,
+                    &mut workspace,
+                    &mut derivative,
+                )
                 .unwrap();
             assert_close(
                 &derivative,
@@ -1168,7 +1267,13 @@ fn mixed_joint_gravity_and_rnea_match_pinocchio() {
         let (pin_q, pin_qd, pin_qdd) = pinocchio.state(&q, &qd, &qdd);
         let mut actual_gravity = [f64::NAN; 3];
         robot
-            .gravity(&q, &[], &mut workspace, &mut actual_gravity)
+            .gravity(
+                &dynibo::BaseState::fixed(),
+                &q,
+                &[],
+                &mut workspace,
+                &mut actual_gravity,
+            )
             .unwrap();
         let expected_gravity = pinocchio.gravity(&pin_q);
         assert_close(
@@ -1181,7 +1286,15 @@ fn mixed_joint_gravity_and_rnea_match_pinocchio() {
 
         let mut actual_torque = [f64::NAN; 3];
         robot
-            .inverse_dynamics(&q, &qd, &qdd, &[], &mut workspace, &mut actual_torque)
+            .inverse_dynamics(
+                &dynibo::BaseState::fixed(),
+                &q,
+                &qd,
+                &qdd,
+                &[],
+                &mut workspace,
+                &mut actual_torque,
+            )
             .unwrap();
         let expected_torque = pinocchio.rnea(&pin_q, &pin_qd, &pin_qdd);
         assert_close(
@@ -1216,7 +1329,15 @@ fn mixed_joint_external_loads_match_pinocchio() {
             let (pin_q, pin_qd, pin_qdd) = pinocchio.state(&q, &qd, &qdd);
             let mut actual = [f64::NAN; 3];
             robot
-                .inverse_dynamics(&q, &qd, &qdd, &[indexed_load], &mut workspace, &mut actual)
+                .inverse_dynamics(
+                    &dynibo::BaseState::fixed(),
+                    &q,
+                    &qd,
+                    &qdd,
+                    &[indexed_load],
+                    &mut workspace,
+                    &mut actual,
+                )
                 .unwrap();
             let expected = pinocchio.rnea_with_link_load(&pin_q, &pin_qd, &pin_qdd, load);
             assert_close(
@@ -1245,7 +1366,7 @@ fn every_branched_link_frame_and_jacobian_match_pinocchio() {
             let (pin_q, _, _) = pinocchio.state(&q, &qd, &qdd);
             let (expected_rotation, expected_translation) = pinocchio.frame(&pin_q);
             let actual_frame = robot
-                .forward_kinematics(&q, target, &mut workspace)
+                .forward_kinematics(&dynibo::BaseState::fixed(), &q, target, &mut workspace)
                 .unwrap();
             assert_close(
                 actual_frame
@@ -1267,7 +1388,13 @@ fn every_branched_link_frame_and_jacobian_match_pinocchio() {
             );
             let mut actual_jacobian = vec![f64::NAN; 6 * robot.joint_count()];
             robot
-                .jacobian(&q, target, &mut workspace, &mut actual_jacobian)
+                .jacobian(
+                    &dynibo::BaseState::fixed(),
+                    &q,
+                    target,
+                    &mut workspace,
+                    &mut actual_jacobian,
+                )
                 .unwrap();
             let expected_jacobian = pinocchio.jacobian(&pin_q);
             assert_close(
@@ -1294,7 +1421,14 @@ fn branched_velocity_and_acceleration_match_pinocchio() {
             let (q, qd, qdd) = deterministic_tree_state(sample);
             let (pin_q, pin_qd, pin_qdd) = pinocchio.state(&q, &qd, &qdd);
             let velocity = robot
-                .forward_velocity_kinematics(&q, &qd, target, &Frame::identity(), &mut workspace)
+                .forward_velocity_kinematics(
+                    &dynibo::BaseState::fixed(),
+                    &q,
+                    &qd,
+                    target,
+                    &Frame::identity(),
+                    &mut workspace,
+                )
                 .unwrap();
             assert_close(
                 velocity.to_vector().as_slice(),
@@ -1304,7 +1438,14 @@ fn branched_velocity_and_acceleration_match_pinocchio() {
                 &format!("tree velocity for {link_name}, sample {sample}"),
             );
             let acceleration = robot
-                .forward_acceleration_kinematics(&q, &qd, &qdd, target, &mut workspace)
+                .forward_acceleration_kinematics(
+                    &dynibo::BaseState::fixed(),
+                    &q,
+                    &qd,
+                    &qdd,
+                    target,
+                    &mut workspace,
+                )
                 .unwrap();
             assert_close(
                 acceleration.to_vector().as_slice(),
@@ -1329,7 +1470,13 @@ fn branched_gravity_and_rnea_match_pinocchio() {
         let (pin_q, pin_qd, pin_qdd) = pinocchio.state(&q, &qd, &qdd);
         let mut gravity = [f64::NAN; 7];
         robot
-            .gravity(&q, &[], &mut workspace, &mut gravity)
+            .gravity(
+                &dynibo::BaseState::fixed(),
+                &q,
+                &[],
+                &mut workspace,
+                &mut gravity,
+            )
             .unwrap();
         assert_close(
             &gravity,
@@ -1340,7 +1487,15 @@ fn branched_gravity_and_rnea_match_pinocchio() {
         );
         let mut torque = [f64::NAN; 7];
         robot
-            .inverse_dynamics(&q, &qd, &qdd, &[], &mut workspace, &mut torque)
+            .inverse_dynamics(
+                &dynibo::BaseState::fixed(),
+                &q,
+                &qd,
+                &qdd,
+                &[],
+                &mut workspace,
+                &mut torque,
+            )
             .unwrap();
         assert_close(
             &torque,
@@ -1374,7 +1529,15 @@ fn branched_moving_external_loads_match_pinocchio() {
             let (pin_q, pin_qd, pin_qdd) = pinocchio.state(&q, &qd, &qdd);
             let mut actual = [f64::NAN; 7];
             robot
-                .inverse_dynamics(&q, &qd, &qdd, &[indexed_load], &mut workspace, &mut actual)
+                .inverse_dynamics(
+                    &dynibo::BaseState::fixed(),
+                    &q,
+                    &qd,
+                    &qdd,
+                    &[indexed_load],
+                    &mut workspace,
+                    &mut actual,
+                )
                 .unwrap();
             let expected = pinocchio.rnea_with_link_load(&pin_q, &pin_qd, &pin_qdd, load);
             assert_close(
@@ -1424,6 +1587,7 @@ fn mixed_joint_ik_reaches_pinocchio_generated_targets() {
         let mut solution = [f64::NAN; 3];
         robot
             .inverse_kinematics(
+                &dynibo::BaseState::fixed(),
                 &initial,
                 target,
                 &desired,
@@ -1455,7 +1619,7 @@ fn mixed_joint_ik_reaches_pinocchio_generated_targets() {
 #[test]
 fn floating_base_kinematics_and_dynamics_match_free_flyer_pinocchio() {
     let path = fixture();
-    let mut robot = Robot::from_urdf_with_base(&path, BaseMode::Floating).unwrap();
+    let robot = Robot::from_urdf_with_base(&path, BaseMode::Floating).unwrap();
     let target = robot.link_id("tool").unwrap();
     let mut workspace = robot.workspace();
     let mut pinocchio = PinocchioContext::new_floating(&robot, &path, "tool");
@@ -1479,14 +1643,12 @@ fn floating_base_kinematics_and_dynamics_match_free_flyer_pinocchio() {
             Vector3::new(-0.11, 0.14, 0.09),
             Vector3::new(0.35, -0.22, 0.18),
         );
-        robot
-            .set_floating_base_state(base, base_velocity, base_acceleration)
-            .unwrap();
+        let base_state = dynibo::BaseState::new(base, base_velocity, base_acceleration).unwrap();
         let (pin_q, pin_qd, pin_qdd) =
             pinocchio.floating_state(&q, &qd, &qdd, &base, base_velocity, base_acceleration);
 
         let actual_frame = robot
-            .forward_kinematics(&q, target, &mut workspace)
+            .forward_kinematics(&base_state, &q, target, &mut workspace)
             .unwrap();
         let (expected_rotation, expected_translation) = pinocchio.frame(&pin_q);
         assert_close(
@@ -1510,7 +1672,13 @@ fn floating_base_kinematics_and_dynamics_match_free_flyer_pinocchio() {
 
         let mut actual_jacobian = vec![0.0; 6 * robot.generalized_count()];
         robot
-            .jacobian(&q, target, &mut workspace, &mut actual_jacobian)
+            .jacobian(
+                &base_state,
+                &q,
+                target,
+                &mut workspace,
+                &mut actual_jacobian,
+            )
             .unwrap();
         assert_close(
             &actual_jacobian,
@@ -1521,7 +1689,14 @@ fn floating_base_kinematics_and_dynamics_match_free_flyer_pinocchio() {
         );
         let mut actual_derivative = vec![0.0; actual_jacobian.len()];
         robot
-            .jacobian_derivative(&q, &qd, target, &mut workspace, &mut actual_derivative)
+            .jacobian_derivative(
+                &base_state,
+                &q,
+                &qd,
+                target,
+                &mut workspace,
+                &mut actual_derivative,
+            )
             .unwrap();
         assert_close(
             &actual_derivative,
@@ -1533,7 +1708,14 @@ fn floating_base_kinematics_and_dynamics_match_free_flyer_pinocchio() {
 
         assert_close(
             robot
-                .forward_velocity_kinematics(&q, &qd, target, &Frame::identity(), &mut workspace)
+                .forward_velocity_kinematics(
+                    &base_state,
+                    &q,
+                    &qd,
+                    target,
+                    &Frame::identity(),
+                    &mut workspace,
+                )
                 .unwrap()
                 .to_vector()
                 .as_slice(),
@@ -1544,7 +1726,7 @@ fn floating_base_kinematics_and_dynamics_match_free_flyer_pinocchio() {
         );
         assert_close(
             robot
-                .forward_acceleration_kinematics(&q, &qd, &qdd, target, &mut workspace)
+                .forward_acceleration_kinematics(&base_state, &q, &qd, &qdd, target, &mut workspace)
                 .unwrap()
                 .to_vector()
                 .as_slice(),
@@ -1557,7 +1739,7 @@ fn floating_base_kinematics_and_dynamics_match_free_flyer_pinocchio() {
         let n = robot.generalized_count();
         let mut actual_mass = vec![0.0; n * n];
         robot
-            .mass_matrix(&q, &mut workspace, &mut actual_mass)
+            .mass_matrix(&base_state, &q, &mut workspace, &mut actual_mass)
             .unwrap();
         assert_close(
             &actual_mass,
@@ -1568,7 +1750,7 @@ fn floating_base_kinematics_and_dynamics_match_free_flyer_pinocchio() {
         );
         let mut actual_gravity = vec![0.0; n];
         robot
-            .gravity(&q, &[], &mut workspace, &mut actual_gravity)
+            .gravity(&base_state, &q, &[], &mut workspace, &mut actual_gravity)
             .unwrap();
         assert_close(
             &actual_gravity,
@@ -1579,7 +1761,13 @@ fn floating_base_kinematics_and_dynamics_match_free_flyer_pinocchio() {
         );
         let mut actual_velocity_product = vec![0.0; n];
         robot
-            .velocity_product_forces(&q, &qd, &mut workspace, &mut actual_velocity_product)
+            .velocity_product_forces(
+                &base_state,
+                &q,
+                &qd,
+                &mut workspace,
+                &mut actual_velocity_product,
+            )
             .unwrap();
         let coriolis = pinocchio.floating_coriolis_from_rnea(&q, &qd, &base, base_velocity);
         let generalized_velocity = [
@@ -1613,7 +1801,7 @@ fn floating_base_kinematics_and_dynamics_match_free_flyer_pinocchio() {
 #[test]
 fn mixed_joint_moving_base_rnea_matches_free_flyer_pinocchio() {
     let path = fixture();
-    let mut robot = Robot::from_urdf_with_base(&path, BaseMode::Floating).unwrap();
+    let robot = Robot::from_urdf_with_base(&path, BaseMode::Floating).unwrap();
     let mut workspace = robot.workspace();
     let mut pinocchio = PinocchioContext::new_floating(&robot, &path, "tool");
 
@@ -1637,12 +1825,10 @@ fn mixed_joint_moving_base_rnea_matches_free_flyer_pinocchio() {
             Vector3::new(-0.11, 0.14, 0.09),
             Vector3::new(0.35, -0.22, 0.18),
         );
-        robot
-            .set_floating_base_state(base, base_velocity, base_acceleration)
-            .unwrap();
+        let base_state = dynibo::BaseState::new(base, base_velocity, base_acceleration).unwrap();
         let mut actual = [f64::NAN; 9];
         robot
-            .inverse_dynamics(&q, &qd, &qdd, &[], &mut workspace, &mut actual)
+            .inverse_dynamics(&base_state, &q, &qd, &qdd, &[], &mut workspace, &mut actual)
             .unwrap();
         let expected = pinocchio.floating_rnea(
             &pin_q,

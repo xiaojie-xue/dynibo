@@ -1,6 +1,6 @@
 use nalgebra::Vector3;
 
-use crate::{Frame, JointType, Result};
+use crate::{BaseState, Frame, JointType, Result};
 
 use super::super::{LinkId, Robot, Workspace};
 
@@ -41,11 +41,13 @@ impl Robot {
     /// invalid input length, link ID, or workspace.
     pub fn jacobian(
         &self,
+        base: &BaseState,
         q: &[f64],
         target: LinkId,
         workspace: &mut Workspace,
         output: &mut [f64],
     ) -> Result<()> {
+        self.validate_base_state(base)?;
         self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         self.validate_slice_length(
@@ -64,7 +66,7 @@ impl Robot {
             },
             true,
         )?;
-        self.write_generalized_jacobian(&workspace.jacobian, &local_target, output);
+        self.write_generalized_jacobian(base, &workspace.jacobian, &local_target, output);
         Ok(())
     }
 
@@ -90,12 +92,14 @@ impl Robot {
     /// invalid input length, link ID, or workspace.
     pub fn jacobian_derivative(
         &self,
+        base: &BaseState,
         q: &[f64],
         qd: &[f64],
         target: LinkId,
         workspace: &mut Workspace,
         output: &mut [f64],
     ) -> Result<()> {
+        self.validate_base_state(base)?;
         self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
@@ -119,6 +123,7 @@ impl Robot {
             },
         )?;
         self.write_generalized_jacobian_derivative(
+            base,
             qd,
             &local_target,
             &workspace.jacobian,
@@ -192,13 +197,14 @@ impl Robot {
 
     fn write_generalized_jacobian(
         &self,
+        base: &BaseState,
         joint_jacobian: &[f64],
         local_target: &Frame,
         output: &mut [f64],
     ) {
         output.fill(0.0);
         let base_columns = self.base_dof_count();
-        let rotation = self.base.frame().rotation;
+        let rotation = base.frame().rotation;
         if base_columns != 0 {
             let offset = rotation * local_target.translation.vector;
             for axis_index in 0..3 {
@@ -295,6 +301,7 @@ impl Robot {
 
     fn write_generalized_jacobian_derivative(
         &self,
+        base: &BaseState,
         qd: &[f64],
         local_target: &Frame,
         joint_jacobian: &[f64],
@@ -303,8 +310,8 @@ impl Robot {
     ) {
         output.fill(0.0);
         let base_columns = self.base_dof_count();
-        let rotation = self.base.frame().rotation;
-        let base_omega = self.base.velocity().angular;
+        let rotation = base.frame().rotation;
+        let base_omega = base.velocity().angular;
         let mut local_velocity = Vector3::zeros();
         for (joint_index, &velocity) in qd.iter().enumerate() {
             let column = &joint_jacobian[6 * joint_index..6 * joint_index + 6];
