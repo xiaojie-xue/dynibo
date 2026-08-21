@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    BaseMode, BaseState, Error, Frame, Joint, JointType, Link, Result, Twist,
+    BaseMode, BaseState, Error, Joint, JointType, Link, Result,
     model::{JointKinematics, LinkDynamics},
     urdf::tree_model,
 };
@@ -35,7 +35,7 @@ pub struct Robot {
     joint_dof_indices: Box<[Option<usize>]>,
     joint_parents: Box<[usize]>,
     leaf_links: Box<[usize]>,
-    base: BaseState,
+    base_mode: BaseMode,
 }
 
 impl Robot {
@@ -84,59 +84,13 @@ impl Robot {
             joint_dof_indices: joint_dof_indices.into_boxed_slice(),
             joint_parents: model.joint_parents.into_boxed_slice(),
             leaf_links: model.leaf_links.into_boxed_slice(),
-            base: BaseState::new(base_mode),
+            base_mode,
         })
-    }
-
-    /// Returns the root-link runtime state.
-    pub const fn base(&self) -> &BaseState {
-        &self.base
     }
 
     /// Returns whether the root link is fixed or floating.
     pub const fn base_mode(&self) -> BaseMode {
-        self.base.mode()
-    }
-
-    /// Sets the root-link pose in the world frame.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the pose contains a non-finite value.
-    pub fn set_base_frame(&mut self, frame: Frame) -> Result<()> {
-        self.base.set_frame(frame)
-    }
-
-    /// Sets floating-base classical velocity expressed in the world frame.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for a fixed base or a non-finite value.
-    pub fn set_base_velocity(&mut self, velocity: Twist) -> Result<()> {
-        self.base.set_velocity(velocity)
-    }
-
-    /// Sets floating-base classical acceleration expressed in the world frame.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for a fixed base or a non-finite value.
-    pub fn set_base_acceleration(&mut self, acceleration: Twist) -> Result<()> {
-        self.base.set_acceleration(acceleration)
-    }
-
-    /// Atomically replaces the complete floating-base state.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for a fixed base or a non-finite value.
-    pub fn set_floating_base_state(
-        &mut self,
-        frame: Frame,
-        velocity: Twist,
-        acceleration: Twist,
-    ) -> Result<()> {
-        self.base.set_floating(frame, velocity, acceleration)
+        self.base_mode
     }
 
     /// Returns the robot name declared in the URDF.
@@ -230,7 +184,7 @@ impl Robot {
     /// omega_z, v_x, v_y, v_z]` (and likewise for acceleration). Non-fixed
     /// joint entries follow in URDF order.
     pub const fn base_dof_count(&self) -> usize {
-        match self.base.mode() {
+        match self.base_mode {
             BaseMode::Fixed => 0,
             BaseMode::Floating => FLOATING_BASE_DOF,
         }
@@ -251,6 +205,24 @@ impl Robot {
     #[inline]
     fn joint_value(&self, values: &[f64], joint_index: usize) -> f64 {
         self.joint_dof_indices[joint_index].map_or(0.0, |dof_index| values[dof_index])
+    }
+
+    fn validate_base_state(&self, base: &BaseState) -> Result<()> {
+        if self.base_mode == BaseMode::Fixed {
+            if base.velocity() != crate::Twist::zeros() {
+                return Err(Error::InvalidBaseState {
+                    field: "velocity",
+                    reason: "must be zero for a fixed base",
+                });
+            }
+            if base.acceleration() != crate::Twist::zeros() {
+                return Err(Error::InvalidBaseState {
+                    field: "acceleration",
+                    reason: "must be zero for a fixed base",
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Allocates reusable storage for runtime-sized calculations on this model.

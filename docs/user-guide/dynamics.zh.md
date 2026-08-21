@@ -39,11 +39,12 @@ $$
 === "Rust"
 
     ```rust
-    robot.mass_matrix(&q, &mut workspace, &mut mass)?;
-    robot.velocity_product_forces(&q, &qd, &mut workspace, &mut velocity)?;
-    robot.gravity(&q, &loads, &mut workspace, &mut gravity)?;
+    let base = BaseState::fixed();
+    robot.mass_matrix(&base, &q, &mut workspace, &mut mass)?;
+    robot.velocity_product_forces(&base, &q, &qd, &mut workspace, &mut velocity)?;
+    robot.gravity(&base, &q, &loads, &mut workspace, &mut gravity)?;
     robot.inverse_dynamics(
-        &q, &qd, &qdd, &loads, &mut workspace, &mut forces)?;
+        &base, &q, &qd, &qdd, &loads, &mut workspace, &mut forces)?;
     ```
 
 === "Python"

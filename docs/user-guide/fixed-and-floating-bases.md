@@ -5,22 +5,25 @@ freedom. It is selected when loading the model and cannot be changed afterward.
 
 ## Fixed base
 
-A fixed-base robot has `G = J`. Its root pose may still be placed anywhere in
-the world with `set_base_frame`; "fixed" means the pose is prescribed rather
-than solved as a generalized coordinate.
+A fixed-base robot has `G = J`. In Rust, `BaseState::fixed()` supplies the
+identity pose and zero motion; `BaseState::fixed_at(frame)` prescribes another
+world pose. "Fixed" means the pose is prescribed rather than solved as a
+generalized coordinate.
 
 ## Floating base
 
 A floating-base robot has `G = J + 6`. Its generalized ordering begins with
-world-expressed angular and linear base motion. Set the complete base state
-before calculations that depend on velocity or acceleration:
+world-expressed angular and linear base motion. Supply the complete base state
+to calculations that depend on velocity or acceleration:
 
 === "Rust"
 
     ```rust
-    let mut robot = Robot::from_urdf_with_base(
+    let robot = Robot::from_urdf_with_base(
         "robot.urdf", BaseMode::Floating)?;
-    robot.set_floating_base_state(frame, velocity, acceleration)?;
+    let base = BaseState::new(frame, velocity, acceleration)?;
+    robot.inverse_dynamics(
+        &base, &q, &qd, &qdd, &loads, &mut workspace, &mut forces)?;
     ```
 
 === "Python"
@@ -47,15 +50,16 @@ before calculations that depend on velocity or acceleration:
     ```
 
 The joint arrays remain length `J`; do not prepend a quaternion or six base
-values. Base state enters calculations through the robot object.
+values. Rust calculation methods receive `BaseState` explicitly. The current
+Python and C-family adapters retain setter-based state for API compatibility.
 
 ## Effects on calculations
 
-- Poses use the stored base frame.
-- Velocity and acceleration include stored base motion.
+- Poses use the supplied base frame.
+- Velocity and acceleration include the supplied base motion.
 - Jacobians gain six leading base columns.
 - Mass matrices and generalized forces gain six base rows or entries.
 - Inverse kinematics currently accepts fixed-base models only.
 
-Changing base state mutates the robot. Do not change it concurrently with a
-calculation on the same robot.
+Rust base states are immutable calculation inputs, so one robot can be shared
+across calculations using different states and workspaces.

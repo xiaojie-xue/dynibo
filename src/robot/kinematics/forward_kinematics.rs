@@ -1,6 +1,6 @@
 use nalgebra::Vector3;
 
-use crate::{Frame, JointType, Result, Twist};
+use crate::{BaseState, Frame, JointType, Result, Twist};
 
 use super::super::{LinkId, Robot, Workspace};
 
@@ -19,20 +19,22 @@ impl Robot {
     /// Returns an error for an invalid input length, link ID, or workspace.
     pub fn forward_kinematics(
         &self,
+        base: &BaseState,
         q: &[f64],
         target: LinkId,
         workspace: &mut Workspace,
     ) -> Result<Frame> {
+        self.validate_base_state(base)?;
         self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         let target_index = self.validate_link_id(target)?;
         let depth = self.prepare_ancestor_path(target_index, &mut workspace.ancestor_path);
-        Ok(*self.base.frame() * self.target_frame_kernel(q, &workspace.ancestor_path[..depth])?)
+        Ok(*base.frame() * self.target_frame_kernel(q, &workspace.ancestor_path[..depth])?)
     }
 
     /// Computes runtime-sized spatial velocity at a point on a target link.
     ///
-    /// The Robot's base state supplies root motion; `tool` selects a point
+    /// The supplied base state provides root motion; `tool` selects a point
     /// rigidly attached to the target link. The returned angular-first twist is
     /// expressed in the world frame at that selected point.
     ///
@@ -45,12 +47,14 @@ impl Robot {
     /// Returns an error for invalid input lengths, link ID, or workspace.
     pub fn forward_velocity_kinematics(
         &self,
+        base: &BaseState,
         q: &[f64],
         qd: &[f64],
         target: LinkId,
         tool: &Frame,
         workspace: &mut Workspace,
     ) -> Result<Twist> {
+        self.validate_base_state(base)?;
         self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
@@ -60,8 +64,8 @@ impl Robot {
             qd,
             target_index,
             tool,
-            self.base.frame(),
-            self.base.velocity(),
+            base.frame(),
+            base.velocity(),
             &mut workspace.ancestor_path,
         ))
     }
@@ -79,12 +83,14 @@ impl Robot {
     /// Returns an error for invalid input lengths, link ID, or workspace.
     pub fn forward_acceleration_kinematics(
         &self,
+        base: &BaseState,
         q: &[f64],
         qd: &[f64],
         qdd: &[f64],
         target: LinkId,
         workspace: &mut Workspace,
     ) -> Result<Twist> {
+        self.validate_base_state(base)?;
         self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
@@ -97,12 +103,12 @@ impl Robot {
             qdd,
             workspace.ancestor_path[..depth].iter().rev().copied(),
         );
-        let rotation = self.base.frame().rotation;
+        let rotation = base.frame().rotation;
         let offset = rotation * local_target.translation.vector;
         let relative_angular = rotation * relative_velocity.angular;
         let relative_linear = rotation * relative_velocity.linear;
-        let base_velocity = self.base.velocity();
-        let base_acceleration = self.base.acceleration();
+        let base_velocity = base.velocity();
+        let base_acceleration = base.acceleration();
         Ok(Twist::new(
             base_acceleration.angular
                 + base_velocity.angular.cross(&relative_angular)

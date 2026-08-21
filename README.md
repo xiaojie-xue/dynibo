@@ -108,15 +108,16 @@ cargo add dynibo
 Load a URDF, create a reusable workspace, and compute a target-link pose:
 
 ```rust
-use dynibo::Robot;
+use dynibo::{BaseState, Robot};
 
 fn main() -> dynibo::Result<()> {
     let robot = Robot::from_urdf("robot.urdf")?;
+    let base = BaseState::fixed();
     let tool = robot.link_id("tool")?;
     let mut workspace = robot.workspace();
     let q = vec![0.0; robot.joint_count()];
 
-    let pose = robot.forward_kinematics(&q, tool, &mut workspace)?;
+    let pose = robot.forward_kinematics(&base, &q, tool, &mut workspace)?;
     println!("translation: {}", pose.translation.vector.transpose());
     Ok(())
 }

@@ -1,11 +1,12 @@
 use std::{hint::black_box, path::PathBuf};
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use dynibo::{Frame, IndexedLoad, InverseKinematicsOptions, LinkId, Robot, Wrench};
+use dynibo::{BaseState, Frame, IndexedLoad, InverseKinematicsOptions, LinkId, Robot, Wrench};
 use nalgebra::Vector3;
 
 struct BenchmarkCase {
     arm: Robot,
+    base: BaseState,
     target: LinkId,
     q: Vec<f64>,
     qd: Vec<f64>,
@@ -26,6 +27,7 @@ impl BenchmarkCase {
         let n = arm.joint_count();
         Self {
             arm,
+            base: BaseState::fixed(),
             target,
             q: (0..n)
                 .map(|index| (0.37 * (index + 1) as f64).sin() * 0.5)
@@ -51,7 +53,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
         b.iter(|| {
             black_box(
                 case.arm
-                    .forward_kinematics(black_box(&case.q), case.target, &mut workspace)
+                    .forward_kinematics(&case.base, black_box(&case.q), case.target, &mut workspace)
                     .unwrap(),
             )
         });
@@ -66,6 +68,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
         b.iter(|| {
             case.arm
                 .jacobian(
+                    &case.base,
                     black_box(&case.q),
                     case.target,
                     &mut workspace,
@@ -85,6 +88,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
         b.iter(|| {
             case.arm
                 .jacobian_derivative(
+                    &case.base,
                     black_box(&case.q),
                     black_box(&case.qd),
                     case.target,
@@ -105,6 +109,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
             black_box(
                 case.arm
                     .forward_velocity_kinematics(
+                        &case.base,
                         black_box(&case.q),
                         black_box(&case.qd),
                         case.target,
@@ -125,6 +130,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
             black_box(
                 case.arm
                     .forward_acceleration_kinematics(
+                        &case.base,
                         black_box(&case.q),
                         black_box(&case.qd),
                         black_box(&case.qdd),
@@ -145,6 +151,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
         b.iter(|| {
             case.arm
                 .gravity(
+                    &case.base,
                     black_box(&case.q),
                     black_box(&[]),
                     &mut workspace,
@@ -164,6 +171,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
         b.iter(|| {
             case.arm
                 .inverse_dynamics(
+                    &case.base,
                     black_box(&case.q),
                     black_box(&case.qd),
                     black_box(&case.qdd),
@@ -185,6 +193,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
         b.iter(|| {
             case.arm
                 .mass_matrix(
+                    &case.base,
                     black_box(&case.q),
                     &mut workspace,
                     black_box(&mut mass_output),
@@ -203,6 +212,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
         b.iter(|| {
             case.arm
                 .velocity_product_forces(
+                    &case.base,
                     black_box(&case.q),
                     black_box(&case.qd),
                     &mut workspace,
@@ -239,6 +249,7 @@ fn benchmark_tree_case(c: &mut Criterion) {
         b.iter(|| {
             case.arm
                 .gravity(
+                    &case.base,
                     black_box(&case.q),
                     black_box(&loads),
                     &mut workspace,
@@ -257,6 +268,7 @@ fn benchmark_tree_case(c: &mut Criterion) {
         b.iter(|| {
             case.arm
                 .inverse_dynamics(
+                    &case.base,
                     black_box(&case.q),
                     black_box(&case.qd),
                     black_box(&case.qdd),
@@ -287,7 +299,7 @@ fn benchmark_target_depths(c: &mut Criterion) {
             b.iter(|| {
                 black_box(
                     case.arm
-                        .forward_kinematics(black_box(&case.q), target, &mut workspace)
+                        .forward_kinematics(&case.base, black_box(&case.q), target, &mut workspace)
                         .unwrap(),
                 )
             });
@@ -303,6 +315,7 @@ fn benchmark_target_depths(c: &mut Criterion) {
             b.iter(|| {
                 case.arm
                     .jacobian(
+                        &case.base,
                         black_box(&case.q),
                         target,
                         &mut workspace,
@@ -323,6 +336,7 @@ fn benchmark_target_depths(c: &mut Criterion) {
                 black_box(
                     case.arm
                         .forward_velocity_kinematics(
+                            &case.base,
                             black_box(&case.q),
                             black_box(&case.qd),
                             target,
@@ -344,6 +358,7 @@ fn benchmark_target_depths(c: &mut Criterion) {
                 black_box(
                     case.arm
                         .forward_acceleration_kinematics(
+                            &case.base,
                             black_box(&case.q),
                             black_box(&case.qd),
                             black_box(&case.qdd),
@@ -362,7 +377,7 @@ fn benchmark_target_depths(c: &mut Criterion) {
         let mut setup_workspace = case.arm.workspace();
         let desired = case
             .arm
-            .forward_kinematics(&case.q, target, &mut setup_workspace)
+            .forward_kinematics(&case.base, &case.q, target, &mut setup_workspace)
             .unwrap();
         let initial = vec![0.0; case.arm.joint_count()];
         let mut output = vec![0.0; case.arm.joint_count()];
@@ -374,6 +389,7 @@ fn benchmark_target_depths(c: &mut Criterion) {
                 b.iter(|| {
                     case.arm
                         .inverse_kinematics(
+                            &case.base,
                             black_box(&initial),
                             target,
                             &desired,
@@ -394,7 +410,7 @@ fn benchmark_inverse_kinematics(c: &mut Criterion, case: &BenchmarkCase) {
     let mut setup_workspace = case.arm.workspace();
     let desired = case
         .arm
-        .forward_kinematics(&case.q, case.target, &mut setup_workspace)
+        .forward_kinematics(&case.base, &case.q, case.target, &mut setup_workspace)
         .unwrap();
     let initial = vec![0.0; case.arm.joint_count()];
     let mut output = vec![0.0; case.arm.joint_count()];
@@ -405,6 +421,7 @@ fn benchmark_inverse_kinematics(c: &mut Criterion, case: &BenchmarkCase) {
         b.iter(|| {
             case.arm
                 .inverse_kinematics(
+                    &case.base,
                     black_box(&initial),
                     case.target,
                     &desired,
