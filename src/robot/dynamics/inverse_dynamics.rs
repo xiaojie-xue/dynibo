@@ -1,6 +1,6 @@
 use nalgebra::Vector3;
 
-use crate::{Frame, JointType, Result, Twist, Wrench};
+use crate::{BaseState, Frame, JointType, Result, Twist, Wrench};
 
 use super::super::{FLOATING_BASE_DOF, IndexedLoad, Robot, Workspace};
 use super::{add_wrench, wrench_to_parent, write_world_wrench};
@@ -26,7 +26,7 @@ impl Robot {
     /// Writes velocity-product generalized forces `C(q, qd) * qd`.
     ///
     /// Gravity, prescribed base acceleration, and external loads are excluded.
-    /// For a floating base, the stored base velocity participates in the result
+    /// For a floating base, the supplied base velocity participates in the result
     /// and output is ordered `[base torque, base force, joint forces]`. The
     /// base wrench is expressed in the world frame at the root origin.
     ///
@@ -35,11 +35,13 @@ impl Robot {
     /// Returns an error for invalid input or output lengths or workspace.
     pub fn velocity_product_forces(
         &self,
+        base: &BaseState,
         q: &[f64],
         qd: &[f64],
         workspace: &mut Workspace,
         output: &mut [f64],
     ) -> Result<()> {
+        self.validate_base_state(base)?;
         self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
@@ -52,8 +54,8 @@ impl Robot {
             q,
             qd,
             &workspace.step,
-            self.base.frame(),
-            self.base.velocity(),
+            base.frame(),
+            base.velocity(),
             Twist::zeros(),
             Vector3::zeros(),
             Wrench::zeros(),
@@ -68,18 +70,14 @@ impl Robot {
             &mut output[joint_offset..],
         )?;
         if joint_offset != 0 {
-            write_world_wrench(
-                self.base.frame(),
-                base_load,
-                &mut output[..FLOATING_BASE_DOF],
-            );
+            write_world_wrench(base.frame(), base_load, &mut output[..FLOATING_BASE_DOF]);
         }
         Ok(())
     }
 
     /// Writes runtime-sized Newton-Euler generalized forces into caller-owned output.
     ///
-    /// Base pose and classical motion come from [`Robot::base`]. Floating-base
+    /// Base pose and classical motion come from the supplied [`BaseState`]. Floating-base
     /// output is ordered `[base torque, base force, joint forces]`, with the
     /// base wrench expressed in the world frame at the root origin.
     ///
@@ -90,8 +88,10 @@ impl Robot {
     /// # Errors
     ///
     /// Returns an error for invalid lengths, link IDs, or workspace.
+    #[allow(clippy::too_many_arguments)]
     pub fn inverse_dynamics(
         &self,
+        base: &BaseState,
         q: &[f64],
         qd: &[f64],
         qdd: &[f64],
@@ -99,6 +99,7 @@ impl Robot {
         workspace: &mut Workspace,
         output: &mut [f64],
     ) -> Result<()> {
+        self.validate_base_state(base)?;
         self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
@@ -108,9 +109,9 @@ impl Robot {
             q,
             qd,
             qdd,
-            self.base.frame(),
-            self.base.velocity(),
-            self.base.acceleration(),
+            base.frame(),
+            base.velocity(),
+            base.acceleration(),
             loads,
             workspace,
             output,
@@ -134,15 +135,17 @@ impl Robot {
     /// Returns an error for invalid lengths, link IDs, or workspace.
     pub fn gravity(
         &self,
+        base: &BaseState,
         q: &[f64],
         loads: &[IndexedLoad],
         workspace: &mut Workspace,
         output: &mut [f64],
     ) -> Result<()> {
+        self.validate_base_state(base)?;
         self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         self.validate_output("gravity output", output)?;
-        self.gravity_for_base(q, self.base.frame(), loads, workspace, output)
+        self.gravity_for_base(q, base.frame(), loads, workspace, output)
     }
 
     #[allow(clippy::too_many_arguments)]

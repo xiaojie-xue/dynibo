@@ -6,7 +6,7 @@ use std::{
 };
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use dynibo::{BaseMode, LinkId, Robot};
+use dynibo::{BaseMode, BaseState, Frame, LinkId, Robot, Twist};
 
 unsafe extern "C" {
     fn dynibo_pinocchio_create_for_frame(
@@ -94,6 +94,7 @@ impl Drop for PinocchioContext {
 
 struct BenchmarkCase<const N: usize> {
     robot: Robot,
+    base: BaseState,
     pinocchio: PinocchioContext,
     target: LinkId,
     q: [f64; N],
@@ -113,6 +114,12 @@ impl<const N: usize> BenchmarkCase<N> {
             .link_id(target_link)
             .expect("target link must exist in the benchmark URDF");
         let pinocchio = PinocchioContext::new_for_frame(&urdf_path, target_link, base_mode);
+        let base = match base_mode {
+            BaseMode::Fixed => BaseState::fixed(),
+            BaseMode::Floating => {
+                BaseState::new(Frame::identity(), Twist::zeros(), Twist::zeros()).unwrap()
+            }
+        };
 
         assert_eq!(robot.joint_count(), N);
         assert_eq!(pinocchio.dof(), robot.generalized_count());
@@ -132,6 +139,7 @@ impl<const N: usize> BenchmarkCase<N> {
 
         Self {
             robot,
+            base,
             pinocchio,
             target,
             q,
@@ -154,7 +162,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
         b.iter(|| {
             black_box(
                 case.robot
-                    .forward_kinematics(black_box(&case.q), case.target, &mut workspace)
+                    .forward_kinematics(&case.base, black_box(&case.q), case.target, &mut workspace)
                     .unwrap(),
             )
         });
@@ -180,6 +188,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
         b.iter(|| {
             case.robot
                 .jacobian(
+                    &case.base,
                     black_box(&case.q),
                     case.target,
                     &mut workspace,
@@ -210,6 +219,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
             black_box(
                 case.robot
                     .forward_acceleration_kinematics(
+                        &case.base,
                         black_box(&case.q),
                         black_box(&case.qd),
                         black_box(&case.qdd),
@@ -230,6 +240,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
         b.iter(|| {
             case.robot
                 .gravity(
+                    &case.base,
                     black_box(&case.q),
                     black_box(&[]),
                     &mut workspace,
@@ -260,6 +271,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
         b.iter(|| {
             case.robot
                 .inverse_dynamics(
+                    &case.base,
                     black_box(&case.q),
                     black_box(&case.qd),
                     black_box(&case.qdd),
@@ -294,6 +306,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
         b.iter(|| {
             case.robot
                 .jacobian_derivative(
+                    &case.base,
                     black_box(&case.q),
                     black_box(&case.qd),
                     case.target,
@@ -325,7 +338,12 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
     mass.bench_function("dynibo", |b| {
         b.iter(|| {
             case.robot
-                .mass_matrix(black_box(&case.q), &mut workspace, black_box(&mut output))
+                .mass_matrix(
+                    &case.base,
+                    black_box(&case.q),
+                    &mut workspace,
+                    black_box(&mut output),
+                )
                 .unwrap();
             black_box(&output);
         });
@@ -351,6 +369,7 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
         b.iter(|| {
             case.robot
                 .velocity_product_forces(
+                    &case.base,
                     black_box(&case.q),
                     black_box(&case.qd),
                     &mut workspace,

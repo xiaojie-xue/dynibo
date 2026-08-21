@@ -18,9 +18,10 @@ Rust and C give direct control over output allocation:
 === "Rust"
 
     ```rust
+    let base = BaseState::fixed();
     let mut workspace = robot.workspace();
     let mut jacobian = vec![0.0; 6 * robot.generalized_count()];
-    robot.jacobian(&q, target, &mut workspace, &mut jacobian)?;
+    robot.jacobian(&base, &q, target, &mut workspace, &mut jacobian)?;
     ```
 
 === "C"

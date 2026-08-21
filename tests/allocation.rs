@@ -56,6 +56,12 @@ fn floating_calculations_do_not_allocate_after_workspace_creation() {
     let q = [0.2, 0.1];
     let qd = [-0.3, 0.4];
     let qdd = [0.5, -0.2];
+    let base = dynibo::BaseState::new(
+        Frame::identity(),
+        dynibo::Twist::zeros(),
+        dynibo::Twist::zeros(),
+    )
+    .unwrap();
     let mut workspace = robot.workspace();
     let mut jacobian = [0.0; 48];
     let mut derivative = [0.0; 48];
@@ -67,32 +73,43 @@ fn floating_calculations_do_not_allocate_after_workspace_creation() {
     for _ in 0..10 {
         black_box(
             robot
-                .forward_kinematics(&q, target, &mut workspace)
+                .forward_kinematics(&base, &q, target, &mut workspace)
                 .unwrap(),
         );
         robot
-            .jacobian(&q, target, &mut workspace, &mut jacobian)
+            .jacobian(&base, &q, target, &mut workspace, &mut jacobian)
             .unwrap();
         robot
-            .jacobian_derivative(&q, &qd, target, &mut workspace, &mut derivative)
+            .jacobian_derivative(&base, &q, &qd, target, &mut workspace, &mut derivative)
             .unwrap();
         black_box(
             robot
-                .forward_velocity_kinematics(&q, &qd, target, &Frame::identity(), &mut workspace)
+                .forward_velocity_kinematics(
+                    &base,
+                    &q,
+                    &qd,
+                    target,
+                    &Frame::identity(),
+                    &mut workspace,
+                )
                 .unwrap(),
         );
         black_box(
             robot
-                .forward_acceleration_kinematics(&q, &qd, &qdd, target, &mut workspace)
+                .forward_acceleration_kinematics(&base, &q, &qd, &qdd, target, &mut workspace)
                 .unwrap(),
         );
-        robot.mass_matrix(&q, &mut workspace, &mut matrix).unwrap();
         robot
-            .velocity_product_forces(&q, &qd, &mut workspace, &mut output)
+            .mass_matrix(&base, &q, &mut workspace, &mut matrix)
             .unwrap();
-        robot.gravity(&q, &[], &mut workspace, &mut output).unwrap();
         robot
-            .inverse_dynamics(&q, &qd, &qdd, &[], &mut workspace, &mut output)
+            .velocity_product_forces(&base, &q, &qd, &mut workspace, &mut output)
+            .unwrap();
+        robot
+            .gravity(&base, &q, &[], &mut workspace, &mut output)
+            .unwrap();
+        robot
+            .inverse_dynamics(&base, &q, &qd, &qdd, &[], &mut workspace, &mut output)
             .unwrap();
         black_box((&jacobian, &derivative, &matrix, &output));
     }
@@ -120,14 +137,21 @@ fn dynamic_calculations_do_not_allocate_after_workspace_creation() {
     let mut velocity_product = [0.0; 4];
     let mut output = [0.0; 4];
     let desired = robot
-        .forward_kinematics(&q, target_id, &mut workspace)
+        .forward_kinematics(&dynibo::BaseState::fixed(), &q, target_id, &mut workspace)
         .unwrap();
 
     robot
-        .jacobian(&q, target_id, &mut workspace, &mut jacobian)
+        .jacobian(
+            &dynibo::BaseState::fixed(),
+            &q,
+            target_id,
+            &mut workspace,
+            &mut jacobian,
+        )
         .unwrap();
     robot
         .inverse_kinematics(
+            &dynibo::BaseState::fixed(),
             &initial,
             target_id,
             &desired,
@@ -142,35 +166,87 @@ fn dynamic_calculations_do_not_allocate_after_workspace_creation() {
     for _ in 0..10 {
         black_box(
             robot
-                .forward_kinematics(&q, target_id, &mut workspace)
+                .forward_kinematics(&dynibo::BaseState::fixed(), &q, target_id, &mut workspace)
                 .unwrap(),
         );
         robot
-            .jacobian(&q, target_id, &mut workspace, &mut jacobian)
+            .jacobian(
+                &dynibo::BaseState::fixed(),
+                &q,
+                target_id,
+                &mut workspace,
+                &mut jacobian,
+            )
             .unwrap();
-        robot.mass_matrix(&q, &mut workspace, &mut mass).unwrap();
         robot
-            .velocity_product_forces(&q, &qd, &mut workspace, &mut velocity_product)
+            .mass_matrix(&dynibo::BaseState::fixed(), &q, &mut workspace, &mut mass)
             .unwrap();
         robot
-            .jacobian_derivative(&q, &qd, target_id, &mut workspace, &mut jacobian_derivative)
+            .velocity_product_forces(
+                &dynibo::BaseState::fixed(),
+                &q,
+                &qd,
+                &mut workspace,
+                &mut velocity_product,
+            )
+            .unwrap();
+        robot
+            .jacobian_derivative(
+                &dynibo::BaseState::fixed(),
+                &q,
+                &qd,
+                target_id,
+                &mut workspace,
+                &mut jacobian_derivative,
+            )
             .unwrap();
         black_box(
             robot
-                .forward_velocity_kinematics(&q, &qd, target_id, &Frame::identity(), &mut workspace)
+                .forward_velocity_kinematics(
+                    &dynibo::BaseState::fixed(),
+                    &q,
+                    &qd,
+                    target_id,
+                    &Frame::identity(),
+                    &mut workspace,
+                )
                 .unwrap(),
         );
         black_box(
             robot
-                .forward_acceleration_kinematics(&q, &qd, &qdd, target_id, &mut workspace)
+                .forward_acceleration_kinematics(
+                    &dynibo::BaseState::fixed(),
+                    &q,
+                    &qd,
+                    &qdd,
+                    target_id,
+                    &mut workspace,
+                )
                 .unwrap(),
         );
-        robot.gravity(&q, &[], &mut workspace, &mut output).unwrap();
         robot
-            .inverse_dynamics(&q, &qd, &qdd, &[], &mut workspace, &mut output)
+            .gravity(
+                &dynibo::BaseState::fixed(),
+                &q,
+                &[],
+                &mut workspace,
+                &mut output,
+            )
+            .unwrap();
+        robot
+            .inverse_dynamics(
+                &dynibo::BaseState::fixed(),
+                &q,
+                &qd,
+                &qdd,
+                &[],
+                &mut workspace,
+                &mut output,
+            )
             .unwrap();
         robot
             .inverse_kinematics(
+                &dynibo::BaseState::fixed(),
                 &initial,
                 target_id,
                 &desired,
