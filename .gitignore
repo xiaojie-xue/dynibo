@@ -11,6 +11,9 @@ __pycache__/
 /dist/
 /wheelhouse/
 /site/
+/docs/.doxy/
+/docs/c-api/
+/docs/cpp-api/
 *.egg-info/
 
 # IDE and editor state
