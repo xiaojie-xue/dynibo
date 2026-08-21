@@ -7,7 +7,6 @@ mod error;
 mod model;
 mod robot;
 mod spatial;
-mod urdf;
 
 pub use base::{BaseMode, BaseState};
 pub use error::{Error, ErrorCategory, Result};

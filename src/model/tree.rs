@@ -1,25 +1,35 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use nalgebra::{Isometry3, Matrix3, Translation3, UnitQuaternion, Vector3};
 use urdf_rs::{JointType as UrdfJointType, Pose, Robot};
 
-use crate::{Error, Joint, JointType, Link, Result};
+use super::{Joint, JointType, Link};
+use crate::{Error, Result};
 
-/// Topologically ordered representation produced while importing a URDF tree.
-pub(crate) struct TreeModel {
+/// Format-neutral, topologically ordered data used to construct a [`crate::Robot`].
+pub(crate) struct Tree {
+    /// Model name supplied by the source description.
+    pub name: String,
     /// Joints ordered immediately before their corresponding child links.
     pub joints: Vec<Joint>,
     /// Links in root-first topological order.
     pub links: Vec<Link>,
     /// Parent link index for each joint. Joint `i` always connects this parent
     /// to child link `i + 1` in the topologically ordered arrays.
-    pub joint_parents: Vec<usize>,
-    /// Indices of links that have no child joints.
-    pub leaf_links: Vec<usize>,
+    pub parent_link_indices: Vec<usize>,
+}
+
+/// Loads, validates, and converts a URDF file into the format-neutral model.
+pub(crate) fn load_urdf(path: impl AsRef<Path>) -> Result<Tree> {
+    let urdf = urdf_rs::read_file(path)?;
+    convert_urdf(&urdf)
 }
 
 /// Converts a URDF translation and roll-pitch-yaw pose to an isometry.
-pub(crate) fn pose_to_frame(pose: &Pose) -> Isometry3<f64> {
+fn pose_to_frame(pose: &Pose) -> Isometry3<f64> {
     Isometry3::from_parts(
         Translation3::new(pose.xyz[0], pose.xyz[1], pose.xyz[2]),
         UnitQuaternion::from_euler_angles(pose.rpy[0], pose.rpy[1], pose.rpy[2]),
@@ -27,91 +37,87 @@ pub(crate) fn pose_to_frame(pose: &Pose) -> Isometry3<f64> {
 }
 
 /// Validates a parsed URDF and converts it to a topologically ordered tree.
-pub(crate) fn tree_model(robot: &Robot) -> Result<TreeModel> {
-    let link_names: HashSet<&str> = robot.links.iter().map(|link| link.name.as_str()).collect();
-    if link_names.len() != robot.links.len() {
-        return Err(Error::InvalidModel("link names must be unique".to_owned()));
-    }
-    let joint_names: HashSet<&str> = robot
-        .joints
-        .iter()
-        .map(|joint| joint.name.as_str())
-        .collect();
-    if joint_names.len() != robot.joints.len() {
-        return Err(Error::InvalidModel("joint names must be unique".to_owned()));
+fn convert_urdf(robot: &Robot) -> Result<Tree> {
+    let mut link_indices = HashMap::with_capacity(robot.links.len());
+    for (index, link) in robot.links.iter().enumerate() {
+        if link_indices.insert(link.name.as_str(), index).is_some() {
+            return Err(Error::InvalidModel("link names must be unique".to_owned()));
+        }
     }
 
-    let children: HashSet<&str> = robot
-        .joints
-        .iter()
-        .map(|joint| joint.child.link.as_str())
-        .collect();
-    let roots: Vec<&str> = robot
-        .links
-        .iter()
-        .map(|link| link.name.as_str())
-        .filter(|name| !children.contains(name))
-        .collect();
-    if roots.len() != 1 {
+    let mut joint_names = HashSet::with_capacity(robot.joints.len());
+    let mut has_parent = vec![false; robot.links.len()];
+    let mut children_by_parent = vec![Vec::<(usize, usize)>::new(); robot.links.len()];
+    for (joint_index, joint) in robot.joints.iter().enumerate() {
+        if !joint_names.insert(joint.name.as_str()) {
+            return Err(Error::InvalidModel("joint names must be unique".to_owned()));
+        }
+        let parent_index = *link_indices
+            .get(joint.parent.link.as_str())
+            .ok_or_else(|| {
+                Error::InvalidModel(format!(
+                    "joint {} references a missing parent link",
+                    joint.name
+                ))
+            })?;
+        let child_index = *link_indices.get(joint.child.link.as_str()).ok_or_else(|| {
+            Error::InvalidModel(format!(
+                "joint {} references a missing child link",
+                joint.name
+            ))
+        })?;
+        if has_parent[child_index] {
+            return Err(Error::InvalidModel(format!(
+                "link {} is reached more than once",
+                joint.child.link
+            )));
+        }
+        has_parent[child_index] = true;
+        children_by_parent[parent_index].push((child_index, joint_index));
+    }
+
+    let mut root_source_index = None;
+    let mut root_count = 0;
+    for (index, &has_parent) in has_parent.iter().enumerate() {
+        if !has_parent {
+            root_source_index = Some(index);
+            root_count += 1;
+        }
+    }
+    if root_count != 1 {
         return Err(Error::InvalidModel(format!(
-            "expected one root link, found {}",
-            roots.len()
+            "expected one root link, found {root_count}"
         )));
     }
-
-    let mut joints_by_parent: HashMap<&str, Vec<&urdf_rs::Joint>> = HashMap::new();
-    for joint in &robot.joints {
-        joints_by_parent
-            .entry(joint.parent.link.as_str())
-            .or_default()
-            .push(joint);
-    }
-    let links_by_name: HashMap<&str, &urdf_rs::Link> = robot
-        .links
-        .iter()
-        .map(|link| (link.name.as_str(), link))
-        .collect();
+    let root_source_index = root_source_index.expect("one root was found");
 
     let mut joints = Vec::with_capacity(robot.joints.len());
     let mut links = Vec::with_capacity(robot.links.len());
-    let mut joint_parents = Vec::with_capacity(robot.joints.len());
-    let mut topological_names = Vec::with_capacity(robot.links.len());
-    let mut discovered: HashMap<&str, usize> = HashMap::with_capacity(robot.links.len());
-    let mut has_children = Vec::with_capacity(robot.links.len());
+    let mut parent_link_indices = Vec::with_capacity(robot.joints.len());
+    let mut topological_source_indices = Vec::with_capacity(robot.links.len());
+    let mut discovered = vec![None; robot.links.len()];
 
-    let root = roots[0];
-    links.push(robot_link(links_by_name[root])?);
-    topological_names.push(root);
-    discovered.insert(root, 0);
-    has_children.push(false);
+    links.push(robot_link(&robot.links[root_source_index])?);
+    topological_source_indices.push(root_source_index);
+    discovered[root_source_index] = Some(0);
 
     let mut parent_index = 0;
-    while parent_index < topological_names.len() {
-        let parent_name = topological_names[parent_index];
-        if let Some(child_joints) = joints_by_parent.get(parent_name) {
-            has_children[parent_index] = true;
-            for joint in child_joints {
-                let child_name = joint.child.link.as_str();
-                let child = links_by_name.get(child_name).ok_or_else(|| {
-                    Error::InvalidModel(format!(
-                        "joint {} references a missing child link",
-                        joint.name
-                    ))
-                })?;
-                if let Some(&first_index) = discovered.get(child_name) {
-                    return Err(Error::InvalidModel(format!(
-                        "link {child_name} is reached more than once (first index {first_index})"
-                    )));
-                }
-
-                let child_index = links.len();
-                discovered.insert(child_name, child_index);
-                topological_names.push(child_name);
-                links.push(robot_link(child)?);
-                has_children.push(false);
-                joints.push(robot_joint(joint)?);
-                joint_parents.push(parent_index);
+    while parent_index < topological_source_indices.len() {
+        let parent_source_index = topological_source_indices[parent_index];
+        for &(child_source_index, joint_source_index) in &children_by_parent[parent_source_index] {
+            if let Some(first_index) = discovered[child_source_index] {
+                return Err(Error::InvalidModel(format!(
+                    "link {} is reached more than once (first index {first_index})",
+                    robot.links[child_source_index].name
+                )));
             }
+
+            let child_index = links.len();
+            discovered[child_source_index] = Some(child_index);
+            topological_source_indices.push(child_source_index);
+            links.push(robot_link(&robot.links[child_source_index])?);
+            joints.push(robot_joint(&robot.joints[joint_source_index])?);
+            parent_link_indices.push(parent_index);
         }
         parent_index += 1;
     }
@@ -121,16 +127,11 @@ pub(crate) fn tree_model(robot: &Robot) -> Result<TreeModel> {
             "joint graph is disconnected or cyclic".to_owned(),
         ));
     }
-    let leaf_links = has_children
-        .iter()
-        .enumerate()
-        .filter_map(|(index, &has_children)| (!has_children).then_some(index))
-        .collect();
-    Ok(TreeModel {
+    Ok(Tree {
+        name: robot.name.clone(),
         joints,
         links,
-        joint_parents,
-        leaf_links,
+        parent_link_indices,
     })
 }
 
@@ -152,7 +153,7 @@ fn robot_joint(joint: &urdf_rs::Joint) -> Result<Joint> {
     } else {
         (joint.limit.lower, joint.limit.upper)
     };
-    Joint::new_named(
+    Joint::new(
         joint.name.clone(),
         joint_type,
         pose_to_frame(&joint.origin),
@@ -239,7 +240,7 @@ mod tests {
     use nalgebra::Matrix3;
     use urdf_rs::{JointType as UrdfJointType, read_from_string};
 
-    use super::tree_model;
+    use super::convert_urdf;
     use crate::{Error, JointType};
 
     const CHAIN: &str = r#"
@@ -262,7 +263,7 @@ mod tests {
     }
 
     fn invalid_model(robot: &urdf_rs::Robot, expected: &str) {
-        let error = tree_model(robot).err().expect("model must be rejected");
+        let error = convert_urdf(robot).err().expect("model must be rejected");
         assert!(
             matches!(error, Error::InvalidModel(ref message) if message.contains(expected)),
             "unexpected error: {error}"
@@ -281,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_root_counts_and_missing_children() {
+    fn rejects_invalid_root_counts_and_missing_link_references() {
         let mut robot = chain();
         let mut detached = robot.links[0].clone();
         detached.name = "detached".to_owned();
@@ -298,6 +299,10 @@ mod tests {
         let mut robot = chain();
         robot.links.pop();
         invalid_model(&robot, "references a missing child link");
+
+        let mut robot = chain();
+        robot.joints[0].parent.link = "missing".to_owned();
+        invalid_model(&robot, "references a missing parent link");
     }
 
     #[test]
@@ -333,7 +338,7 @@ mod tests {
         let mut robot = chain();
         robot.joints[0].joint_type = UrdfJointType::Planar;
         assert!(matches!(
-            tree_model(&robot),
+            convert_urdf(&robot),
             Err(Error::UnsupportedJointType {
                 ref joint,
                 ref joint_type,
@@ -342,10 +347,10 @@ mod tests {
 
         let mut robot = chain();
         robot.joints[0].joint_type = UrdfJointType::Continuous;
-        let model = tree_model(&robot).expect("continuous joints are supported");
-        assert_eq!(model.joints[0].joint_type(), JointType::Revolute);
-        assert_eq!(model.joints[0].lower_limit(), f64::NEG_INFINITY);
-        assert_eq!(model.joints[0].upper_limit(), f64::INFINITY);
+        let tree = convert_urdf(&robot).expect("continuous joints are supported");
+        assert_eq!(tree.joints[0].joint_type(), JointType::Revolute);
+        assert_eq!(tree.joints[0].lower_limit(), f64::NEG_INFINITY);
+        assert_eq!(tree.joints[0].upper_limit(), f64::INFINITY);
     }
 
     #[test]
@@ -391,9 +396,9 @@ mod tests {
             "#,
         )
         .unwrap();
-        let model = tree_model(&robot).unwrap();
+        let tree = convert_urdf(&robot).unwrap();
         assert_relative_eq!(
-            model.links[1].inertia(),
+            tree.links[1].inertia(),
             &Matrix3::from_diagonal(&nalgebra::Vector3::new(2.0, 1.0, 3.0)),
             epsilon = 2.0e-12
         );

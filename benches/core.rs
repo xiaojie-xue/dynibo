@@ -13,16 +13,10 @@ struct BenchmarkCase {
 }
 
 impl BenchmarkCase {
-    fn new(relative_urdf_path: &str) -> Self {
+    fn new(relative_urdf_path: &str, target_name: &str) -> Self {
         let urdf_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_urdf_path);
         let arm = Robot::from_urdf(urdf_path).expect("Dynibo must load the benchmark URDF");
-        let target_name = arm
-            .leaf_links()
-            .next()
-            .expect("benchmark robot must have a leaf link")
-            .name()
-            .to_owned();
-        let target = arm.link_id(&target_name).unwrap();
+        let target = arm.link_id(target_name).unwrap();
         let n = arm.joint_count();
         Self {
             arm,
@@ -216,7 +210,7 @@ fn benchmark_case(c: &mut Criterion, case: &BenchmarkCase) {
 }
 
 fn benchmark_tree_case(c: &mut Criterion) {
-    let case = BenchmarkCase::new("tests/data/test_tree_7.urdf");
+    let case = BenchmarkCase::new("tests/data/test_tree_7.urdf", "right_tool");
     benchmark_case(c, &case);
     let left = case.arm.link_id("left_tool").unwrap();
     let right = case.arm.link_id("right_tool").unwrap();
@@ -272,7 +266,7 @@ fn benchmark_tree_case(c: &mut Criterion) {
 }
 
 fn benchmark_target_depths(c: &mut Criterion) {
-    let case = BenchmarkCase::new("tests/data/test_arm_40.urdf");
+    let case = BenchmarkCase::new("tests/data/test_arm_40.urdf", "test_link_40");
     let targets = [
         ("root", case.arm.link_id("test_base_link").unwrap()),
         ("depth_1", case.arm.link_id("test_link_1").unwrap()),
@@ -420,10 +414,13 @@ fn benchmark_inverse_kinematics(c: &mut Criterion, case: &BenchmarkCase) {
 }
 
 fn benchmark_core(c: &mut Criterion) {
-    let case_4 = BenchmarkCase::new("tests/data/test_arm.urdf");
+    let case_4 = BenchmarkCase::new("tests/data/test_arm.urdf", "test_link_4");
     benchmark_case(c, &case_4);
     benchmark_inverse_kinematics(c, &case_4);
-    benchmark_case(c, &BenchmarkCase::new("tests/data/test_arm_40.urdf"));
+    benchmark_case(
+        c,
+        &BenchmarkCase::new("tests/data/test_arm_40.urdf", "test_link_40"),
+    );
     benchmark_tree_case(c);
     benchmark_target_depths(c);
 }

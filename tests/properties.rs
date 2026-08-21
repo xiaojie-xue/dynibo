@@ -190,14 +190,13 @@ fn velocity_product_matches_rnea_minus_gravity() {
 #[test]
 fn jacobian_derivative_matches_zero_acceleration_and_finite_difference() {
     let epsilon = 1.0e-7;
-    for robot in [tree_arm(), mixed_oracle_arm()] {
+    for (robot, target_names) in [
+        (tree_arm(), &["left_tool", "right_tool"][..]),
+        (mixed_oracle_arm(), &["tool"][..]),
+    ] {
         let joint_count = robot.joint_count();
-        let leaf_names: Vec<String> = robot
-            .leaf_links()
-            .map(|link| link.name().to_owned())
-            .collect();
-        for leaf_name in leaf_names {
-            let target = robot.link_id(&leaf_name).unwrap();
+        for &target_name in target_names {
+            let target = robot.link_id(target_name).unwrap();
             let mut workspace = robot.workspace();
             for sample in 0..8 {
                 let q = sample_state(joint_count, sample, 0.3, 0.85);
