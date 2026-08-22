@@ -242,7 +242,7 @@ impl Robot {
         for i in 0..self.model_joint_count() {
             let joint = self.joint_kinematics[i];
             let link = self.link_dynamics[i + 1];
-            let parent = self.joint_parents[i];
+            let parent = self.parent_link_indices[i];
             let (parent_omega, parent_alpha, parent_acceleration) = if parent == 0 {
                 (
                     base_omega,
@@ -331,7 +331,7 @@ impl Robot {
                     JointType::Fixed => unreachable!("fixed joints have no DOF index"),
                 };
             }
-            let parent = self.joint_parents[i];
+            let parent = self.parent_link_indices[i];
             if parent != 0 {
                 let parent_load = wrench_to_parent(&scratch.transforms[i], scratch.link_loads[i]);
                 scratch.link_loads[parent - 1] =
@@ -374,7 +374,7 @@ impl Robot {
         let base_gravity = base_frame.rotation.inverse() * Vector3::new(0.0, 0.0, GRAVITY);
         for i in 0..self.model_joint_count() {
             scratch.transforms[i] = self.joint_kinematics[i].frame(self.joint_value(q, i));
-            let parent = self.joint_parents[i];
+            let parent = self.parent_link_indices[i];
             let parent_gravity = if parent == 0 {
                 base_gravity
             } else {
@@ -401,7 +401,7 @@ impl Robot {
                     JointType::Fixed => unreachable!("fixed joints have no DOF index"),
                 };
             }
-            let parent = self.joint_parents[i];
+            let parent = self.parent_link_indices[i];
             if parent != 0 {
                 let parent_load = wrench_to_parent(&scratch.transforms[i], scratch.link_loads[i]);
                 scratch.link_loads[parent - 1] =

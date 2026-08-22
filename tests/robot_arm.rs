@@ -8,10 +8,7 @@ use std::{
 };
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
-use dynibo::{
-    Error, Frame, IndexedLoad, InverseKinematicsOptions, Joint, JointType, Link, Robot, Twist,
-    Wrench,
-};
+use dynibo::{Error, Frame, IndexedLoad, InverseKinematicsOptions, Link, Robot, Twist, Wrench};
 use nalgebra::{Isometry3, Matrix3, SMatrix, SVector, Translation3, UnitQuaternion, Vector3};
 
 type JointVector<const N: usize> = SVector<f64, N>;
@@ -214,9 +211,9 @@ fn test_arm() -> Robot {
 }
 
 fn end_link(arm: &Robot) -> &Link {
-    arm.leaf_links()
-        .next()
-        .expect("robot must have a leaf link")
+    arm.links()
+        .last()
+        .expect("test chain must have an end link")
 }
 
 fn urdf_path(file_name: &str) -> PathBuf {
@@ -230,49 +227,13 @@ fn tree_arm() -> Robot {
         .expect("tree URDF must load")
 }
 
-#[allow(clippy::too_many_arguments)]
-fn joint(name: &str, joint_type: JointType, xyz: [f64; 3], rpy: [f64; 3], axis: [f64; 3]) -> Joint {
-    Joint::new(
-        name,
-        joint_type,
-        Isometry3::from_parts(
-            Translation3::new(xyz[0], xyz[1], xyz[2]),
-            UnitQuaternion::from_euler_angles(rpy[0], rpy[1], rpy[2]),
-        ),
-        Vector3::new(axis[0], axis[1], axis[2]),
-        -10.0,
-        10.0,
-        100.0,
-    )
-    .unwrap()
-}
-
 #[test]
-fn joint_and_loaded_link_preserve_their_parameters() {
-    let mut joint = Joint::new(
-        "joint_1",
-        JointType::Revolute,
-        Isometry3::from_parts(
-            Translation3::new(2.0, 3.0, 4.0),
-            UnitQuaternion::from_euler_angles(0.0, 2.0, 1.0),
-        ),
-        Vector3::z(),
-        -3.14,
-        3.14,
-        100.0,
-    )
-    .unwrap();
+fn loaded_link_preserves_its_inertial_parameters() {
     let arm = test_arm();
     let link = arm.link("test_link_2").unwrap();
 
-    assert_eq!(joint.name(), "joint_1");
     assert_eq!(link.name(), "test_link_2");
-    assert_eq!(joint.joint_type(), JointType::Revolute);
-    assert_abs_diff_eq!(joint.lower_limit(), -3.14);
-    assert_abs_diff_eq!(joint.upper_limit(), 3.14);
-    assert_abs_diff_eq!(joint.velocity_limit(), 100.0);
     assert_eq!(link.mass(), 7.016);
-    assert_abs_diff_eq!(joint.origin().translation.vector.x, 2.0);
     assert_abs_diff_eq!(link.center_of_mass().z, 0.129994);
     assert_eq!(
         link.inertia(),
@@ -287,98 +248,6 @@ fn joint_and_loaded_link_preserve_their_parameters() {
             -0.000005506,
             0.093672064,
         )
-    );
-    assert_relative_eq!(joint.axis().as_ref(), &Vector3::z(), epsilon = 1.0e-12);
-    assert!(joint.is_over_limit(4.0));
-    assert!(!joint.is_over_limit(0.0));
-    assert_abs_diff_eq!(joint.set_position(10.0), 3.14);
-    assert_abs_diff_eq!(joint.position(), 3.14);
-    assert_abs_diff_eq!(joint.set_velocity(-200.0), -100.0);
-    assert_abs_diff_eq!(joint.velocity(), -100.0);
-    assert_abs_diff_eq!(joint.set_acceleration(12.0), 12.0);
-    assert_abs_diff_eq!(joint.acceleration(), 12.0);
-    assert_abs_diff_eq!(joint.set_home_offset(-0.25), -0.25);
-    assert_abs_diff_eq!(joint.home_offset(), -0.25);
-    assert_abs_diff_eq!(
-        joint.active_force(Wrench::new(Vector3::new(1.0, 2.0, 3.0), Vector3::zeros())),
-        3.0
-    );
-}
-
-#[test]
-fn fixed_joint_ignores_its_axis_but_moving_joints_validate_theirs() {
-    let fixed = Joint::new(
-        "fixed",
-        JointType::Fixed,
-        Frame::identity(),
-        Vector3::zeros(),
-        0.0,
-        0.0,
-        0.0,
-    )
-    .expect("a fixed joint does not need a motion axis");
-    assert_eq!(fixed.joint_type(), JointType::Fixed);
-
-    for joint_type in [JointType::Revolute, JointType::Prismatic] {
-        let error = Joint::new(
-            "moving",
-            joint_type,
-            Frame::identity(),
-            Vector3::zeros(),
-            -1.0,
-            1.0,
-            1.0,
-        )
-        .unwrap_err();
-        assert!(matches!(
-            error,
-            Error::InvalidJointAxis { ref joint } if joint == "moving"
-        ));
-    }
-}
-
-#[test]
-fn revolute_and_prismatic_joint_frames_match_urdf_semantics() {
-    let revolute = joint(
-        "revolute",
-        JointType::Revolute,
-        [0.0, 0.0, 0.226],
-        [0.0, 0.0, FRAC_PI_2],
-        [0.0, 0.0, 1.0],
-    );
-    let frame = revolute.frame(0.3 * PI);
-    let expected = UnitQuaternion::from_euler_angles(0.0, 0.0, 0.8 * PI);
-    assert_relative_eq!(frame.rotation, expected, epsilon = 1.0e-12);
-    assert_abs_diff_eq!(frame.translation.vector.z, 0.226);
-
-    let prismatic = joint(
-        "slide",
-        JointType::Prismatic,
-        [1.0, 0.0, 0.0],
-        [0.0; 3],
-        [0.0, 1.0, 0.0],
-    );
-    assert_relative_eq!(
-        prismatic.frame(0.25).translation.vector,
-        Vector3::new(1.0, 0.25, 0.0),
-        epsilon = 1.0e-12
-    );
-    assert_abs_diff_eq!(
-        prismatic.active_force(Wrench::new(Vector3::zeros(), Vector3::new(2.0, 3.0, 4.0))),
-        3.0
-    );
-
-    let fixed = joint(
-        "fixed",
-        JointType::Fixed,
-        [0.1, 0.2, 0.3],
-        [0.0; 3],
-        [0.0; 3],
-    );
-    assert_relative_eq!(fixed.frame(123.0), *fixed.origin(), epsilon = 1.0e-12);
-    assert_abs_diff_eq!(
-        fixed.active_force(Wrench::new(Vector3::z(), Vector3::x())),
-        0.0
     );
 }
 

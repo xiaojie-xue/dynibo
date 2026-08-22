@@ -59,7 +59,7 @@ impl Robot {
         // Composite rigid-body pass: accumulate each subtree inertia, expressed
         // about the parent link origin, into the parent.
         for index in (0..model_joint_count).rev() {
-            let parent = self.joint_parents[index];
+            let parent = self.parent_link_indices[index];
             if parent == 0 {
                 continue;
             }
@@ -108,7 +108,7 @@ impl Robot {
                     output[current_dof * joint_count + dof_index] = entry;
                     output[dof_index * joint_count + current_dof] = entry;
                 }
-                let parent = self.joint_parents[current];
+                let parent = self.parent_link_indices[current];
                 if parent == 0 {
                     break;
                 }
@@ -155,7 +155,7 @@ impl Robot {
                 - mass * translation * translation.transpose()
                 - translation * rotated_moment.transpose()
                 - rotated_moment * translation.transpose();
-            let parent = self.joint_parents[index];
+            let parent = self.parent_link_indices[index];
             if parent == 0 {
                 root_mass += mass;
                 root_moment += transformed_moment;
@@ -211,7 +211,7 @@ impl Robot {
                     output[joint_column * generalized_count + current_row] = entry;
                     output[current_row * generalized_count + joint_column] = entry;
                 }
-                let parent = self.joint_parents[current];
+                let parent = self.parent_link_indices[current];
                 force = wrench_to_parent(&workspace.frames[current], force);
                 if parent == 0 {
                     break;

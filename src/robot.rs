@@ -5,8 +5,7 @@ use std::{
 
 use crate::{
     BaseMode, BaseState, Error, Frame, Joint, JointType, Link, Result, Twist,
-    model::{JointKinematics, LinkDynamics},
-    urdf::tree_model,
+    model::{JointKinematics, LinkDynamics, Tree, load_urdf},
 };
 
 mod dynamics;
@@ -33,8 +32,7 @@ pub struct Robot {
     link_dynamics: Box<[LinkDynamics]>,
     active_joint_indices: Box<[usize]>,
     joint_dof_indices: Box<[Option<usize>]>,
-    joint_parents: Box<[usize]>,
-    leaf_links: Box<[usize]>,
+    parent_link_indices: Box<[usize]>,
     base: BaseState,
 }
 
@@ -54,38 +52,40 @@ impl Robot {
     ///
     /// Returns an error if the file cannot be parsed or its graph is invalid.
     pub fn from_urdf_with_base(path: impl AsRef<Path>, base_mode: BaseMode) -> Result<Self> {
-        let robot = urdf_rs::read_file(path)?;
-        let model = tree_model(&robot)?;
+        let tree = load_urdf(path)?;
+        Ok(Self::from_tree(tree, base_mode))
+    }
+
+    fn from_tree(tree: Tree, base_mode: BaseMode) -> Self {
         let model_id = NEXT_MODEL_ID.fetch_add(1, Ordering::Relaxed);
         assert_ne!(
             model_id, UNOWNED_MODEL_ID,
             "robot model identifier overflow"
         );
-        let joint_kinematics: Box<[_]> = model.joints.iter().map(Joint::kinematics).collect();
-        let link_dynamics: Box<[_]> = model.links.iter().map(Link::dynamics).collect();
-        let active_joint_indices: Box<[_]> = model
+        let joint_kinematics: Box<[_]> = tree.joints.iter().map(Joint::kinematics).collect();
+        let link_dynamics: Box<[_]> = tree.links.iter().map(Link::dynamics).collect();
+        let active_joint_indices: Box<[_]> = tree
             .joints
             .iter()
             .enumerate()
             .filter_map(|(index, joint)| (joint.joint_type() != JointType::Fixed).then_some(index))
             .collect();
-        let mut joint_dof_indices = vec![None; model.joints.len()];
+        let mut joint_dof_indices = vec![None; tree.joints.len()];
         for (dof_index, &joint_index) in active_joint_indices.iter().enumerate() {
             joint_dof_indices[joint_index] = Some(dof_index);
         }
-        Ok(Self {
+        Self {
             model_id,
-            name: robot.name,
-            joints: model.joints.into_boxed_slice(),
-            links: model.links.into_boxed_slice(),
+            name: tree.name,
+            joints: tree.joints.into_boxed_slice(),
+            links: tree.links.into_boxed_slice(),
             joint_kinematics,
             link_dynamics,
             active_joint_indices,
             joint_dof_indices: joint_dof_indices.into_boxed_slice(),
-            joint_parents: model.joint_parents.into_boxed_slice(),
-            leaf_links: model.leaf_links.into_boxed_slice(),
+            parent_link_indices: tree.parent_link_indices.into_boxed_slice(),
             base: BaseState::new(base_mode),
-        })
+        }
     }
 
     /// Returns the root-link runtime state.
@@ -158,11 +158,6 @@ impl Robot {
     /// Returns the model's root link.
     pub fn root_link(&self) -> &Link {
         &self.links[0]
-    }
-
-    /// Iterates over links that have no children.
-    pub fn leaf_links(&self) -> impl ExactSizeIterator<Item = &Link> {
-        self.leaf_links.iter().map(|&index| &self.links[index])
     }
 
     /// Finds a link by its URDF name.

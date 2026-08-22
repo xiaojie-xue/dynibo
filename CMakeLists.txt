@@ -46,8 +46,9 @@ add_custom_command(
         Cargo.toml Cargo.lock
         bindings/c/Cargo.toml bindings/c/src/lib.rs
         bindings/c/include/dynibo/dynibo.h bindings/c/include/dynibo/dynibo.hpp
-        src/lib.rs src/error.rs src/model.rs src/robot.rs
-        src/robot/workspace.rs src/spatial.rs src/urdf.rs
+        src/lib.rs src/error.rs src/model.rs
+        src/model/joint.rs src/model/link.rs src/model/tree.rs
+        src/robot.rs src/robot/workspace.rs src/spatial.rs
     COMMENT "Building dynibo C ABI with Cargo"
     VERBATIM)
 

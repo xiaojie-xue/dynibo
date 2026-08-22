@@ -16,7 +16,7 @@ impl Robot {
             let joint_index = current - 1;
             path[depth] = joint_index;
             depth += 1;
-            current = self.joint_parents[joint_index];
+            current = self.parent_link_indices[joint_index];
         }
         depth
     }
