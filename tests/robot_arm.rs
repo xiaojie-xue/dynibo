@@ -77,7 +77,12 @@ impl DynamicTestApi for Robot {
         target: &Link,
     ) -> dynibo::Result<Frame> {
         let mut workspace = self.workspace();
-        self.forward_kinematics(q.as_slice(), self.link_id(target.name())?, &mut workspace)
+        self.forward_kinematics(
+            &dynibo::BaseState::fixed(),
+            q.as_slice(),
+            self.link_id(target.name())?,
+            &mut workspace,
+        )
     }
 
     fn test_jacobian<const N: usize>(
@@ -88,6 +93,7 @@ impl DynamicTestApi for Robot {
         let mut workspace = self.workspace();
         let mut output = Jacobian::<N>::zeros();
         self.jacobian(
+            &dynibo::BaseState::fixed(),
             q.as_slice(),
             self.link_id(target.name())?,
             &mut workspace,
@@ -106,6 +112,7 @@ impl DynamicTestApi for Robot {
         let mut workspace = self.workspace();
         let mut output = JointVector::<N>::zeros();
         self.inverse_kinematics(
+            &dynibo::BaseState::fixed(),
             initial_q.as_slice(),
             self.link_id(target.name())?,
             desired,
@@ -124,13 +131,13 @@ impl DynamicTestApi for Robot {
         base: &Frame,
         tool: &Frame,
     ) -> dynibo::Result<Twist> {
-        let mut robot = self.clone();
-        robot.set_base_frame(*base)?;
-        let mut workspace = robot.workspace();
-        robot.forward_velocity_kinematics(
+        let base = dynibo::BaseState::fixed_at(*base)?;
+        let mut workspace = self.workspace();
+        self.forward_velocity_kinematics(
+            &base,
             q.as_slice(),
             qd.as_slice(),
-            robot.link_id(target.name())?,
+            self.link_id(target.name())?,
             tool,
             &mut workspace,
         )
@@ -145,6 +152,7 @@ impl DynamicTestApi for Robot {
     ) -> dynibo::Result<Twist> {
         let mut workspace = self.workspace();
         self.forward_acceleration_kinematics(
+            &dynibo::BaseState::fixed(),
             q.as_slice(),
             qd.as_slice(),
             qdd.as_slice(),
@@ -168,11 +176,16 @@ impl DynamicTestApi for Robot {
                 })
             })
             .collect::<dynibo::Result<Vec<_>>>()?;
-        let mut robot = self.clone();
-        robot.set_base_frame(*base)?;
-        let mut workspace = robot.workspace();
+        let base = dynibo::BaseState::fixed_at(*base)?;
+        let mut workspace = self.workspace();
         let mut output = JointVector::<N>::zeros();
-        robot.gravity(q.as_slice(), &loads, &mut workspace, output.as_mut_slice())?;
+        self.gravity(
+            &base,
+            q.as_slice(),
+            &loads,
+            &mut workspace,
+            output.as_mut_slice(),
+        )?;
         Ok(output)
     }
 
@@ -195,6 +208,7 @@ impl DynamicTestApi for Robot {
         let mut workspace = self.workspace();
         let mut output = JointVector::<N>::zeros();
         self.inverse_dynamics(
+            &dynibo::BaseState::fixed(),
             q.as_slice(),
             qd.as_slice(),
             qdd.as_slice(),
@@ -269,19 +283,34 @@ fn urdf_rs_loads_test_arm_and_checks_calculation_size() {
     ));
     let link_id = arm.link_id("test_link_1").unwrap();
     let mut workspace = arm.workspace();
-    arm.forward_kinematics(&[0.0; 4], link_id, &mut workspace)
-        .expect("a model-owned link ID remains valid");
+    arm.forward_kinematics(
+        &dynibo::BaseState::fixed(),
+        &[0.0; 4],
+        link_id,
+        &mut workspace,
+    )
+    .expect("a model-owned link ID remains valid");
     let other_arm = test_arm();
     let other_link_id = other_arm.link_id("test_link_1").unwrap();
     assert!(matches!(
-        arm.forward_kinematics(&[0.0; 4], other_link_id, &mut workspace),
+        arm.forward_kinematics(
+            &dynibo::BaseState::fixed(),
+            &[0.0; 4],
+            other_link_id,
+            &mut workspace
+        ),
         Err(Error::InvalidLinkId)
     ));
     assert_abs_diff_eq!(arm.links()[2].mass(), 7.016);
     assert_abs_diff_eq!(arm.joints()[1].origin().translation.vector.z, 0.108);
 
     let wrong_size = arm
-        .forward_kinematics(&[0.0; 3], link_id, &mut workspace)
+        .forward_kinematics(
+            &dynibo::BaseState::fixed(),
+            &[0.0; 3],
+            link_id,
+            &mut workspace,
+        )
         .unwrap_err();
     assert!(matches!(
         wrong_size,
@@ -729,6 +758,19 @@ fn fixed_joint_has_constant_pose_and_no_motion_or_generalized_force() {
     assert_relative_eq!(
         arm.test_jacobian(&zero, target).unwrap(),
         Jacobian::<0>::zeros(),
+        epsilon = 1.0e-12
+    );
+    assert_relative_eq!(
+        arm.test_forward_velocity_kinematics(
+            &zero,
+            &zero,
+            target,
+            &Frame::identity(),
+            &Frame::identity(),
+        )
+        .unwrap()
+        .to_vector(),
+        Twist::zeros().to_vector(),
         epsilon = 1.0e-12
     );
     assert_relative_eq!(

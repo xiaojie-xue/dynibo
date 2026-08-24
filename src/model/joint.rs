@@ -222,6 +222,7 @@ mod tests {
         assert_abs_diff_eq!(joint.origin().translation.vector.x, 2.0);
         assert_relative_eq!(joint.axis().as_ref(), &Vector3::z(), epsilon = 1.0e-12);
         assert!(joint.is_over_limit(4.0));
+        assert!(joint.is_over_limit(-4.0));
         assert!(!joint.is_over_limit(0.0));
         assert_abs_diff_eq!(joint.set_home_offset(-0.25), -0.25);
         assert_abs_diff_eq!(joint.home_offset(), -0.25);

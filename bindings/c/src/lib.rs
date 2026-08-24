@@ -13,8 +13,8 @@ use std::{
 };
 
 use dynibo::{
-    BaseMode, ErrorCategory, Frame, IndexedLoad, InverseKinematicsOptions, LinkId, Robot, Twist,
-    Workspace, Wrench,
+    BaseMode, BaseState, ErrorCategory, Frame, IndexedLoad, InverseKinematicsOptions, LinkId,
+    Robot, Twist, Workspace, Wrench,
 };
 use nalgebra::{Quaternion, Translation3, UnitQuaternion, Vector3};
 
@@ -127,6 +127,7 @@ impl Default for DyniboIkOptions {
 /// Opaque robot model.
 pub struct DyniboRobot {
     inner: Robot,
+    base: BaseState,
     link_ids: Vec<LinkId>,
     name: CString,
 }
@@ -385,6 +386,7 @@ pub unsafe extern "C" fn dynibo_robot_from_urdf(
             CString::new(inner.name()).map_err(|_| model_error("robot name contains NUL"))?;
         *output = Box::into_raw(Box::new(DyniboRobot {
             inner,
+            base: BaseState::fixed(),
             link_ids,
             name,
         }));
@@ -408,8 +410,13 @@ pub unsafe extern "C" fn dynibo_robot_from_urdf_with_base(
         let path = unsafe { CStr::from_ptr(path) }
             .to_str()
             .map_err(|_| invalid("path must be valid UTF-8"))?;
-        let inner =
-            Robot::from_urdf_with_base(path, base_mode_from_c(base_mode)?).map_err(core_error)?;
+        let base_mode = base_mode_from_c(base_mode)?;
+        let inner = Robot::from_urdf_with_base(path, base_mode).map_err(core_error)?;
+        let base = match base_mode {
+            BaseMode::Fixed => BaseState::fixed(),
+            BaseMode::Floating => BaseState::new(Frame::identity(), Twist::zeros(), Twist::zeros())
+                .expect("zero floating-base state is valid"),
+        };
         let link_ids = inner
             .links()
             .iter()
@@ -419,6 +426,7 @@ pub unsafe extern "C" fn dynibo_robot_from_urdf_with_base(
             CString::new(inner.name()).map_err(|_| model_error("robot name contains NUL"))?;
         *output = Box::into_raw(Box::new(DyniboRobot {
             inner,
+            base,
             link_ids,
             name,
         }));
@@ -472,10 +480,15 @@ pub unsafe extern "C" fn dynibo_robot_set_floating_base_state(
     call(|| {
         let robot = unsafe { required_mut(robot, "robot") }?;
         let frame = frame_from_pose(unsafe { required_ref(frame, "frame") }?)?;
-        robot
-            .inner
-            .set_floating_base_state(frame, twist_from_c(velocity), twist_from_c(acceleration))
-            .map_err(core_error)
+        if robot.inner.base_mode() != BaseMode::Floating {
+            return Err(core_error(dynibo::Error::InvalidBaseState {
+                field: "mode",
+                reason: "does not match robot base mode",
+            }));
+        }
+        robot.base = BaseState::new(frame, twist_from_c(velocity), twist_from_c(acceleration))
+            .map_err(core_error)?;
+        Ok(())
     })
 }
 
@@ -488,7 +501,14 @@ pub unsafe extern "C" fn dynibo_robot_set_base_frame(
     call(|| {
         let robot = unsafe { required_mut(robot, "robot") }?;
         let frame = frame_from_pose(unsafe { required_ref(frame, "frame") }?)?;
-        robot.inner.set_base_frame(frame).map_err(core_error)
+        robot.base = match robot.inner.base_mode() {
+            BaseMode::Fixed => BaseState::fixed_at(frame).expect("C pose was already validated"),
+            BaseMode::Floating => {
+                BaseState::new(frame, robot.base.velocity(), robot.base.acceleration())
+                    .expect("C pose and existing base motion were already validated")
+            }
+        };
+        Ok(())
     })
 }
 
@@ -590,7 +610,7 @@ pub unsafe extern "C" fn dynibo_forward_kinematics(
             .ok_or_else(|| invalid(format!("invalid link id {target}")))?;
         let frame = robot
             .inner
-            .forward_kinematics(q, link, &mut workspace.inner)
+            .forward_kinematics(&robot.base, q, link, &mut workspace.inner)
             .map_err(core_error)?;
         *output = pose_from_frame(&frame);
         Ok(())
@@ -626,7 +646,7 @@ pub unsafe extern "C" fn dynibo_jacobian(
             .ok_or_else(|| invalid(format!("invalid link id {target}")))?;
         robot
             .inner
-            .jacobian(q, link, &mut workspace.inner, output)
+            .jacobian(&robot.base, q, link, &mut workspace.inner, output)
             .map_err(core_error)
     })
 }
@@ -665,7 +685,7 @@ pub unsafe extern "C" fn dynibo_jacobian_derivative(
             .ok_or_else(|| invalid(format!("invalid link id {target}")))?;
         robot
             .inner
-            .jacobian_derivative(q, qd, link, &mut workspace.inner, output)
+            .jacobian_derivative(&robot.base, q, qd, link, &mut workspace.inner, output)
             .map_err(core_error)
     })
 }
@@ -694,7 +714,7 @@ pub unsafe extern "C" fn dynibo_mass_matrix(
         let output = unsafe { output_slice(output, output_len, "output") }?;
         robot
             .inner
-            .mass_matrix(q, &mut workspace.inner, output)
+            .mass_matrix(&robot.base, q, &mut workspace.inner, output)
             .map_err(core_error)
     })
 }
@@ -725,7 +745,7 @@ pub unsafe extern "C" fn dynibo_velocity_product_forces(
         let output = unsafe { output_slice(output, output_len, "output") }?;
         robot
             .inner
-            .velocity_product_forces(q, qd, &mut workspace.inner, output)
+            .velocity_product_forces(&robot.base, q, qd, &mut workspace.inner, output)
             .map_err(core_error)
     })
 }
@@ -762,6 +782,7 @@ pub unsafe extern "C" fn dynibo_inverse_kinematics(
         robot
             .inner
             .inverse_kinematics(
+                &robot.base,
                 initial_q,
                 link,
                 &desired,
@@ -811,7 +832,7 @@ pub unsafe extern "C" fn dynibo_forward_velocity_kinematics(
             .ok_or_else(|| invalid(format!("invalid link id {target}")))?;
         let value = robot
             .inner
-            .forward_velocity_kinematics(q, qd, link, &tool, &mut workspace.inner)
+            .forward_velocity_kinematics(&robot.base, q, qd, link, &tool, &mut workspace.inner)
             .map_err(core_error)?;
         *output = twist_to_c(value);
         Ok(())
@@ -850,7 +871,7 @@ pub unsafe extern "C" fn dynibo_forward_acceleration_kinematics(
             .ok_or_else(|| invalid(format!("invalid link id {target}")))?;
         let value = robot
             .inner
-            .forward_acceleration_kinematics(q, qd, qdd, link, &mut workspace.inner)
+            .forward_acceleration_kinematics(&robot.base, q, qd, qdd, link, &mut workspace.inner)
             .map_err(core_error)?;
         *output = twist_to_c(value);
         Ok(())
@@ -882,7 +903,7 @@ pub unsafe extern "C" fn dynibo_gravity(
         let output = unsafe { output_slice(output, output_len, "output") }?;
         robot
             .inner
-            .gravity(q, loads, &mut workspace.inner, output)
+            .gravity(&robot.base, q, loads, &mut workspace.inner, output)
             .map_err(core_error)
     })
 }
@@ -919,7 +940,7 @@ pub unsafe extern "C" fn dynibo_inverse_dynamics(
         let output = unsafe { output_slice(output, output_len, "output") }?;
         robot
             .inner
-            .inverse_dynamics(q, qd, qdd, loads, &mut workspace.inner, output)
+            .inverse_dynamics(&robot.base, q, qd, qdd, loads, &mut workspace.inner, output)
             .map_err(core_error)
     })
 }
@@ -1055,6 +1076,27 @@ mod tests {
             };
             assert_eq!(
                 dynibo_robot_set_floating_base_state(floating, &identity, velocity, acceleration),
+                DyniboStatus::Ok
+            );
+            let invalid_velocity = DyniboTwist {
+                angular: [f64::NAN, 0.0, 0.0],
+                linear: [0.0; 3],
+            };
+            assert_eq!(
+                dynibo_robot_set_floating_base_state(
+                    floating,
+                    &identity,
+                    invalid_velocity,
+                    acceleration,
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            let shifted = DyniboPose {
+                translation: [0.3, -0.2, 0.1],
+                ..identity
+            };
+            assert_eq!(
+                dynibo_robot_set_base_frame(floating, &shifted),
                 DyniboStatus::Ok
             );
             assert_eq!(
@@ -1221,6 +1263,16 @@ mod tests {
             assert_eq!(
                 dynibo_robot_from_urdf_with_base(path.as_ptr(), 99, &mut rejected),
                 DyniboStatus::InvalidArgument
+            );
+            assert!(rejected.is_null());
+            let missing = CString::new("/definitely/missing/dynibo.urdf").unwrap();
+            assert_eq!(
+                dynibo_robot_from_urdf_with_base(
+                    missing.as_ptr(),
+                    DYNIBO_BASE_FIXED,
+                    &mut rejected,
+                ),
+                DyniboStatus::ModelError
             );
             assert!(rejected.is_null());
         }

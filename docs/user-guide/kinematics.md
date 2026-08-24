@@ -52,13 +52,14 @@ floating-base inverse kinematics is not currently supported.
 === "Rust"
 
     ```rust
-    let pose = robot.forward_kinematics(&q, target, &mut workspace)?;
-    robot.jacobian(&q, target, &mut workspace, &mut jacobian)?;
+    let base = BaseState::fixed();
+    let pose = robot.forward_kinematics(&base, &q, target, &mut workspace)?;
+    robot.jacobian(&base, &q, target, &mut workspace, &mut jacobian)?;
     let velocity = robot.forward_velocity_kinematics(
-        &q, &qd, target, &Frame::identity(), &mut workspace)?;
+        &base, &q, &qd, target, &Frame::identity(), &mut workspace)?;
     let mut solution = vec![0.0; robot.joint_count()];
     robot.inverse_kinematics(
-        &initial_q, target, &desired, options,
+        &base, &initial_q, target, &desired, options,
         &mut workspace, &mut solution)?;
     ```
 

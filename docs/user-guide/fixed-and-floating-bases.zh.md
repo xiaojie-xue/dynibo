@@ -5,20 +5,23 @@ Base mode 决定根节点运动是否作为广义自由度参与计算。它在�
 
 ## 固定基
 
-固定基机器人满足 `G = J`。仍然可以通过 `set_base_frame` 将根节点放置在世界坐标系
-中的任意位置；“固定”表示该位姿是给定状态，而不是需要求解的广义坐标。
+固定基机器人满足 `G = J`。Rust 中，`BaseState::fixed()` 表示 identity 位姿和零运动，
+`BaseState::fixed_at(frame)` 可以指定其他世界位姿；“固定”表示该位姿是给定状态，
+而不是需要求解的广义坐标。
 
 ## 浮动基
 
 浮动基机器人满足 `G = J + 6`，广义量最前面是世界坐标系下的角运动和线运动。
-执行依赖速度或加速度的计算前，应设置完整基座状态：
+执行依赖速度或加速度的计算时，应传入完整基座状态：
 
 === "Rust"
 
     ```rust
-    let mut robot = Robot::from_urdf_with_base(
+    let robot = Robot::from_urdf_with_base(
         "robot.urdf", BaseMode::Floating)?;
-    robot.set_floating_base_state(frame, velocity, acceleration)?;
+    let base = BaseState::new(frame, velocity, acceleration)?;
+    robot.inverse_dynamics(
+        &base, &q, &qd, &qdd, &loads, &mut workspace, &mut forces)?;
     ```
 
 === "Python"
@@ -44,15 +47,16 @@ Base mode 决定根节点运动是否作为广义自由度参与计算。它在�
         robot, &frame, velocity, acceleration));
     ```
 
-关节数组长度仍然是 `J`，不要在开头添加四元数或六个基座值。基座状态通过 robot 对象
-进入计算。
+关节数组长度仍然是 `J`，不要在开头添加四元数或六个基座值。Rust 计算方法显式接收
+`BaseState`；当前 Python 和 C 系列适配层为了 API 兼容仍保留 setter 状态。
 
 ## 对计算的影响
 
-- 位姿使用保存的 base frame。
-- 速度和加速度包含保存的基座运动。
+- 位姿使用传入的 base frame。
+- 速度和加速度包含传入的基座运动。
 - 雅可比矩阵增加开头六个基座列。
 - 质量矩阵和广义力增加六个基座行或元素。
 - 逆运动学目前只支持固定基模型。
 
-修改基座状态会改变 robot。不要在同一个 robot 正在计算时并发修改它。
+Rust 的基座状态是不可变计算输入，因此一个 robot 可以配合不同的状态和 workspace
+并发计算。

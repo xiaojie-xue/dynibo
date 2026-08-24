@@ -17,9 +17,10 @@ Rust 和 C 可以直接控制输出内存：
 === "Rust"
 
     ```rust
+    let base = BaseState::fixed();
     let mut workspace = robot.workspace();
     let mut jacobian = vec![0.0; 6 * robot.generalized_count()];
-    robot.jacobian(&q, target, &mut workspace, &mut jacobian)?;
+    robot.jacobian(&base, &q, target, &mut workspace, &mut jacobian)?;
     ```
 
 === "C"
