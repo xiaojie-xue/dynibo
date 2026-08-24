@@ -350,3 +350,45 @@ fn frame_for_target(frames: &[Frame], target_index: usize) -> Frame {
         frames[target_index - 1]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::Error;
+
+    fn robot() -> Robot {
+        Robot::from_urdf(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_arm.urdf"))
+            .unwrap()
+    }
+
+    #[test]
+    fn jacobian_apis_propagate_corrupted_workspace_buffer_errors() {
+        let robot = robot();
+        let base = BaseState::fixed();
+        let target = robot.link_id("test_link_4").unwrap();
+        let q = [0.0; 4];
+        let mut output = [0.0; 24];
+
+        let mut workspace = robot.workspace();
+        workspace.frames.pop();
+        assert!(matches!(
+            robot.jacobian(&base, &q, target, &mut workspace, &mut output),
+            Err(Error::WrongSliceLength {
+                slice: "frame workspace",
+                ..
+            })
+        ));
+
+        let mut workspace = robot.workspace();
+        workspace.jacobian.pop();
+        assert!(matches!(
+            robot.jacobian_derivative(&base, &q, &q, target, &mut workspace, &mut output,),
+            Err(Error::WrongSliceLength {
+                slice: "jacobian output",
+                ..
+            })
+        ));
+    }
+}

@@ -105,13 +105,6 @@ fn convert_urdf(robot: &Robot) -> Result<Tree> {
     while parent_index < topological_source_indices.len() {
         let parent_source_index = topological_source_indices[parent_index];
         for &(child_source_index, joint_source_index) in &children_by_parent[parent_source_index] {
-            if let Some(first_index) = discovered[child_source_index] {
-                return Err(Error::InvalidModel(format!(
-                    "link {} is reached more than once (first index {first_index})",
-                    robot.links[child_source_index].name
-                )));
-            }
-
             let child_index = links.len();
             discovered[child_source_index] = Some(child_index);
             topological_source_indices.push(child_source_index);

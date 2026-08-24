@@ -761,6 +761,19 @@ fn fixed_joint_has_constant_pose_and_no_motion_or_generalized_force() {
         epsilon = 1.0e-12
     );
     assert_relative_eq!(
+        arm.test_forward_velocity_kinematics(
+            &zero,
+            &zero,
+            target,
+            &Frame::identity(),
+            &Frame::identity(),
+        )
+        .unwrap()
+        .to_vector(),
+        Twist::zeros().to_vector(),
+        epsilon = 1.0e-12
+    );
+    assert_relative_eq!(
         arm.test_forward_acceleration_kinematics(&zero, &zero, &zero, target)
             .unwrap()
             .to_vector(),

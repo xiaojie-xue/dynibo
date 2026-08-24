@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use approx::assert_relative_eq;
-use dynibo::{Frame, IndexedLoad, Robot, Workspace, Wrench};
+use dynibo::{BaseMode, BaseState, Frame, IndexedLoad, Robot, Twist, Workspace, Wrench};
 use nalgebra::{DMatrix, Vector3};
 
 fn tree_arm() -> Robot {
@@ -110,6 +110,26 @@ fn mass_matrix_matches_rnea_columns_and_keeps_structural_guarantees() {
             );
         }
     }
+}
+
+#[test]
+fn floating_mass_matrix_propagates_through_fixed_ancestors() {
+    let robot = Robot::from_urdf_with_base(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/oracle_mixed.urdf"),
+        BaseMode::Floating,
+    )
+    .unwrap();
+    let base = BaseState::new(Frame::identity(), Twist::zeros(), Twist::zeros()).unwrap();
+    let q = [0.3, -0.2, 0.4];
+    let generalized_count = robot.generalized_count();
+    let mut mass = vec![0.0; generalized_count * generalized_count];
+
+    robot
+        .mass_matrix(&base, &q, &mut robot.workspace(), &mut mass)
+        .unwrap();
+
+    let mass = DMatrix::from_column_slice(generalized_count, generalized_count, &mass);
+    assert_relative_eq!(mass, mass.transpose(), epsilon = 2.0e-12);
 }
 
 #[test]

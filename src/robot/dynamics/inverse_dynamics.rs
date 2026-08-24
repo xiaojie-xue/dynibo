@@ -463,3 +463,69 @@ impl Robot {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::Error;
+
+    fn robot() -> Robot {
+        Robot::from_urdf(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_arm.urdf"))
+            .unwrap()
+    }
+
+    fn assert_wrong_workspace_length<T>(result: Result<T>, slice: &'static str) {
+        assert!(matches!(
+            result,
+            Err(Error::WrongSliceLength {
+                slice: actual,
+                ..
+            }) if actual == slice
+        ));
+    }
+
+    #[test]
+    fn dynamics_kernels_reject_corrupted_workspace_buffers() {
+        let robot = robot();
+        let base = BaseState::fixed();
+        let q = [0.0; 4];
+        let mut output = [0.0; 4];
+
+        let mut workspace = robot.workspace();
+        workspace.frames.pop();
+        assert_wrong_workspace_length(
+            robot.velocity_product_forces(&base, &q, &q, &mut workspace, &mut output),
+            "transform workspace",
+        );
+
+        let mut workspace = robot.workspace();
+        workspace.frames.pop();
+        assert_wrong_workspace_length(
+            robot.inverse_dynamics(&base, &q, &q, &q, &[], &mut workspace, &mut output),
+            "transform workspace",
+        );
+
+        let mut workspace = robot.workspace();
+        workspace.frames.pop();
+        assert_wrong_workspace_length(
+            robot.gravity(&base, &q, &[], &mut workspace, &mut output),
+            "transform workspace",
+        );
+
+        let mut workspace = robot.workspace();
+        workspace.angular_accelerations.pop();
+        assert_wrong_workspace_length(
+            robot.gravity(&base, &q, &[], &mut workspace, &mut output),
+            "gravity workspace",
+        );
+
+        let mut workspace = robot.workspace();
+        workspace.link_loads.pop();
+        assert_wrong_workspace_length(
+            robot.gravity(&base, &q, &[], &mut workspace, &mut output),
+            "load workspace",
+        );
+    }
+}
