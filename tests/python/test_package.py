@@ -28,7 +28,7 @@ class PackageTests(unittest.TestCase):
         self.q = [0.0] * self.robot.joint_count
 
     def test_model_and_kinematics(self) -> None:
-        self.assertEqual(dynibo.__version__, "0.2.0")
+        self.assertEqual(dynibo.__version__, "0.3.0")
         self.assertEqual(self.robot.name, "test_arm")
         self.assertEqual(self.robot.joint_count, 4)
         self.assertEqual(self.robot.link_count, 5)

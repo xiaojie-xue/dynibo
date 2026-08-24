@@ -55,7 +55,7 @@ class PlatformWheel(bdist_wheel):
 
 setup(
     name="dynibo",
-    version="0.2.0",
+    version="0.3.0",
     description="Python bindings for tree-structured robot kinematics and dynamics",
     author="Xiaojie Xue",
     long_description=(ROOT / "bindings/python/README.md").read_text(encoding="utf-8"),

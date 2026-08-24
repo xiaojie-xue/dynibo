@@ -24,7 +24,7 @@ static void check(DyniboStatus status) {
 
 int main(int argc, char **argv) {
     CHECK(argc == 2);
-    CHECK(strcmp(dynibo_version(), "0.2.0") == 0);
+    CHECK(strcmp(dynibo_version(), "0.3.0") == 0);
     CHECK(dynibo_robot_name(NULL) == NULL);
     CHECK(dynibo_robot_joint_count(NULL) == 0);
     CHECK(dynibo_robot_link_count(NULL) == 0);

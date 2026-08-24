@@ -37,7 +37,7 @@ extern "C" {
 /** Compile-time major version. */
 #define DYNIBO_VERSION_MAJOR 0
 /** Compile-time minor version. */
-#define DYNIBO_VERSION_MINOR 2
+#define DYNIBO_VERSION_MINOR 3
 /** Compile-time patch version. */
 #define DYNIBO_VERSION_PATCH 0
 
