@@ -502,12 +502,12 @@ pub unsafe extern "C" fn dynibo_robot_set_base_frame(
         let robot = unsafe { required_mut(robot, "robot") }?;
         let frame = frame_from_pose(unsafe { required_ref(frame, "frame") }?)?;
         robot.base = match robot.inner.base_mode() {
-            BaseMode::Fixed => BaseState::fixed_at(frame),
+            BaseMode::Fixed => BaseState::fixed_at(frame).expect("C pose was already validated"),
             BaseMode::Floating => {
                 BaseState::new(frame, robot.base.velocity(), robot.base.acceleration())
+                    .expect("C pose and existing base motion were already validated")
             }
-        }
-        .map_err(core_error)?;
+        };
         Ok(())
     })
 }
@@ -1078,6 +1078,27 @@ mod tests {
                 dynibo_robot_set_floating_base_state(floating, &identity, velocity, acceleration),
                 DyniboStatus::Ok
             );
+            let invalid_velocity = DyniboTwist {
+                angular: [f64::NAN, 0.0, 0.0],
+                linear: [0.0; 3],
+            };
+            assert_eq!(
+                dynibo_robot_set_floating_base_state(
+                    floating,
+                    &identity,
+                    invalid_velocity,
+                    acceleration,
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            let shifted = DyniboPose {
+                translation: [0.3, -0.2, 0.1],
+                ..identity
+            };
+            assert_eq!(
+                dynibo_robot_set_base_frame(floating, &shifted),
+                DyniboStatus::Ok
+            );
             assert_eq!(
                 dynibo_robot_set_floating_base_state(
                     ptr::null_mut(),
@@ -1242,6 +1263,16 @@ mod tests {
             assert_eq!(
                 dynibo_robot_from_urdf_with_base(path.as_ptr(), 99, &mut rejected),
                 DyniboStatus::InvalidArgument
+            );
+            assert!(rejected.is_null());
+            let missing = CString::new("/definitely/missing/dynibo.urdf").unwrap();
+            assert_eq!(
+                dynibo_robot_from_urdf_with_base(
+                    missing.as_ptr(),
+                    DYNIBO_BASE_FIXED,
+                    &mut rejected,
+                ),
+                DyniboStatus::ModelError
             );
             assert!(rejected.is_null());
         }

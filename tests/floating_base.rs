@@ -45,6 +45,16 @@ fn assert_slice_close(actual: &[f64], expected: &[f64], tolerance: f64) {
     }
 }
 
+fn assert_acceleration_error<T>(result: dynibo::Result<T>) {
+    assert!(matches!(
+        result,
+        Err(Error::InvalidBaseState {
+            field: "acceleration",
+            ..
+        })
+    ));
+}
+
 #[test]
 fn base_mode_state_dimensions_and_ik_contract_are_explicit() {
     let fixed = Robot::from_urdf(
@@ -55,11 +65,20 @@ fn base_mode_state_dimensions_and_ik_contract_are_explicit() {
     assert_eq!(fixed.base_dof_count(), 0);
     assert_eq!(fixed.generalized_count(), fixed.joint_count());
     let zero = BaseState::fixed();
+    assert_eq!(BaseState::default(), zero);
     assert_eq!(zero.frame(), &Frame::identity());
     assert_eq!(zero.velocity(), Twist::zeros());
     assert_eq!(zero.acceleration(), Twist::zeros());
     assert!(matches!(
         BaseState::fixed_at(Frame::translation(f64::NAN, 0.0, 0.0)),
+        Err(Error::InvalidBaseState { field: "frame", .. })
+    ));
+    assert!(matches!(
+        BaseState::new(
+            Frame::translation(f64::NAN, 0.0, 0.0),
+            Twist::zeros(),
+            Twist::zeros(),
+        ),
         Err(Error::InvalidBaseState { field: "frame", .. })
     ));
     let fixed_state = BaseState::fixed_at(base_frame()).unwrap();
@@ -156,6 +175,86 @@ fn base_mode_state_dimensions_and_ik_contract_are_explicit() {
             &mut output,
         ),
         Err(Error::FloatingBaseIkUnsupported)
+    ));
+}
+
+#[test]
+fn fixed_base_calculations_reject_nonzero_base_acceleration() {
+    let robot = Robot::from_urdf(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/floating_arm.urdf"),
+    )
+    .unwrap();
+    let target = robot.link_id("tool").unwrap();
+    let invalid_base = BaseState::new(
+        Frame::identity(),
+        Twist::zeros(),
+        Twist::new(Vector3::x(), Vector3::zeros()),
+    )
+    .unwrap();
+    let q = [0.0; 2];
+    let mut workspace = robot.workspace();
+    let mut vector = [0.0; 2];
+    let mut matrix = [0.0; 4];
+    let mut jacobian = [0.0; 12];
+
+    assert_acceleration_error(robot.forward_kinematics(&invalid_base, &q, target, &mut workspace));
+    assert_acceleration_error(robot.forward_velocity_kinematics(
+        &invalid_base,
+        &q,
+        &q,
+        target,
+        &Frame::identity(),
+        &mut workspace,
+    ));
+    assert_acceleration_error(robot.forward_acceleration_kinematics(
+        &invalid_base,
+        &q,
+        &q,
+        &q,
+        target,
+        &mut workspace,
+    ));
+    assert_acceleration_error(robot.jacobian(
+        &invalid_base,
+        &q,
+        target,
+        &mut workspace,
+        &mut jacobian,
+    ));
+    assert_acceleration_error(robot.jacobian_derivative(
+        &invalid_base,
+        &q,
+        &q,
+        target,
+        &mut workspace,
+        &mut jacobian,
+    ));
+    assert_acceleration_error(robot.mass_matrix(&invalid_base, &q, &mut workspace, &mut matrix));
+    assert_acceleration_error(robot.velocity_product_forces(
+        &invalid_base,
+        &q,
+        &q,
+        &mut workspace,
+        &mut vector,
+    ));
+    assert_acceleration_error(robot.gravity(&invalid_base, &q, &[], &mut workspace, &mut vector));
+    assert_acceleration_error(robot.inverse_dynamics(
+        &invalid_base,
+        &q,
+        &q,
+        &q,
+        &[],
+        &mut workspace,
+        &mut vector,
+    ));
+    assert_acceleration_error(robot.inverse_kinematics(
+        &invalid_base,
+        &q,
+        target,
+        &Frame::identity(),
+        InverseKinematicsOptions::default(),
+        &mut workspace,
+        &mut vector,
     ));
 }
 

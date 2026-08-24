@@ -29,7 +29,7 @@ impl Robot {
         self.validate_slice("q", q)?;
         let target_index = self.validate_link_id(target)?;
         let depth = self.prepare_ancestor_path(target_index, &mut workspace.ancestor_path);
-        Ok(*base.frame() * self.target_frame_kernel(q, &workspace.ancestor_path[..depth])?)
+        Ok(*base.frame() * self.target_frame_kernel(q, &workspace.ancestor_path[..depth]))
     }
 
     /// Computes runtime-sized spatial velocity at a point on a target link.
@@ -123,13 +123,12 @@ impl Robot {
         ))
     }
 
-    fn target_frame_kernel(&self, q: &[f64], path: &[usize]) -> Result<Frame> {
-        self.validate_slice("q", q)?;
+    fn target_frame_kernel(&self, q: &[f64], path: &[usize]) -> Frame {
         let mut frame = Frame::identity();
         for &joint_index in path.iter().rev() {
             frame *= self.joint_kinematics[joint_index].frame(self.joint_value(q, joint_index));
         }
-        Ok(frame)
+        frame
     }
 
     #[inline]
