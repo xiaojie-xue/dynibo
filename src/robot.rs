@@ -196,16 +196,29 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error if the file cannot be parsed or its graph is invalid.
+    /// Returns an error if the file cannot be parsed, its graph is invalid, or
+    /// a floating-base model's root link does not have positive mass.
     pub fn from_urdf_with_base(path: impl AsRef<Path>, base_mode: BaseMode) -> Result<Self> {
         let tree = load_urdf(path)?;
-        Ok(Self::from_tree(tree, base_mode))
+        Self::from_tree(tree, base_mode)
     }
 
-    fn from_tree(tree: Tree, base_mode: BaseMode) -> Self {
+    fn from_tree(tree: Tree, base_mode: BaseMode) -> Result<Self> {
+        if base_mode == BaseMode::Floating {
+            let root = tree
+                .links
+                .first()
+                .expect("validated robot tree has one root link");
+            if root.mass() <= 0.0 {
+                return Err(Error::InvalidModel(format!(
+                    "floating-base root link {} must have positive mass",
+                    root.name()
+                )));
+            }
+        }
         let model = Arc::new(Model::from_tree(tree, base_mode));
         let workspace = Workspace::new(model.as_ref());
-        Self { model, workspace }
+        Ok(Self { model, workspace })
     }
 
     /// Creates another calculation instance sharing this robot's immutable model.

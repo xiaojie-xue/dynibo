@@ -114,6 +114,12 @@ int main(int argc, char **argv) {
     for (size_t index = 0; index < n; ++index) {
         CHECK(fabs(output[index] - expected_dynamics[index]) < 2.0e-10);
     }
+    check(dynibo_forward_dynamics(
+        robot, workspace, reference_q, reference_qd, n,
+        expected_dynamics, n, NULL, 0, output, n));
+    for (size_t index = 0; index < n; ++index) {
+        CHECK(fabs(output[index] - reference_qdd[index]) < 2.0e-10);
+    }
 
     const double zero_qdd[4] = {0.0, 0.0, 0.0, 0.0};
     check(dynibo_mass_matrix(robot, workspace, reference_q, n, square, n * n));
@@ -189,6 +195,10 @@ int main(int argc, char **argv) {
         == DYNIBO_STATUS_INVALID_ARGUMENT);
     CHECK(dynibo_velocity_product_forces(
         robot, workspace, reference_q, reference_qd, n - 1, output, n)
+        == DYNIBO_STATUS_INVALID_ARGUMENT);
+    CHECK(dynibo_forward_dynamics(
+        robot, workspace, reference_q, reference_qd, n,
+        expected_dynamics, n - 1, NULL, 0, output, n)
         == DYNIBO_STATUS_INVALID_ARGUMENT);
     CHECK(dynibo_jacobian_derivative(
         robot, workspace, reference_q, reference_qd, n, target,

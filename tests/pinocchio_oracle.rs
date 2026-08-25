@@ -2,7 +2,9 @@
 
 use std::{ffi::CString, path::PathBuf, ptr::NonNull};
 
-use dynibo::{BaseMode, Frame, IndexedLoad, InverseKinematicsOptions, Robot, Twist, Wrench};
+use dynibo::{
+    BaseMode, BaseState, Frame, IndexedLoad, InverseKinematicsOptions, Robot, Twist, Wrench,
+};
 use nalgebra::{Matrix3, Rotation3, Translation3, UnitQuaternion, Vector3};
 
 unsafe extern "C" {
@@ -71,6 +73,13 @@ unsafe extern "C" {
         qd: *const f64,
         qdd: *const f64,
         torque: *mut f64,
+    );
+    fn dynibo_pinocchio_aba_values(
+        context: *mut std::ffi::c_void,
+        q: *const f64,
+        qd: *const f64,
+        torque: *const f64,
+        acceleration: *mut f64,
     );
     fn dynibo_pinocchio_mass_matrix_values(
         context: *mut std::ffi::c_void,
@@ -381,6 +390,28 @@ impl PinocchioContext {
             )
         };
         self.dynibo_joint_order(&pinocchio)
+    }
+
+    fn aba(&mut self, configuration: &[f64], velocity: &[f64], torque: &[f64]) -> Vec<f64> {
+        assert_eq!(torque.len(), self.joint_mappings.len());
+        let mut pinocchio_torque = vec![0.0; self.velocity_size];
+        for (joint, mapping) in self.joint_mappings.iter().enumerate() {
+            if let Some(index) = mapping.velocity_index {
+                pinocchio_torque[index] = torque[joint];
+            }
+        }
+        let mut pinocchio_acceleration = vec![0.0; self.velocity_size];
+        // SAFETY: all buffers match the context dimensions.
+        unsafe {
+            dynibo_pinocchio_aba_values(
+                self.pointer.as_ptr(),
+                configuration.as_ptr(),
+                velocity.as_ptr(),
+                pinocchio_torque.as_ptr(),
+                pinocchio_acceleration.as_mut_ptr(),
+            )
+        };
+        self.dynibo_joint_order(&pinocchio_acceleration)
     }
 
     fn mass_matrix(&mut self, configuration: &[f64]) -> Vec<f64> {
@@ -1236,6 +1267,35 @@ fn mixed_joint_gravity_and_rnea_match_pinocchio() {
             1.0e-9,
             1.0e-10,
             &format!("RNEA sample {sample}"),
+        );
+    }
+}
+
+#[test]
+fn mixed_joint_aba_matches_pinocchio() {
+    let path = fixture();
+    let mut robot = Robot::from_urdf(&path).unwrap();
+    let mut pinocchio = PinocchioContext::new(&robot, &path, "tool");
+
+    for sample in 0..32 {
+        let (q, qd, _) = deterministic_mixed_state(sample);
+        let zero = [0.0; 3];
+        let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero);
+        let torque: [f64; 3] = std::array::from_fn(|joint| {
+            let phase = (sample + 1) as f64 * (joint + 2) as f64 * 0.413;
+            8.0 * phase.sin()
+        });
+        let mut actual = [f64::NAN; 3];
+        robot
+            .forward_dynamics(&BaseState::fixed(), &q, &qd, &torque, &[], &mut actual)
+            .unwrap();
+        let expected = pinocchio.aba(&pin_q, &pin_qd, &torque);
+        assert_close(
+            &actual,
+            &expected,
+            2.0e-9,
+            2.0e-10,
+            &format!("ABA sample {sample}"),
         );
     }
 }

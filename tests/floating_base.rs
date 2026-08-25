@@ -167,6 +167,19 @@ fn base_mode_state_dimensions_and_ik_contract_are_explicit() {
 }
 
 #[test]
+fn floating_base_requires_positive_root_mass_at_model_load() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/fixed_arm.urdf");
+    Robot::from_urdf(&path).expect("a massless root remains valid for a fixed base");
+
+    let error = Robot::from_urdf_with_base(&path, BaseMode::Floating).unwrap_err();
+    assert!(matches!(
+        error,
+        Error::InvalidModel(ref message)
+            if message == "floating-base root link base must have positive mass"
+    ));
+}
+
+#[test]
 fn fixed_base_calculations_reject_nonzero_base_acceleration() {
     let mut robot = Robot::from_urdf(
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/floating_arm.urdf"),

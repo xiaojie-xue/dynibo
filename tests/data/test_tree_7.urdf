@@ -1,6 +1,12 @@
 <?xml version="1.0"?>
 <robot name="test_tree_7">
-  <link name="base"/>
+  <link name="base">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <mass value="0.8"/>
+      <inertia ixx="0.02" ixy="0" ixz="0" iyy="0.02" iyz="0" izz="0.02"/>
+    </inertial>
+  </link>
 
   <link name="trunk">
     <inertial>

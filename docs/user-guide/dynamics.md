@@ -38,6 +38,21 @@ joint velocity or acceleration.
 state, supplied base motion, gravity, and optional external loads. With a
 stationary base and no loads, it satisfies the manipulator equation above.
 
+## Forward dynamics
+
+`forward_dynamics` uses the linear-time articulated-body algorithm (ABA) to
+solve
+
+$$
+\dot\nu = M(q)^{-1}\left(\tau-C(q,\nu)\nu-g(q)-\tau_{\mathrm{load}}\right).
+$$
+
+For a floating base, input forces and output accelerations begin with
+world-frame angular and linear base components. The supplied base pose and
+velocity participate in the calculation; a floating base's stored acceleration
+is ignored because it is part of the result. A singular joint or floating-base articulated
+inertia produces a solver error rather than non-finite acceleration.
+
 ## Calling the operations
 
 === "Rust"
@@ -49,6 +64,8 @@ stationary base and no loads, it satisfies the manipulator equation above.
     robot.gravity(&base, &q, &loads, &mut workspace, &mut gravity)?;
     robot.inverse_dynamics(
         &base, &q, &qd, &qdd, &loads, &mut workspace, &mut forces)?;
+    robot.forward_dynamics(
+        &base, &q, &qd, &forces, &loads, &mut accelerations)?;
     ```
 
 === "Python"
@@ -58,6 +75,7 @@ stationary base and no loads, it satisfies the manipulator equation above.
     velocity = robot.velocity_product_forces(q, qd)
     gravity = robot.gravity(q, loads)
     forces = robot.inverse_dynamics(q, qd, qdd, loads)
+    accelerations = robot.forward_dynamics(q, qd, forces, loads)
     ```
 
 === "C++"
@@ -67,6 +85,7 @@ stationary base and no loads, it satisfies the manipulator equation above.
     const auto velocity = robot.velocity_product_forces(q, qd);
     const auto gravity = robot.gravity(q, loads);
     const auto forces = robot.inverse_dynamics(q, qd, qdd, loads);
+    const auto accelerations = robot.forward_dynamics(q, qd, forces, loads);
     ```
 
 === "C"
@@ -79,6 +98,9 @@ stationary base and no loads, it satisfies the manipulator equation above.
     check(dynibo_inverse_dynamics(
         robot, workspace, q, qd, qdd, J,
         loads, load_count, forces, G));
+    check(dynibo_forward_dynamics(
+        robot, workspace, q, qd, J, forces, G,
+        loads, load_count, accelerations, G));
     ```
 
 See [External Loads](external-loads.md) before supplying loads and [Frames and

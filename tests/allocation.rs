@@ -66,6 +66,7 @@ fn floating_calculations_do_not_allocate_after_robot_creation() {
     let mut derivative = [0.0; 48];
     let mut matrix = [0.0; 64];
     let mut output = [0.0; 8];
+    let mut forward_output = [0.0; 8];
 
     ALLOCATIONS.store(0, Ordering::Relaxed);
     COUNTING.store(true, Ordering::SeqCst);
@@ -93,6 +94,9 @@ fn floating_calculations_do_not_allocate_after_robot_creation() {
         robot
             .inverse_dynamics(&base, &q, &qd, &qdd, &[], &mut output)
             .unwrap();
+        robot
+            .forward_dynamics(&base, &q, &qd, &output, &[], &mut forward_output)
+            .unwrap();
         black_box((&jacobian, &derivative, &matrix, &output));
     }
     COUNTING.store(false, Ordering::SeqCst);
@@ -117,6 +121,7 @@ fn dynamic_calculations_do_not_allocate_after_robot_creation() {
     let mut mass = [0.0; 16];
     let mut velocity_product = [0.0; 4];
     let mut output = [0.0; 4];
+    let mut forward_output = [0.0; 4];
     let desired = robot
         .forward_kinematics(&dynibo::BaseState::fixed(), &q, target_id)
         .unwrap();
@@ -188,6 +193,16 @@ fn dynamic_calculations_do_not_allocate_after_robot_creation() {
             .unwrap();
         robot
             .inverse_dynamics(&dynibo::BaseState::fixed(), &q, &qd, &qdd, &[], &mut output)
+            .unwrap();
+        robot
+            .forward_dynamics(
+                &dynibo::BaseState::fixed(),
+                &q,
+                &qd,
+                &output,
+                &[],
+                &mut forward_output,
+            )
             .unwrap();
         robot
             .inverse_kinematics(

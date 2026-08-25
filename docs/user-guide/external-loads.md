@@ -1,7 +1,10 @@
 # External Loads
 
-Gravity and inverse dynamics can include wrenches applied to link origins. Each
-load pairs a model-scoped link ID with torque and force components.
+Gravity, inverse dynamics, and forward dynamics can include resisting wrenches
+at link origins. Each load pairs a model-scoped link ID with torque and force
+components. The wrench is added to the generalized effort required by inverse
+dynamics and subtracted from the effort available to forward dynamics; use the
+opposite sign when starting from a physical force applied to the robot.
 
 ## Frame and point
 

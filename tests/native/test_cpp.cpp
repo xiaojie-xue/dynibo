@@ -52,6 +52,11 @@ int main(int argc, char** argv) {
         CHECK(std::abs(reference_gravity[index] - expected_gravity[index]) < 2.0e-10);
         CHECK(std::abs(reference_dynamics[index] - expected_dynamics[index]) < 2.0e-10);
     }
+    const auto recovered_acceleration =
+        assigned.forward_dynamics(reference_q, reference_qd, reference_dynamics);
+    for (std::size_t index = 0; index < reference_q.size(); ++index) {
+        CHECK(std::abs(recovered_acceleration[index] - reference_qdd[index]) < 2.0e-10);
+    }
 
     const auto mass = assigned.mass_matrix(reference_q);
     CHECK(mass.size() == reference_q.size() * reference_q.size());
@@ -126,6 +131,14 @@ int main(int argc, char** argv) {
     caught = false;
     try {
         static_cast<void>(assigned.inverse_dynamics(q, short_q, q));
+    } catch (const dynibo::Error& error) {
+        caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
+            && std::string(error.what()).find("same length") != std::string::npos;
+    }
+    CHECK(caught);
+    caught = false;
+    try {
+        static_cast<void>(assigned.forward_dynamics(q, short_q, q));
     } catch (const dynibo::Error& error) {
         caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
             && std::string(error.what()).find("same length") != std::string::npos;

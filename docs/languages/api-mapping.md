@@ -18,6 +18,7 @@ different numerical API.
 | Jacobian | `robot.jacobian` | `robot.jacobian` | `robot.jacobian` | `dynibo_jacobian` |
 | Mass matrix | `robot.mass_matrix` | `robot.mass_matrix` | `robot.mass_matrix` | `dynibo_mass_matrix` |
 | Inverse dynamics | `robot.inverse_dynamics` | `robot.inverse_dynamics` | `robot.inverse_dynamics` | `dynibo_inverse_dynamics` |
+| Forward dynamics | `robot.forward_dynamics` | `robot.forward_dynamics` | `robot.forward_dynamics` | `dynibo_forward_dynamics` |
 | Workspace | Explicit argument | Owned by `Robot` | Owned by `Robot` | Explicit handle |
 | Matrix output | Caller buffer | Flat tuple | Flat `std::vector` | Caller buffer |
 | Errors | `Result<T>` | Exceptions | `dynibo::Error` | `DyniboStatus` |

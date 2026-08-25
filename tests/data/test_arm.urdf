@@ -1,6 +1,12 @@
 <?xml version="1.0"?>
 <robot name="test_arm">
-  <link name="test_base_link"/>
+  <link name="test_base_link">
+    <inertial>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <mass value="1"/>
+      <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+    </inertial>
+  </link>
   <link name="test_link_1">
     <inertial>
       <origin rpy="0 0 0" xyz="-0.000384 -0.053925 0.104514"/>

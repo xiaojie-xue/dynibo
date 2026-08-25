@@ -34,6 +34,18 @@ $$
 `inverse_dynamics` 使用递归 Newton--Euler 算法，包含关节状态、保存的基座运动、
 重力和可选外部载荷。基座静止且无载荷时满足上面的动力学方程。
 
+## 正动力学
+
+`forward_dynamics` 使用线性时间复杂度的 articulated-body algorithm（ABA）求解
+
+$$
+\dot\nu = M(q)^{-1}\left(\tau-C(q,\nu)\nu-g(q)-\tau_{\mathrm{load}}\right).
+$$
+
+对于浮动基，输入力和输出加速度首先包含世界坐标系下的基座角分量、线分量。计算会使用
+传入的基座位姿和速度；浮动基保存的加速度会被忽略，因为它是计算结果的一部分。joint 或
+浮动基 articulated inertia 奇异时返回 solver error，而不是产生非有限加速度。
+
 ## 调用方式
 
 === "Rust"
@@ -45,6 +57,8 @@ $$
     robot.gravity(&base, &q, &loads, &mut workspace, &mut gravity)?;
     robot.inverse_dynamics(
         &base, &q, &qd, &qdd, &loads, &mut workspace, &mut forces)?;
+    robot.forward_dynamics(
+        &base, &q, &qd, &forces, &loads, &mut accelerations)?;
     ```
 
 === "Python"
@@ -54,6 +68,7 @@ $$
     velocity = robot.velocity_product_forces(q, qd)
     gravity = robot.gravity(q, loads)
     forces = robot.inverse_dynamics(q, qd, qdd, loads)
+    accelerations = robot.forward_dynamics(q, qd, forces, loads)
     ```
 
 === "C++"
@@ -63,6 +78,7 @@ $$
     const auto velocity = robot.velocity_product_forces(q, qd);
     const auto gravity = robot.gravity(q, loads);
     const auto forces = robot.inverse_dynamics(q, qd, qdd, loads);
+    const auto accelerations = robot.forward_dynamics(q, qd, forces, loads);
     ```
 
 === "C"
@@ -75,6 +91,9 @@ $$
     check(dynibo_inverse_dynamics(
         robot, workspace, q, qd, qdd, J,
         loads, load_count, forces, G));
+    check(dynibo_forward_dynamics(
+        robot, workspace, q, qd, J, forces, G,
+        loads, load_count, accelerations, G));
     ```
 
 传入载荷前请阅读[外部载荷](external-loads.md)，解释基座 wrench 或矩阵结果前请阅读

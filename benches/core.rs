@@ -166,6 +166,37 @@ fn benchmark_case(c: &mut Criterion, case: &mut BenchmarkCase) {
     });
     rnea.finish();
 
+    let mut generalized_forces = vec![0.0; n];
+    case.arm
+        .inverse_dynamics(
+            &case.base,
+            &case.q,
+            &case.qd,
+            &case.qdd,
+            &[],
+            &mut generalized_forces,
+        )
+        .unwrap();
+    let mut aba = c.benchmark_group(format!("aba/{size}"));
+    aba.throughput(Throughput::Elements(1));
+    let mut acceleration_output = vec![0.0; n];
+    aba.bench_function("dynibo", |b| {
+        b.iter(|| {
+            case.arm
+                .forward_dynamics(
+                    &case.base,
+                    black_box(&case.q),
+                    black_box(&case.qd),
+                    black_box(&generalized_forces),
+                    black_box(&[]),
+                    black_box(&mut acceleration_output),
+                )
+                .unwrap();
+            black_box(&acceleration_output);
+        });
+    });
+    aba.finish();
+
     let mut mass = c.benchmark_group(format!("mass_matrix/{size}"));
     mass.throughput(Throughput::Elements(1));
     let mut mass_output = vec![0.0; n * n];
@@ -250,6 +281,36 @@ fn benchmark_tree_case(c: &mut Criterion) {
         });
     });
     rnea.finish();
+
+    let mut generalized_forces = vec![0.0; case.arm.joint_count()];
+    case.arm
+        .inverse_dynamics(
+            &case.base,
+            &case.q,
+            &case.qd,
+            &case.qdd,
+            &loads,
+            &mut generalized_forces,
+        )
+        .unwrap();
+    let mut aba = c.benchmark_group("tree_aba/7joint_2leaf");
+    aba.throughput(Throughput::Elements(1));
+    aba.bench_function("two_leaf_loads", |b| {
+        b.iter(|| {
+            case.arm
+                .forward_dynamics(
+                    &case.base,
+                    black_box(&case.q),
+                    black_box(&case.qd),
+                    black_box(&generalized_forces),
+                    black_box(&loads),
+                    black_box(&mut output),
+                )
+                .unwrap();
+            black_box(&output);
+        });
+    });
+    aba.finish();
 }
 
 fn benchmark_target_depths(c: &mut Criterion) {

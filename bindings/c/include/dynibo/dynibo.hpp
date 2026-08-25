@@ -261,6 +261,23 @@ public:
         return result;
     }
 
+    /** @brief Computes articulated-body forward dynamics. */
+    std::vector<double> forward_dynamics(
+        const std::vector<double>& q, const std::vector<double>& qd,
+        const std::vector<double>& generalized_forces,
+        const std::vector<DyniboLoad>& loads = {}) {
+        if (q.size() != qd.size()) {
+            throw Error(DYNIBO_STATUS_INVALID_ARGUMENT,
+                        "q and qd must have the same length");
+        }
+        std::vector<double> result(generalized_count());
+        check(dynibo_forward_dynamics(
+            robot_, workspace_, q.data(), qd.data(), q.size(),
+            generalized_forces.data(), generalized_forces.size(),
+            loads.data(), loads.size(), result.data(), result.size()));
+        return result;
+    }
+
     /** @brief Returns the borrowed native robot handle for C API interoperation. */
     DyniboRobot* native_handle() noexcept { return robot_; }
     /** @brief Returns the borrowed native workspace handle for C API interoperation. */

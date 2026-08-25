@@ -71,6 +71,7 @@ dynamics interfaces:
 - `velocity_product_forces` — Coriolis and centrifugal generalized forces
 - `gravity` — gravity compensation with optional external loads
 - `inverse_dynamics` — recursive Newton–Euler inverse dynamics
+- `forward_dynamics` — linear-time articulated-body forward dynamics
 
 The API is built around a small set of types: `Robot`, `LinkId`,
 `Frame`, `Twist`, and `Wrench`. Rust, Python, C, and C++ interfaces share the
