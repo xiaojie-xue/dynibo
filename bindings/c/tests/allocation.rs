@@ -7,10 +7,11 @@ use std::{
 };
 
 use dynibo_c::{
-    DyniboLoad, DyniboPose, DyniboRobot, DyniboStatus, DyniboTwist, DyniboWorkspace,
-    dynibo_forward_dynamics, dynibo_forward_velocity_kinematics, dynibo_gravity,
+    DYNIBO_BASE_FLOATING, DyniboLoad, DyniboPose, DyniboRobot, DyniboStatus, DyniboTwist,
+    DyniboWorkspace, dynibo_forward_dynamics, dynibo_forward_velocity_kinematics, dynibo_gravity,
     dynibo_inverse_dynamics, dynibo_robot_destroy, dynibo_robot_from_urdf,
-    dynibo_robot_joint_count, dynibo_robot_link_id, dynibo_workspace_create,
+    dynibo_robot_from_urdf_with_base, dynibo_robot_generalized_count, dynibo_robot_joint_count,
+    dynibo_robot_link_id, dynibo_robot_set_floating_base_state, dynibo_workspace_create,
     dynibo_workspace_destroy,
 };
 
@@ -142,6 +143,102 @@ fn fixed_base_abi_hot_paths_do_not_allocate() {
                     1,
                     output.as_mut_ptr(),
                     output.len(),
+                ),
+                DyniboStatus::Ok
+            );
+        }
+        COUNTING.store(false, Ordering::SeqCst);
+        assert_eq!(ALLOCATIONS.load(Ordering::Relaxed), 0);
+
+        dynibo_workspace_destroy(workspace);
+        dynibo_robot_destroy(robot);
+    }
+}
+
+#[test]
+fn floating_base_abi_forward_dynamics_does_not_allocate() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("tests/data/floating_arm.urdf");
+    let path = CString::new(path.to_string_lossy().as_bytes()).unwrap();
+    let mut robot: *mut DyniboRobot = ptr::null_mut();
+    let mut workspace: *mut DyniboWorkspace = ptr::null_mut();
+    unsafe {
+        assert_eq!(
+            dynibo_robot_from_urdf_with_base(path.as_ptr(), DYNIBO_BASE_FLOATING, &mut robot,),
+            DyniboStatus::Ok
+        );
+        assert_eq!(
+            dynibo_workspace_create(robot, &mut workspace),
+            DyniboStatus::Ok
+        );
+        let frame = DyniboPose {
+            translation: [0.2, -0.3, 0.4],
+            rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
+        };
+        let velocity = DyniboTwist {
+            angular: [0.21, -0.17, 0.13],
+            linear: [-0.3, 0.2, 0.1],
+        };
+        let acceleration = DyniboTwist {
+            angular: [-0.11, 0.14, 0.09],
+            linear: [0.35, -0.22, 0.18],
+        };
+        assert_eq!(
+            dynibo_robot_set_floating_base_state(robot, &frame, velocity, acceleration),
+            DyniboStatus::Ok
+        );
+        let mut target = 0;
+        assert_eq!(
+            dynibo_robot_link_id(robot, c"tool".as_ptr(), &mut target),
+            DyniboStatus::Ok
+        );
+        let n = dynibo_robot_joint_count(robot);
+        let generalized_count = dynibo_robot_generalized_count(robot);
+        assert_eq!((n, generalized_count), (2, 8));
+        let q = [0.31, -0.27];
+        let qd = [-0.24, 0.35];
+        let qdd = [0.42, -0.28];
+        let load = DyniboLoad {
+            link_id: target,
+            torque: [-0.13, 0.21, 0.08],
+            force: [0.5, -0.4, 0.3],
+        };
+        let mut generalized_forces = [0.0; 8];
+        let mut recovered = [0.0; 8];
+
+        assert_eq!(
+            dynibo_inverse_dynamics(
+                robot,
+                workspace,
+                q.as_ptr(),
+                qd.as_ptr(),
+                qdd.as_ptr(),
+                n,
+                &load,
+                1,
+                generalized_forces.as_mut_ptr(),
+                generalized_forces.len(),
+            ),
+            DyniboStatus::Ok
+        );
+
+        ALLOCATIONS.store(0, Ordering::Relaxed);
+        COUNTING.store(true, Ordering::SeqCst);
+        for _ in 0..10 {
+            assert_eq!(
+                dynibo_forward_dynamics(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    qd.as_ptr(),
+                    n,
+                    generalized_forces.as_ptr(),
+                    generalized_forces.len(),
+                    &load,
+                    1,
+                    recovered.as_mut_ptr(),
+                    recovered.len(),
                 ),
                 DyniboStatus::Ok
             );

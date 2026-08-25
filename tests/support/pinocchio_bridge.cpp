@@ -270,6 +270,25 @@ void dynibo_pinocchio_aba_values(void* raw_context, const double* q, const doubl
       pinocchio::aba(context->model, context->data, configuration, velocity, generalized_force);
 }
 
+void dynibo_pinocchio_aba_with_link_load_values(
+    void* raw_context, const double* q, const double* qd, const double* torque,
+    const double* load, double* acceleration) noexcept {
+  auto* context = static_cast<PinocchioBenchContext*>(raw_context);
+  const ConfigMap configuration(q, context->model.nq);
+  const ConfigMap velocity(qd, context->model.nv);
+  const ConfigMap generalized_force(torque, context->model.nv);
+  const Eigen::Map<const Eigen::Vector3d> load_torque(load);
+  const Eigen::Map<const Eigen::Vector3d> load_force(load + 3);
+  const pinocchio::Force frame_load(load_force, load_torque);
+  pinocchio::container::aligned_vector<pinocchio::Force> external_forces(
+      context->model.njoints, pinocchio::Force::Zero());
+  const auto& frame = context->model.frames[context->target_frame];
+  external_forces[frame.parentJoint] = frame.placement.act(-frame_load);
+  Eigen::Map<Eigen::VectorXd> acceleration_map(acceleration, context->model.nv);
+  acceleration_map = pinocchio::aba(context->model, context->data, configuration,
+                                    velocity, generalized_force, external_forces);
+}
+
 void dynibo_pinocchio_mass_matrix_values(void* raw_context, const double* q,
                                        double* mass) noexcept {
   auto* context = static_cast<PinocchioBenchContext*>(raw_context);
