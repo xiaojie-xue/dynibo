@@ -2,7 +2,7 @@ use nalgebra::Vector3;
 
 use crate::{BaseState, Frame, JointType, Result};
 
-use super::super::{LinkId, Robot, Workspace};
+use super::super::{LinkId, Model, Robot, Workspace};
 
 struct JacobianScratch<'a> {
     frames: &'a mut [Frame],
@@ -20,6 +20,44 @@ struct JacobianDerivativeScratch<'a> {
 }
 
 impl Robot {
+    /// Writes a world-expressed `6 x G` geometric Jacobian in column-major order.
+    ///
+    /// Each column stores angular components followed by linear components at
+    /// the target-link origin. `G` is [`Robot::generalized_count`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid base state, input or output length, or link ID.
+    pub fn jacobian(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        target: LinkId,
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.model
+            .jacobian(base, q, target, &mut self.workspace, output)
+    }
+
+    /// Writes the time derivative of the geometric Jacobian in column-major order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid base state, input or output length, or link ID.
+    pub fn jacobian_derivative(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        qd: &[f64],
+        target: LinkId,
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.model
+            .jacobian_derivative(base, q, qd, target, &mut self.workspace, output)
+    }
+}
+
+impl Model {
     /// Writes a runtime-sized `6 x G` geometric Jacobian in column-major order.
     ///
     /// Each column stores `[angular_x, angular_y, angular_z, linear_x,
@@ -38,8 +76,8 @@ impl Robot {
     /// # Errors
     ///
     /// Returns an error unless `output.len() == 6 * generalized_count()`, or for an
-    /// invalid input length, link ID, or workspace.
-    pub fn jacobian(
+    /// invalid input length or link ID.
+    fn jacobian(
         &self,
         base: &BaseState,
         q: &[f64],
@@ -48,7 +86,6 @@ impl Robot {
         output: &mut [f64],
     ) -> Result<()> {
         self.validate_base_state(base)?;
-        self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         self.validate_slice_length(
             "jacobian output",
@@ -89,8 +126,8 @@ impl Robot {
     /// # Errors
     ///
     /// Returns an error unless `output.len() == 6 * generalized_count()`, or for an
-    /// invalid input length, link ID, or workspace.
-    pub fn jacobian_derivative(
+    /// invalid input length or link ID.
+    fn jacobian_derivative(
         &self,
         base: &BaseState,
         q: &[f64],
@@ -100,7 +137,6 @@ impl Robot {
         output: &mut [f64],
     ) -> Result<()> {
         self.validate_base_state(base)?;
-        self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
         self.validate_slice_length(
@@ -358,37 +394,34 @@ mod tests {
     use super::*;
     use crate::Error;
 
-    fn robot() -> Robot {
+    fn fixture() -> Robot {
         Robot::from_urdf(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_arm.urdf"))
             .unwrap()
     }
 
     #[test]
     fn jacobian_apis_propagate_corrupted_workspace_buffer_errors() {
-        let robot = robot();
+        let mut robot = fixture();
         let base = BaseState::fixed();
         let target = robot.link_id("test_link_4").unwrap();
         let q = [0.0; 4];
         let mut output = [0.0; 24];
 
-        let mut workspace = robot.workspace();
-        workspace.frames.pop();
+        robot.workspace.frames.pop();
         assert!(matches!(
-            robot.jacobian(&base, &q, target, &mut workspace, &mut output),
+            robot.jacobian(&base, &q, target, &mut output),
             Err(Error::WrongSliceLength {
                 slice: "frame workspace",
                 ..
             })
         ));
 
-        let mut workspace = robot.workspace();
-        workspace.jacobian.pop();
+        let mut robot = fixture();
+        let target = robot.link_id("test_link_4").unwrap();
+        robot.workspace.jacobian.pop();
         assert!(matches!(
-            robot.jacobian_derivative(&base, &q, &q, target, &mut workspace, &mut output,),
-            Err(Error::WrongSliceLength {
-                slice: "jacobian output",
-                ..
-            })
+            robot.jacobian_derivative(&base, &q, &q, target, &mut output,),
+            Err(Error::WrongSliceLength { .. })
         ));
     }
 }

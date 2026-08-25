@@ -22,7 +22,7 @@ The Jacobian is a flat column-major `6 x N` tuple. With NumPy, convert it using
 The root pose and floating-base motion are stored on `Robot` and are used
 consistently by every calculation. Use `set_base_frame()` for either base mode,
 or `set_floating_base_state()` to replace the complete floating-base state. Calls on one
-`Robot` are serialized so its native workspace can be shared safely between
+`Robot` are serialized so its native calculation storage can be shared safely between
 Python threads; use separate instances for true parallel execution.
 
 See the [Python API documentation](https://dynibo.readthedocs.io/) for complete

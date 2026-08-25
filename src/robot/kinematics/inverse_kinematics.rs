@@ -2,7 +2,7 @@ use nalgebra::{SMatrix, SVector};
 
 use crate::{BaseMode, BaseState, Error, Frame, Result};
 
-use super::super::{LinkId, Robot, Workspace};
+use super::super::{LinkId, Model, Robot, Workspace};
 
 /// Configuration for damped-least-squares inverse kinematics.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -40,6 +40,35 @@ struct IkScratch<'a> {
 }
 
 impl Robot {
+    /// Solves fixed-base inverse kinematics with damped least squares.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid inputs, a floating base, numerical failure,
+    /// joint-limit violation, or failure to converge.
+    #[allow(clippy::too_many_arguments)]
+    pub fn inverse_kinematics(
+        &mut self,
+        base: &BaseState,
+        initial_q: &[f64],
+        target: LinkId,
+        desired: &Frame,
+        options: InverseKinematicsOptions,
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.model.inverse_kinematics(
+            base,
+            initial_q,
+            target,
+            desired,
+            options,
+            &mut self.workspace,
+            output,
+        )
+    }
+}
+
+impl Model {
     /// Writes a runtime-sized inverse-kinematics solution using the supplied options.
     ///
     /// Each iteration applies a damped-least-squares update,
@@ -53,10 +82,10 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error for invalid lengths, link ID, workspace, solver input,
+    /// Returns an error for invalid lengths, link ID, solver input,
     /// numerical failure, limits, or non-convergence.
     #[allow(clippy::too_many_arguments)]
-    pub fn inverse_kinematics(
+    fn inverse_kinematics(
         &self,
         base: &BaseState,
         initial_q: &[f64],
@@ -67,7 +96,6 @@ impl Robot {
         output: &mut [f64],
     ) -> Result<()> {
         self.validate_base_state(base)?;
-        self.validate_workspace(workspace)?;
         if self.base_mode() == BaseMode::Floating {
             return Err(Error::FloatingBaseIkUnsupported);
         }

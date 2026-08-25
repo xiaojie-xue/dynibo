@@ -2,10 +2,24 @@ use nalgebra::{Matrix3, Vector3};
 
 use crate::{BaseMode, BaseState, JointType, Result, Wrench};
 
-use super::super::{FLOATING_BASE_DOF, Robot, Workspace};
+use super::super::{FLOATING_BASE_DOF, Model, Robot, Workspace};
 use super::{wrench_component, wrench_to_parent, write_wrench_to_column};
 
 impl Robot {
+    /// Writes the `G x G` mass matrix in column-major order.
+    ///
+    /// Rows and columns follow the generalized-vector ordering documented by
+    /// [`Robot::generalized_count`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid base state or input/output length.
+    pub fn mass_matrix(&mut self, base: &BaseState, q: &[f64], output: &mut [f64]) -> Result<()> {
+        self.model.mass_matrix(base, q, &mut self.workspace, output)
+    }
+}
+
+impl Model {
     /// Writes the runtime-sized `G x G` mass matrix in column-major order.
     ///
     /// Rows and columns follow the generalized-vector ordering: for a floating
@@ -22,8 +36,8 @@ impl Robot {
     /// # Errors
     ///
     /// Returns an error unless `output.len() == generalized_count().pow(2)`,
-    /// or for an invalid input length or workspace.
-    pub fn mass_matrix(
+    /// or for an invalid input length.
+    fn mass_matrix(
         &self,
         base: &BaseState,
         q: &[f64],
@@ -31,7 +45,6 @@ impl Robot {
         output: &mut [f64],
     ) -> Result<()> {
         self.validate_base_state(base)?;
-        self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         self.validate_slice_length(
             "mass matrix output",

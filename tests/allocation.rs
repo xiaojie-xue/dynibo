@@ -48,10 +48,10 @@ unsafe impl GlobalAlloc for CountingAllocator {
 }
 
 #[test]
-fn floating_calculations_do_not_allocate_after_workspace_creation() {
+fn floating_calculations_do_not_allocate_after_robot_creation() {
     let _guard = TEST_LOCK.lock().unwrap();
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/floating_arm.urdf");
-    let robot = Robot::from_urdf_with_base(path, BaseMode::Floating).unwrap();
+    let mut robot = Robot::from_urdf_with_base(path, BaseMode::Floating).unwrap();
     let target = robot.link_id("tool").unwrap();
     let q = [0.2, 0.1];
     let qd = [-0.3, 0.4];
@@ -62,7 +62,6 @@ fn floating_calculations_do_not_allocate_after_workspace_creation() {
         dynibo::Twist::zeros(),
     )
     .unwrap();
-    let mut workspace = robot.workspace();
     let mut jacobian = [0.0; 48];
     let mut derivative = [0.0; 48];
     let mut matrix = [0.0; 64];
@@ -71,45 +70,28 @@ fn floating_calculations_do_not_allocate_after_workspace_creation() {
     ALLOCATIONS.store(0, Ordering::Relaxed);
     COUNTING.store(true, Ordering::SeqCst);
     for _ in 0..10 {
-        black_box(
-            robot
-                .forward_kinematics(&base, &q, target, &mut workspace)
-                .unwrap(),
-        );
+        black_box(robot.forward_kinematics(&base, &q, target).unwrap());
+        robot.jacobian(&base, &q, target, &mut jacobian).unwrap();
         robot
-            .jacobian(&base, &q, target, &mut workspace, &mut jacobian)
-            .unwrap();
-        robot
-            .jacobian_derivative(&base, &q, &qd, target, &mut workspace, &mut derivative)
+            .jacobian_derivative(&base, &q, &qd, target, &mut derivative)
             .unwrap();
         black_box(
             robot
-                .forward_velocity_kinematics(
-                    &base,
-                    &q,
-                    &qd,
-                    target,
-                    &Frame::identity(),
-                    &mut workspace,
-                )
+                .forward_velocity_kinematics(&base, &q, &qd, target, &Frame::identity())
                 .unwrap(),
         );
         black_box(
             robot
-                .forward_acceleration_kinematics(&base, &q, &qd, &qdd, target, &mut workspace)
+                .forward_acceleration_kinematics(&base, &q, &qd, &qdd, target)
                 .unwrap(),
         );
+        robot.mass_matrix(&base, &q, &mut matrix).unwrap();
         robot
-            .mass_matrix(&base, &q, &mut workspace, &mut matrix)
+            .velocity_product_forces(&base, &q, &qd, &mut output)
             .unwrap();
+        robot.gravity(&base, &q, &[], &mut output).unwrap();
         robot
-            .velocity_product_forces(&base, &q, &qd, &mut workspace, &mut output)
-            .unwrap();
-        robot
-            .gravity(&base, &q, &[], &mut workspace, &mut output)
-            .unwrap();
-        robot
-            .inverse_dynamics(&base, &q, &qd, &qdd, &[], &mut workspace, &mut output)
+            .inverse_dynamics(&base, &q, &qd, &qdd, &[], &mut output)
             .unwrap();
         black_box((&jacobian, &derivative, &matrix, &output));
     }
@@ -121,33 +103,26 @@ fn floating_calculations_do_not_allocate_after_workspace_creation() {
 static ALLOCATOR: CountingAllocator = CountingAllocator;
 
 #[test]
-fn dynamic_calculations_do_not_allocate_after_workspace_creation() {
+fn dynamic_calculations_do_not_allocate_after_robot_creation() {
     let _guard = TEST_LOCK.lock().unwrap();
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_arm.urdf");
-    let robot = Robot::from_urdf(path).unwrap();
+    let mut robot = Robot::from_urdf(path).unwrap();
     let target_id = robot.link_id("test_link_4").unwrap();
     let q = [0.1, 0.8, -0.6, 0.3];
     let qd = [-0.2, 0.4, -0.1, 0.5];
     let qdd = [0.3, -0.2, 0.4, -0.1];
     let initial = [0.0; 4];
-    let mut workspace = robot.workspace();
     let mut jacobian = [0.0; 24];
     let mut jacobian_derivative = [0.0; 24];
     let mut mass = [0.0; 16];
     let mut velocity_product = [0.0; 4];
     let mut output = [0.0; 4];
     let desired = robot
-        .forward_kinematics(&dynibo::BaseState::fixed(), &q, target_id, &mut workspace)
+        .forward_kinematics(&dynibo::BaseState::fixed(), &q, target_id)
         .unwrap();
 
     robot
-        .jacobian(
-            &dynibo::BaseState::fixed(),
-            &q,
-            target_id,
-            &mut workspace,
-            &mut jacobian,
-        )
+        .jacobian(&dynibo::BaseState::fixed(), &q, target_id, &mut jacobian)
         .unwrap();
     robot
         .inverse_kinematics(
@@ -156,7 +131,6 @@ fn dynamic_calculations_do_not_allocate_after_workspace_creation() {
             target_id,
             &desired,
             InverseKinematicsOptions::default(),
-            &mut workspace,
             &mut output,
         )
         .unwrap();
@@ -166,29 +140,17 @@ fn dynamic_calculations_do_not_allocate_after_workspace_creation() {
     for _ in 0..10 {
         black_box(
             robot
-                .forward_kinematics(&dynibo::BaseState::fixed(), &q, target_id, &mut workspace)
+                .forward_kinematics(&dynibo::BaseState::fixed(), &q, target_id)
                 .unwrap(),
         );
         robot
-            .jacobian(
-                &dynibo::BaseState::fixed(),
-                &q,
-                target_id,
-                &mut workspace,
-                &mut jacobian,
-            )
+            .jacobian(&dynibo::BaseState::fixed(), &q, target_id, &mut jacobian)
             .unwrap();
         robot
-            .mass_matrix(&dynibo::BaseState::fixed(), &q, &mut workspace, &mut mass)
+            .mass_matrix(&dynibo::BaseState::fixed(), &q, &mut mass)
             .unwrap();
         robot
-            .velocity_product_forces(
-                &dynibo::BaseState::fixed(),
-                &q,
-                &qd,
-                &mut workspace,
-                &mut velocity_product,
-            )
+            .velocity_product_forces(&dynibo::BaseState::fixed(), &q, &qd, &mut velocity_product)
             .unwrap();
         robot
             .jacobian_derivative(
@@ -196,7 +158,6 @@ fn dynamic_calculations_do_not_allocate_after_workspace_creation() {
                 &q,
                 &qd,
                 target_id,
-                &mut workspace,
                 &mut jacobian_derivative,
             )
             .unwrap();
@@ -208,7 +169,6 @@ fn dynamic_calculations_do_not_allocate_after_workspace_creation() {
                     &qd,
                     target_id,
                     &Frame::identity(),
-                    &mut workspace,
                 )
                 .unwrap(),
         );
@@ -220,29 +180,14 @@ fn dynamic_calculations_do_not_allocate_after_workspace_creation() {
                     &qd,
                     &qdd,
                     target_id,
-                    &mut workspace,
                 )
                 .unwrap(),
         );
         robot
-            .gravity(
-                &dynibo::BaseState::fixed(),
-                &q,
-                &[],
-                &mut workspace,
-                &mut output,
-            )
+            .gravity(&dynibo::BaseState::fixed(), &q, &[], &mut output)
             .unwrap();
         robot
-            .inverse_dynamics(
-                &dynibo::BaseState::fixed(),
-                &q,
-                &qd,
-                &qdd,
-                &[],
-                &mut workspace,
-                &mut output,
-            )
+            .inverse_dynamics(&dynibo::BaseState::fixed(), &q, &qd, &qdd, &[], &mut output)
             .unwrap();
         robot
             .inverse_kinematics(
@@ -251,7 +196,6 @@ fn dynamic_calculations_do_not_allocate_after_workspace_creation() {
                 target_id,
                 &desired,
                 InverseKinematicsOptions::default(),
-                &mut workspace,
                 &mut output,
             )
             .unwrap();

@@ -152,17 +152,16 @@ impl<const N: usize> BenchmarkCase<N> {
     }
 }
 
-fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &BenchmarkCase<N>) {
+fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &mut BenchmarkCase<N>) {
     let generalized_count = case.robot.generalized_count();
 
     let mut fk = c.benchmark_group(format!("forward_kinematics/{model}"));
     fk.throughput(Throughput::Elements(1));
-    let mut workspace = case.robot.workspace();
     fk.bench_function("dynibo", |b| {
         b.iter(|| {
             black_box(
                 case.robot
-                    .forward_kinematics(&case.base, black_box(&case.q), case.target, &mut workspace)
+                    .forward_kinematics(&case.base, black_box(&case.q), case.target)
                     .unwrap(),
             )
         });
@@ -182,7 +181,6 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
 
     let mut jacobian = c.benchmark_group(format!("end_jacobian/{model}"));
     jacobian.throughput(Throughput::Elements(1));
-    let mut workspace = case.robot.workspace();
     let mut output = vec![0.0; 6 * generalized_count];
     jacobian.bench_function("dynibo", |b| {
         b.iter(|| {
@@ -191,7 +189,6 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
                     &case.base,
                     black_box(&case.q),
                     case.target,
-                    &mut workspace,
                     black_box(&mut output),
                 )
                 .unwrap();
@@ -213,7 +210,6 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
 
     let mut acceleration = c.benchmark_group(format!("forward_acceleration/{model}"));
     acceleration.throughput(Throughput::Elements(1));
-    let mut workspace = case.robot.workspace();
     acceleration.bench_function("dynibo", |b| {
         b.iter(|| {
             black_box(
@@ -224,7 +220,6 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
                         black_box(&case.qd),
                         black_box(&case.qdd),
                         case.target,
-                        &mut workspace,
                     )
                     .unwrap(),
             )
@@ -234,7 +229,6 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
 
     let mut gravity = c.benchmark_group(format!("gravity/{model}"));
     gravity.throughput(Throughput::Elements(1));
-    let mut workspace = case.robot.workspace();
     let mut output = vec![0.0; generalized_count];
     gravity.bench_function("dynibo", |b| {
         b.iter(|| {
@@ -243,7 +237,6 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
                     &case.base,
                     black_box(&case.q),
                     black_box(&[]),
-                    &mut workspace,
                     black_box(&mut output),
                 )
                 .unwrap();
@@ -265,7 +258,6 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
 
     let mut rnea = c.benchmark_group(format!("rnea/{model}"));
     rnea.throughput(Throughput::Elements(1));
-    let mut workspace = case.robot.workspace();
     let mut output = vec![0.0; generalized_count];
     rnea.bench_function("dynibo", |b| {
         b.iter(|| {
@@ -276,7 +268,6 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
                     black_box(&case.qd),
                     black_box(&case.qdd),
                     black_box(&[]),
-                    &mut workspace,
                     black_box(&mut output),
                 )
                 .unwrap();
@@ -300,7 +291,6 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
 
     let mut jacobian_derivative = c.benchmark_group(format!("end_jacobian_derivative/{model}"));
     jacobian_derivative.throughput(Throughput::Elements(1));
-    let mut workspace = case.robot.workspace();
     let mut output = vec![0.0; 6 * generalized_count];
     jacobian_derivative.bench_function("dynibo", |b| {
         b.iter(|| {
@@ -310,7 +300,6 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
                     black_box(&case.q),
                     black_box(&case.qd),
                     case.target,
-                    &mut workspace,
                     black_box(&mut output),
                 )
                 .unwrap();
@@ -333,17 +322,11 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
 
     let mut mass = c.benchmark_group(format!("mass_matrix/{model}"));
     mass.throughput(Throughput::Elements(1));
-    let mut workspace = case.robot.workspace();
     let mut output = vec![0.0; generalized_count * generalized_count];
     mass.bench_function("dynibo", |b| {
         b.iter(|| {
             case.robot
-                .mass_matrix(
-                    &case.base,
-                    black_box(&case.q),
-                    &mut workspace,
-                    black_box(&mut output),
-                )
+                .mass_matrix(&case.base, black_box(&case.q), black_box(&mut output))
                 .unwrap();
             black_box(&output);
         });
@@ -363,7 +346,6 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
 
     let mut velocity_product = c.benchmark_group(format!("velocity_product_forces/{model}"));
     velocity_product.throughput(Throughput::Elements(1));
-    let mut workspace = case.robot.workspace();
     let mut output = vec![0.0; generalized_count];
     velocity_product.bench_function("dynibo", |b| {
         b.iter(|| {
@@ -372,7 +354,6 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
                     &case.base,
                     black_box(&case.q),
                     black_box(&case.qd),
-                    &mut workspace,
                     black_box(&mut output),
                 )
                 .unwrap();
@@ -395,19 +376,19 @@ fn benchmark_case<const N: usize>(c: &mut Criterion, model: &str, case: &Benchma
 }
 
 fn benchmark_pinocchio(c: &mut Criterion) {
-    let fixed_serial = BenchmarkCase::<40>::new(
+    let mut fixed_serial = BenchmarkCase::<40>::new(
         "tests/data/test_arm_40.urdf",
         "test_link_40",
         BaseMode::Fixed,
     );
-    let floating_serial = BenchmarkCase::<40>::new(
+    let mut floating_serial = BenchmarkCase::<40>::new(
         "tests/data/test_arm_40.urdf",
         "test_link_40",
         BaseMode::Floating,
     );
-    let fixed_tree =
+    let mut fixed_tree =
         BenchmarkCase::<7>::new("tests/data/test_tree_7.urdf", "right_tool", BaseMode::Fixed);
-    let floating_tree = BenchmarkCase::<7>::new(
+    let mut floating_tree = BenchmarkCase::<7>::new(
         "tests/data/test_tree_7.urdf",
         "right_tool",
         BaseMode::Floating,
@@ -428,10 +409,10 @@ fn benchmark_pinocchio(c: &mut Criterion) {
     });
     overhead.finish();
 
-    benchmark_case(c, "fixed_serial_40joint", &fixed_serial);
-    benchmark_case(c, "floating_serial_40joint", &floating_serial);
-    benchmark_case(c, "fixed_tree_7joint_2leaf", &fixed_tree);
-    benchmark_case(c, "floating_tree_7joint_2leaf", &floating_tree);
+    benchmark_case(c, "fixed_serial_40joint", &mut fixed_serial);
+    benchmark_case(c, "floating_serial_40joint", &mut floating_serial);
+    benchmark_case(c, "fixed_tree_7joint_2leaf", &mut fixed_tree);
+    benchmark_case(c, "floating_tree_7joint_2leaf", &mut floating_tree);
 }
 
 criterion_group!(benches, benchmark_pinocchio);

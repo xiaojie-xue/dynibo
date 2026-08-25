@@ -14,7 +14,7 @@ use std::{
 
 use dynibo::{
     BaseMode, BaseState, ErrorCategory, Frame, IndexedLoad, InverseKinematicsOptions, LinkId,
-    Robot, Twist, Workspace, Wrench,
+    Robot, Twist, Wrench,
 };
 use nalgebra::{Quaternion, Translation3, UnitQuaternion, Vector3};
 
@@ -134,7 +134,7 @@ pub struct DyniboRobot {
 
 /// Opaque reusable calculation workspace.
 pub struct DyniboWorkspace {
-    inner: Workspace,
+    inner: Robot,
     indexed_loads: Box<[IndexedLoad]>,
 }
 
@@ -188,6 +188,17 @@ fn core_error(error: dynibo::Error) -> (DyniboStatus, String) {
 
 fn model_error(message: impl Into<String>) -> (DyniboStatus, String) {
     (DyniboStatus::ModelError, message.into())
+}
+
+fn validate_workspace_model(
+    robot: &DyniboRobot,
+    workspace: &DyniboWorkspace,
+) -> Result<(), (DyniboStatus, String)> {
+    if robot.inner.root_link_id() == workspace.inner.root_link_id() {
+        Ok(())
+    } else {
+        Err(invalid("workspace does not belong to this robot model"))
+    }
 }
 
 unsafe fn required_ref<'a, T>(
@@ -377,10 +388,8 @@ pub unsafe extern "C" fn dynibo_robot_from_urdf(
             .to_str()
             .map_err(|_| invalid("path must be valid UTF-8"))?;
         let inner = Robot::from_urdf(path).map_err(core_error)?;
-        let link_ids = inner
-            .links()
-            .iter()
-            .map(|link| inner.link_id(link.name()).expect("link came from robot"))
+        let link_ids = (0..inner.link_count())
+            .map(|index| inner.link_id_at(index).expect("link index came from robot"))
             .collect();
         let name =
             CString::new(inner.name()).map_err(|_| model_error("robot name contains NUL"))?;
@@ -417,10 +426,8 @@ pub unsafe extern "C" fn dynibo_robot_from_urdf_with_base(
             BaseMode::Floating => BaseState::new(Frame::identity(), Twist::zeros(), Twist::zeros())
                 .expect("zero floating-base state is valid"),
         };
-        let link_ids = inner
-            .links()
-            .iter()
-            .map(|link| inner.link_id(link.name()).expect("link came from robot"))
+        let link_ids = (0..inner.link_count())
+            .map(|index| inner.link_id_at(index).expect("link index came from robot"))
             .collect();
         let name =
             CString::new(inner.name()).map_err(|_| model_error("robot name contains NUL"))?;
@@ -560,7 +567,7 @@ pub unsafe extern "C" fn dynibo_workspace_create(
         // SAFETY: Pointer validation is performed by the helper.
         let output = unsafe { required_mut(output, "output") }?;
         *output = Box::into_raw(Box::new(DyniboWorkspace {
-            inner: robot.inner.workspace(),
+            inner: robot.inner.fork(),
             indexed_loads: robot
                 .link_ids
                 .iter()
@@ -599,6 +606,7 @@ pub unsafe extern "C" fn dynibo_forward_kinematics(
         let robot = unsafe { required_ref(robot, "robot") }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let workspace = unsafe { required_mut(workspace, "workspace") }?;
+        validate_workspace_model(robot, workspace)?;
         // SAFETY: Pointer validation is performed by the helpers.
         let q = unsafe { input_slice(q, q_len, "q") }?;
         // SAFETY: Pointer validation is performed by the helpers.
@@ -608,9 +616,9 @@ pub unsafe extern "C" fn dynibo_forward_kinematics(
             .get(target)
             .copied()
             .ok_or_else(|| invalid(format!("invalid link id {target}")))?;
-        let frame = robot
+        let frame = workspace
             .inner
-            .forward_kinematics(&robot.base, q, link, &mut workspace.inner)
+            .forward_kinematics(&robot.base, q, link)
             .map_err(core_error)?;
         *output = pose_from_frame(&frame);
         Ok(())
@@ -635,6 +643,7 @@ pub unsafe extern "C" fn dynibo_jacobian(
         let robot = unsafe { required_ref(robot, "robot") }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let workspace = unsafe { required_mut(workspace, "workspace") }?;
+        validate_workspace_model(robot, workspace)?;
         // SAFETY: Pointer validation is performed by the helpers.
         let q = unsafe { input_slice(q, q_len, "q") }?;
         // SAFETY: Pointer validation is performed by the helpers.
@@ -644,9 +653,9 @@ pub unsafe extern "C" fn dynibo_jacobian(
             .get(target)
             .copied()
             .ok_or_else(|| invalid(format!("invalid link id {target}")))?;
-        robot
+        workspace
             .inner
-            .jacobian(&robot.base, q, link, &mut workspace.inner, output)
+            .jacobian(&robot.base, q, link, output)
             .map_err(core_error)
     })
 }
@@ -670,6 +679,7 @@ pub unsafe extern "C" fn dynibo_jacobian_derivative(
         let robot = unsafe { required_ref(robot, "robot") }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let workspace = unsafe { required_mut(workspace, "workspace") }?;
+        validate_workspace_model(robot, workspace)?;
         // SAFETY: Pointer validation is performed by the helpers.
         let q = unsafe { input_slice(q, state_len, "q") }?;
         // SAFETY: Pointer validation is performed by the helpers.
@@ -683,9 +693,9 @@ pub unsafe extern "C" fn dynibo_jacobian_derivative(
             .get(target)
             .copied()
             .ok_or_else(|| invalid(format!("invalid link id {target}")))?;
-        robot
+        workspace
             .inner
-            .jacobian_derivative(&robot.base, q, qd, link, &mut workspace.inner, output)
+            .jacobian_derivative(&robot.base, q, qd, link, output)
             .map_err(core_error)
     })
 }
@@ -707,14 +717,15 @@ pub unsafe extern "C" fn dynibo_mass_matrix(
         let robot = unsafe { required_ref(robot, "robot") }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let workspace = unsafe { required_mut(workspace, "workspace") }?;
+        validate_workspace_model(robot, workspace)?;
         // SAFETY: Pointer validation is performed by the helpers.
         let q = unsafe { input_slice(q, q_len, "q") }?;
         reject_f64_overlap(q.as_ptr(), q.len(), "q", output, output_len)?;
         // SAFETY: Pointer validation is performed by the helpers.
         let output = unsafe { output_slice(output, output_len, "output") }?;
-        robot
+        workspace
             .inner
-            .mass_matrix(&robot.base, q, &mut workspace.inner, output)
+            .mass_matrix(&robot.base, q, output)
             .map_err(core_error)
     })
 }
@@ -735,6 +746,7 @@ pub unsafe extern "C" fn dynibo_velocity_product_forces(
         let robot = unsafe { required_ref(robot, "robot") }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let workspace = unsafe { required_mut(workspace, "workspace") }?;
+        validate_workspace_model(robot, workspace)?;
         // SAFETY: Pointer validation is performed by the helpers.
         let q = unsafe { input_slice(q, state_len, "q") }?;
         // SAFETY: Pointer validation is performed by the helpers.
@@ -743,9 +755,9 @@ pub unsafe extern "C" fn dynibo_velocity_product_forces(
         reject_f64_overlap(qd.as_ptr(), qd.len(), "qd", output, output_len)?;
         // SAFETY: Pointer validation is performed by the helpers.
         let output = unsafe { output_slice(output, output_len, "output") }?;
-        robot
+        workspace
             .inner
-            .velocity_product_forces(&robot.base, q, qd, &mut workspace.inner, output)
+            .velocity_product_forces(&robot.base, q, qd, output)
             .map_err(core_error)
     })
 }
@@ -768,6 +780,7 @@ pub unsafe extern "C" fn dynibo_inverse_kinematics(
         let robot = unsafe { required_ref(robot, "robot") }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let workspace = unsafe { required_mut(workspace, "workspace") }?;
+        validate_workspace_model(robot, workspace)?;
         // SAFETY: Pointer validation is performed by the helpers.
         let initial_q = unsafe { input_slice(initial_q, q_len, "initial_q") }?;
         // SAFETY: Pointer validation is performed by the helpers.
@@ -779,23 +792,16 @@ pub unsafe extern "C" fn dynibo_inverse_kinematics(
             .get(target)
             .copied()
             .ok_or_else(|| invalid(format!("invalid link id {target}")))?;
-        robot
+        let core_options = InverseKinematicsOptions {
+            max_iterations: options.max_iterations,
+            translation_tolerance: options.translation_tolerance,
+            rotation_tolerance: options.rotation_tolerance,
+            damping: options.damping,
+            max_step_norm: options.max_step_norm,
+        };
+        workspace
             .inner
-            .inverse_kinematics(
-                &robot.base,
-                initial_q,
-                link,
-                &desired,
-                InverseKinematicsOptions {
-                    max_iterations: options.max_iterations,
-                    translation_tolerance: options.translation_tolerance,
-                    rotation_tolerance: options.rotation_tolerance,
-                    damping: options.damping,
-                    max_step_norm: options.max_step_norm,
-                },
-                &mut workspace.inner,
-                output,
-            )
+            .inverse_kinematics(&robot.base, initial_q, link, &desired, core_options, output)
             .map_err(core_error)
     })
 }
@@ -817,6 +823,7 @@ pub unsafe extern "C" fn dynibo_forward_velocity_kinematics(
         let robot = unsafe { required_ref(robot, "robot") }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let workspace = unsafe { required_mut(workspace, "workspace") }?;
+        validate_workspace_model(robot, workspace)?;
         // SAFETY: Pointer validation is performed by the helpers.
         let q = unsafe { input_slice(q, state_len, "q") }?;
         // SAFETY: Pointer validation is performed by the helpers.
@@ -830,9 +837,9 @@ pub unsafe extern "C" fn dynibo_forward_velocity_kinematics(
             .get(target)
             .copied()
             .ok_or_else(|| invalid(format!("invalid link id {target}")))?;
-        let value = robot
+        let value = workspace
             .inner
-            .forward_velocity_kinematics(&robot.base, q, qd, link, &tool, &mut workspace.inner)
+            .forward_velocity_kinematics(&robot.base, q, qd, link, &tool)
             .map_err(core_error)?;
         *output = twist_to_c(value);
         Ok(())
@@ -856,6 +863,7 @@ pub unsafe extern "C" fn dynibo_forward_acceleration_kinematics(
         let robot = unsafe { required_ref(robot, "robot") }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let workspace = unsafe { required_mut(workspace, "workspace") }?;
+        validate_workspace_model(robot, workspace)?;
         // SAFETY: Pointer validation is performed by the helpers.
         let q = unsafe { input_slice(q, state_len, "q") }?;
         // SAFETY: Pointer validation is performed by the helpers.
@@ -869,9 +877,9 @@ pub unsafe extern "C" fn dynibo_forward_acceleration_kinematics(
             .get(target)
             .copied()
             .ok_or_else(|| invalid(format!("invalid link id {target}")))?;
-        let value = robot
+        let value = workspace
             .inner
-            .forward_acceleration_kinematics(&robot.base, q, qd, qdd, link, &mut workspace.inner)
+            .forward_acceleration_kinematics(&robot.base, q, qd, qdd, link)
             .map_err(core_error)?;
         *output = twist_to_c(value);
         Ok(())
@@ -895,15 +903,16 @@ pub unsafe extern "C" fn dynibo_gravity(
         let robot = unsafe { required_ref(robot, "robot") }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let workspace = unsafe { required_mut(workspace, "workspace") }?;
+        validate_workspace_model(robot, workspace)?;
         // SAFETY: Pointer validation is performed by the helpers.
         let q = unsafe { input_slice(q, q_len, "q") }?;
         // SAFETY: Pointer validation is performed by the helper.
         let loads = unsafe { load_slice(robot, &mut workspace.indexed_loads, loads, load_count) }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let output = unsafe { output_slice(output, output_len, "output") }?;
-        robot
+        workspace
             .inner
-            .gravity(&robot.base, q, loads, &mut workspace.inner, output)
+            .gravity(&robot.base, q, loads, output)
             .map_err(core_error)
     })
 }
@@ -928,6 +937,7 @@ pub unsafe extern "C" fn dynibo_inverse_dynamics(
         let robot = unsafe { required_ref(robot, "robot") }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let workspace = unsafe { required_mut(workspace, "workspace") }?;
+        validate_workspace_model(robot, workspace)?;
         // SAFETY: Pointer validation is performed by the helpers.
         let q = unsafe { input_slice(q, state_len, "q") }?;
         // SAFETY: Pointer validation is performed by the helpers.
@@ -938,9 +948,9 @@ pub unsafe extern "C" fn dynibo_inverse_dynamics(
         let loads = unsafe { load_slice(robot, &mut workspace.indexed_loads, loads, load_count) }?;
         // SAFETY: Pointer validation is performed by the helpers.
         let output = unsafe { output_slice(output, output_len, "output") }?;
-        robot
+        workspace
             .inner
-            .inverse_dynamics(&robot.base, q, qd, qdd, loads, &mut workspace.inner, output)
+            .inverse_dynamics(&robot.base, q, qd, qdd, loads, output)
             .map_err(core_error)
     })
 }
@@ -1310,6 +1320,22 @@ mod tests {
                 dynibo_workspace_create(robot, ptr::null_mut()),
                 DyniboStatus::InvalidArgument
             );
+            let (other_robot, other_workspace, _) = create_handles();
+            let q = [0.0; 4];
+            let mut pose = DyniboPose::default();
+            assert_eq!(
+                dynibo_forward_kinematics(
+                    robot,
+                    other_workspace,
+                    q.as_ptr(),
+                    q.len(),
+                    target,
+                    &mut pose,
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            dynibo_workspace_destroy(other_workspace);
+            dynibo_robot_destroy(other_robot);
             dynibo_workspace_destroy(workspace);
             dynibo_robot_destroy(robot);
         }

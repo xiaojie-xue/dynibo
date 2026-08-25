@@ -6,9 +6,9 @@ pub use inverse_kinematics::InverseKinematicsOptions;
 
 use crate::{Frame, Result};
 
-use super::Robot;
+use super::Model;
 
-impl Robot {
+impl Model {
     fn prepare_ancestor_path(&self, target_index: usize, path: &mut [usize]) -> usize {
         let mut current = target_index;
         let mut depth = 0;

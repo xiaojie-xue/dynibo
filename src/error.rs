@@ -34,10 +34,13 @@ pub enum Error {
         /// Link name requested by the caller.
         name: String,
     },
+    /// An active joint degree-of-freedom index is out of range.
+    InvalidJointIndex {
+        /// Rejected active-DOF index.
+        index: usize,
+    },
     /// A link identifier belongs to a different robot model.
     InvalidLinkId,
-    /// A workspace belongs to a different robot model or has the wrong size.
-    InvalidWorkspace,
     /// A base-state component is invalid.
     InvalidBaseState {
         /// Name of the rejected component.
@@ -109,8 +112,8 @@ impl Error {
             | Self::InvalidJointAxis { .. } => ErrorCategory::Model,
             Self::WrongSliceLength { .. }
             | Self::UnknownLink { .. }
+            | Self::InvalidJointIndex { .. }
             | Self::InvalidLinkId
-            | Self::InvalidWorkspace
             | Self::InvalidBaseState { .. }
             | Self::FloatingBaseIkUnsupported
             | Self::InvalidIkOptions { .. }
@@ -138,10 +141,10 @@ impl fmt::Display for Error {
             } => write!(f, "expected {expected} elements in {slice}, found {actual}"),
             Self::InvalidJointAxis { joint } => write!(f, "joint {joint} has an invalid axis"),
             Self::UnknownLink { name } => write!(f, "link {name} does not exist in the model"),
-            Self::InvalidLinkId => write!(f, "link identifier does not belong to this robot model"),
-            Self::InvalidWorkspace => {
-                write!(f, "workspace does not belong to this robot model")
+            Self::InvalidJointIndex { index } => {
+                write!(f, "joint DOF index {index} does not exist in the model")
             }
+            Self::InvalidLinkId => write!(f, "link identifier does not belong to this robot model"),
             Self::InvalidBaseState { field, reason } => {
                 write!(f, "invalid base {field}: {reason}")
             }
@@ -241,12 +244,12 @@ mod tests {
                 "link tool does not exist in the model".to_owned(),
             ),
             (
-                Error::InvalidLinkId,
-                "link identifier does not belong to this robot model".to_owned(),
+                Error::InvalidJointIndex { index: 7 },
+                "joint DOF index 7 does not exist in the model".to_owned(),
             ),
             (
-                Error::InvalidWorkspace,
-                "workspace does not belong to this robot model".to_owned(),
+                Error::InvalidLinkId,
+                "link identifier does not belong to this robot model".to_owned(),
             ),
             (
                 Error::InvalidBaseState {
