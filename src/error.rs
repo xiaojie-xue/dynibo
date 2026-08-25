@@ -89,6 +89,13 @@ pub enum Error {
         /// Final rotation-vector norm, in radians.
         rotation_error: f64,
     },
+    /// A joint's articulated inertia cannot be inverted by forward dynamics.
+    ForwardDynamicsSingularJointInertia {
+        /// Zero-based active joint degree-of-freedom index.
+        joint_index: usize,
+    },
+    /// The floating base's articulated inertia cannot be inverted by forward dynamics.
+    ForwardDynamicsSingularBaseInertia,
 }
 
 /// Stable, coarse classification of errors for language bindings and callers.
@@ -120,7 +127,9 @@ impl Error {
             | Self::NonFiniteIkInput { .. } => ErrorCategory::InvalidInput,
             Self::IkNumericalFailure { .. }
             | Self::IkJointLimitViolation { .. }
-            | Self::IkNotConverged { .. } => ErrorCategory::Solver,
+            | Self::IkNotConverged { .. }
+            | Self::ForwardDynamicsSingularJointInertia { .. }
+            | Self::ForwardDynamicsSingularBaseInertia => ErrorCategory::Solver,
         }
     }
 }
@@ -180,6 +189,14 @@ impl fmt::Display for Error {
                 f,
                 "inverse kinematics did not converge after {iterations} iterations \
                  (translation error {translation_error:.6e}, rotation error {rotation_error:.6e})"
+            ),
+            Self::ForwardDynamicsSingularJointInertia { joint_index } => write!(
+                f,
+                "forward dynamics found singular articulated inertia at joint DOF {joint_index}"
+            ),
+            Self::ForwardDynamicsSingularBaseInertia => write!(
+                f,
+                "forward dynamics found singular floating-base articulated inertia"
             ),
         }
     }
@@ -297,6 +314,14 @@ mod tests {
                 },
                 "inverse kinematics did not converge after 4 iterations (translation error 2.500000e-1, rotation error 5.000000e-1)".to_owned(),
             ),
+            (
+                Error::ForwardDynamicsSingularJointInertia { joint_index: 2 },
+                "forward dynamics found singular articulated inertia at joint DOF 2".to_owned(),
+            ),
+            (
+                Error::ForwardDynamicsSingularBaseInertia,
+                "forward dynamics found singular floating-base articulated inertia".to_owned(),
+            ),
         ];
 
         for (error, expected) in cases {
@@ -327,6 +352,10 @@ mod tests {
                 rotation_error: 0.5,
             }
             .category(),
+            ErrorCategory::Solver
+        );
+        assert_eq!(
+            Error::ForwardDynamicsSingularBaseInertia.category(),
             ErrorCategory::Solver
         );
     }

@@ -66,6 +66,7 @@ Dynibo 专注于最常用的机器人运动学与动力学接口：
 - `velocity_product_forces` — 离心力 + 科氏广义力
 - `gravity` — 重力补偿，可附加外部载荷
 - `inverse_dynamics` — 递归 Newton–Euler 逆动力学
+- `forward_dynamics` — 线性时间复杂度的 articulated-body 正动力学
 
 API 围绕少量核心类型构建：`Robot`、`LinkId`、`Frame`、`Twist` 和
 `Wrench`。Rust、Python、C 和 C++ 接口共用同一套 Rust 实现。

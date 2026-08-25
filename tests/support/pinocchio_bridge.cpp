@@ -1,3 +1,4 @@
+#include <pinocchio/algorithm/aba.hpp>
 #include <pinocchio/algorithm/crba.hpp>
 #include <pinocchio/algorithm/frames.hpp>
 #include <pinocchio/algorithm/jacobian.hpp>
@@ -248,7 +249,7 @@ void dynibo_pinocchio_gravity_values(void* raw_context, const double* q,
 }
 
 void dynibo_pinocchio_rnea_values(void* raw_context, const double* q, const double* qd,
-                                const double* qdd, double* torque) noexcept {
+                                  const double* qdd, double* torque) noexcept {
   auto* context = static_cast<PinocchioBenchContext*>(raw_context);
   const ConfigMap configuration(q, context->model.nq);
   const ConfigMap velocity(qd, context->model.nv);
@@ -256,6 +257,17 @@ void dynibo_pinocchio_rnea_values(void* raw_context, const double* q, const doub
   Eigen::Map<Eigen::VectorXd> torque_map(torque, context->model.nv);
   torque_map =
       pinocchio::rnea(context->model, context->data, configuration, velocity, acceleration);
+}
+
+void dynibo_pinocchio_aba_values(void* raw_context, const double* q, const double* qd,
+                                 const double* torque, double* acceleration) noexcept {
+  auto* context = static_cast<PinocchioBenchContext*>(raw_context);
+  const ConfigMap configuration(q, context->model.nq);
+  const ConfigMap velocity(qd, context->model.nv);
+  const ConfigMap generalized_force(torque, context->model.nv);
+  Eigen::Map<Eigen::VectorXd> acceleration_map(acceleration, context->model.nv);
+  acceleration_map =
+      pinocchio::aba(context->model, context->data, configuration, velocity, generalized_force);
 }
 
 void dynibo_pinocchio_mass_matrix_values(void* raw_context, const double* q,

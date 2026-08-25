@@ -1,3 +1,4 @@
+mod forward_dynamics;
 mod inverse_dynamics;
 mod mass_matrix;
 

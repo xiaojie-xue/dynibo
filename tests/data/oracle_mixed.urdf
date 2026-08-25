@@ -1,6 +1,13 @@
 <?xml version="1.0"?>
 <robot name="oracle_mixed">
-  <link name="base"/>
+  <link name="base">
+    <inertial>
+      <origin xyz="0.02 -0.01 0.03" rpy="0.1 -0.05 0.08"/>
+      <mass value="1.2"/>
+      <inertia ixx="0.08" ixy="0.002" ixz="-0.001"
+               iyy="0.09" iyz="0.003" izz="0.11"/>
+    </inertial>
+  </link>
 
   <link name="link_a">
     <inertial>

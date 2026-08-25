@@ -87,6 +87,12 @@ class PackageTests(unittest.TestCase):
             reconstructed = gravity[row] + velocity_product[row]
             self.assertAlmostEqual(reconstructed, bias[row], delta=1.0e-10)
 
+        expected_qdd = [0.7, -0.4, 0.1, 0.3]
+        generalized_forces = self.robot.inverse_dynamics(q, qd, expected_qdd)
+        recovered_qdd = self.robot.forward_dynamics(q, qd, generalized_forces)
+        for actual, expected_value in zip(recovered_qdd, expected_qdd):
+            self.assertAlmostEqual(actual, expected_value, delta=2.0e-10)
+
         acceleration = self.robot.forward_acceleration_kinematics(
             q, qd, zero, self.target
         )
@@ -113,6 +119,13 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(
                 len(robot.inverse_dynamics(q, q, q)), robot.generalized_count
             )
+            forces = robot.inverse_dynamics(q, q, q)
+            acceleration = robot.forward_dynamics(q, q, forces)
+            expected_base = (-0.1, 0.05, 0.2, 0.3, -0.2, 0.1)
+            for actual, expected_value in zip(acceleration[:6], expected_base):
+                self.assertAlmostEqual(actual, expected_value, delta=2.0e-9)
+            for actual in acceleration[6:]:
+                self.assertAlmostEqual(actual, 0.0, delta=2.0e-9)
             with self.assertRaisesRegex(ValueError, "does not support a floating base"):
                 robot.inverse_kinematics(q, target, robot.forward_kinematics(q, target))
 
@@ -223,6 +236,8 @@ class PackageTests(unittest.TestCase):
             self.robot.jacobian_derivative(self.q, self.q[:-1], self.target)
         with self.assertRaisesRegex(ValueError, "expected 4 elements"):
             self.robot.mass_matrix(self.q[:-1])
+        with self.assertRaisesRegex(ValueError, "expected 4 elements"):
+            self.robot.forward_dynamics(self.q, self.q, self.q[:-1])
         with self.assertRaisesRegex(ValueError, "pose translation must contain exactly 3"):
             self.robot.set_base_frame(dynibo.Pose(translation=(0.0, 0.0)))
         with self.assertRaisesRegex(ValueError, "load force must contain exactly 3"):

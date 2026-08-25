@@ -237,6 +237,12 @@ _lib.dynibo_inverse_dynamics.argtypes = [
     ct.POINTER(_Load), ct.c_size_t, _double_p, ct.c_size_t,
 ]
 _lib.dynibo_inverse_dynamics.restype = ct.c_int
+_lib.dynibo_forward_dynamics.argtypes = [
+    _robot_p, _workspace_p, _double_p, _double_p, ct.c_size_t,
+    _double_p, ct.c_size_t, ct.POINTER(_Load), ct.c_size_t,
+    _double_p, ct.c_size_t,
+]
+_lib.dynibo_forward_dynamics.restype = ct.c_int
 
 
 def _check(status: int) -> None:
@@ -814,5 +820,44 @@ class Robot:
         _check(_lib.dynibo_inverse_dynamics(
             self._robot, self._workspace, q_array, qd_array, qdd_array, len(q_array),
             loads_c, len(loads_c), output, len(output),
+        ))
+        return tuple(output)
+
+    @_synchronized
+    def forward_dynamics(
+        self, q: Sequence[float], qd: Sequence[float],
+        generalized_forces: Sequence[float], loads: Iterable[Load] = (),
+    ) -> tuple[float, ...]:
+        r"""Compute articulated-body forward dynamics.
+
+        The stored base pose and velocity participate in the calculation. A
+        floating base's stored acceleration is ignored. For a floating base,
+        input forces and output accelerations are ordered as world-frame angular
+        base, world-frame linear base, then non-fixed joints.
+
+        Args:
+            q: Non-fixed joint positions in URDF order.
+            qd: Non-fixed joint velocities in URDF order.
+            generalized_forces: Applied generalized forces in base-then-joint order.
+            loads: Optional link-local resisting wrenches.
+
+        Returns:
+            Generalized accelerations in base-then-joint order.
+
+        Raises:
+            ValueError: If an input or load is invalid.
+            SolverError: If an articulated inertia is singular.
+            DyniboError: If another native calculation failure occurs.
+        """
+        q_array = _array(q, "q")
+        qd_array = _array(qd, "qd")
+        _require_same_length(q_array, qd=qd_array)
+        force_array = _array(generalized_forces, "generalized_forces")
+        loads_c = _loads(loads)
+        output = (ct.c_double * self.generalized_count)()
+        _check(_lib.dynibo_forward_dynamics(
+            self._robot, self._workspace, q_array, qd_array, len(q_array),
+            force_array, len(force_array), loads_c, len(loads_c),
+            output, len(output),
         ))
         return tuple(output)

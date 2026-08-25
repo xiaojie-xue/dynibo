@@ -1,6 +1,6 @@
-use nalgebra::{Matrix3, Vector3};
+use nalgebra::{Matrix3, SMatrix, Vector3};
 
-use crate::{Frame, Wrench};
+use crate::{Frame, Twist, Wrench};
 
 use super::Model;
 
@@ -21,12 +21,12 @@ impl LinkId {
     }
 }
 
-/// A wrench associated with a model-scoped link identifier.
+/// A resisting wrench associated with a model-scoped link identifier.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct IndexedLoad {
     /// Link at whose origin the wrench is applied.
     pub link: LinkId,
-    /// Wrench expressed in the selected link's coordinate frame.
+    /// Resisting wrench expressed in the selected link's coordinate frame.
     pub wrench: Wrench,
 }
 
@@ -42,6 +42,14 @@ pub(super) struct Workspace {
     pub(super) composite_masses: Vec<f64>,
     pub(super) composite_moments: Vec<Vector3<f64>>,
     pub(super) composite_inertias: Vec<Matrix3<f64>>,
+    pub(super) spatial_velocities: Vec<Twist>,
+    pub(super) bias_accelerations: Vec<Twist>,
+    pub(super) spatial_accelerations: Vec<Twist>,
+    pub(super) articulated_inertias: Vec<SMatrix<f64, 6, 6>>,
+    pub(super) articulated_bias_forces: Vec<Wrench>,
+    pub(super) articulated_u: Vec<Wrench>,
+    pub(super) articulated_d: Vec<f64>,
+    pub(super) articulated_joint_bias: Vec<f64>,
     pub(super) origin_velocities: Vec<Vector3<f64>>,
     pub(super) jacobian: Vec<f64>,
     pub(super) jacobian_derivative: Vec<f64>,
@@ -64,6 +72,14 @@ impl Workspace {
             composite_masses: vec![0.0; model_joint_count],
             composite_moments: vec![Vector3::zeros(); model_joint_count],
             composite_inertias: vec![Matrix3::zeros(); model_joint_count],
+            spatial_velocities: vec![Twist::zeros(); model_joint_count],
+            bias_accelerations: vec![Twist::zeros(); model_joint_count],
+            spatial_accelerations: vec![Twist::zeros(); model_joint_count],
+            articulated_inertias: vec![SMatrix::zeros(); model_joint_count],
+            articulated_bias_forces: vec![Wrench::zeros(); model_joint_count],
+            articulated_u: vec![Wrench::zeros(); model_joint_count],
+            articulated_d: vec![0.0; model_joint_count],
+            articulated_joint_bias: vec![0.0; model_joint_count],
             origin_velocities: vec![Vector3::zeros(); model_joint_count],
             jacobian: vec![0.0; 6 * joint_count],
             jacobian_derivative: vec![0.0; 6 * joint_count],

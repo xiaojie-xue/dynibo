@@ -83,7 +83,7 @@ pub struct DyniboTwist {
     pub linear: [f64; 3],
 }
 
-/// External wrench applied at a link origin and expressed in that link frame.
+/// Resisting wrench at a link origin and expressed in that link frame.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DyniboLoad {
@@ -955,6 +955,60 @@ pub unsafe extern "C" fn dynibo_inverse_dynamics(
     })
 }
 
+/// Writes articulated-body forward-dynamics generalized accelerations.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn dynibo_forward_dynamics(
+    robot: *const DyniboRobot,
+    workspace: *mut DyniboWorkspace,
+    q: *const f64,
+    qd: *const f64,
+    state_len: usize,
+    generalized_forces: *const f64,
+    generalized_force_len: usize,
+    loads: *const DyniboLoad,
+    load_count: usize,
+    output: *mut f64,
+    output_len: usize,
+) -> DyniboStatus {
+    call(|| {
+        // SAFETY: Pointer validation is performed by the helpers.
+        let robot = unsafe { required_ref(robot, "robot") }?;
+        // SAFETY: Pointer validation is performed by the helpers.
+        let workspace = unsafe { required_mut(workspace, "workspace") }?;
+        validate_workspace_model(robot, workspace)?;
+        // SAFETY: Pointer validation is performed by the helpers.
+        let q = unsafe { input_slice(q, state_len, "q") }?;
+        // SAFETY: Pointer validation is performed by the helpers.
+        let qd = unsafe { input_slice(qd, state_len, "qd") }?;
+        // SAFETY: Pointer validation is performed by the helpers.
+        let generalized_forces = unsafe {
+            input_slice(
+                generalized_forces,
+                generalized_force_len,
+                "generalized_forces",
+            )
+        }?;
+        reject_f64_overlap(q.as_ptr(), q.len(), "q", output, output_len)?;
+        reject_f64_overlap(qd.as_ptr(), qd.len(), "qd", output, output_len)?;
+        reject_f64_overlap(
+            generalized_forces.as_ptr(),
+            generalized_forces.len(),
+            "generalized_forces",
+            output,
+            output_len,
+        )?;
+        // SAFETY: Pointer validation is performed by the helper.
+        let loads = unsafe { load_slice(robot, &mut workspace.indexed_loads, loads, load_count) }?;
+        // SAFETY: Pointer validation is performed by the helpers.
+        let output = unsafe { output_slice(output, output_len, "output") }?;
+        workspace
+            .inner
+            .forward_dynamics(&robot.base, q, qd, generalized_forces, loads, output)
+            .map_err(core_error)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::{ffi::CString, ptr, thread};
@@ -1245,6 +1299,23 @@ mod tests {
                     q.as_ptr(),
                     q.as_ptr(),
                     q.len(),
+                    ptr::null(),
+                    0,
+                    generalized.as_mut_ptr(),
+                    generalized.len(),
+                ),
+                DyniboStatus::Ok
+            );
+            let generalized_forces = generalized;
+            assert_eq!(
+                dynibo_forward_dynamics(
+                    floating,
+                    workspace,
+                    q.as_ptr(),
+                    q.as_ptr(),
+                    q.len(),
+                    generalized_forces.as_ptr(),
+                    generalized_forces.len(),
                     ptr::null(),
                     0,
                     generalized.as_mut_ptr(),

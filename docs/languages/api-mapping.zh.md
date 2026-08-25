@@ -16,6 +16,7 @@ Rust 使用 crate 和 type namespace，Python 使用 module 和 class，C++ 使�
 | 雅可比矩阵 | `robot.jacobian` | `robot.jacobian` | `robot.jacobian` | `dynibo_jacobian` |
 | 质量矩阵 | `robot.mass_matrix` | `robot.mass_matrix` | `robot.mass_matrix` | `dynibo_mass_matrix` |
 | 逆动力学 | `robot.inverse_dynamics` | `robot.inverse_dynamics` | `robot.inverse_dynamics` | `dynibo_inverse_dynamics` |
+| 正动力学 | `robot.forward_dynamics` | `robot.forward_dynamics` | `robot.forward_dynamics` | `dynibo_forward_dynamics` |
 | Workspace | 显式参数 | 由 `Robot` 持有 | 由 `Robot` 持有 | 显式 handle |
 | 矩阵输出 | 调用方 buffer | 一维 tuple | 一维 `std::vector` | 调用方 buffer |
 | 错误 | `Result<T>` | 异常 | `dynibo::Error` | `DyniboStatus` |

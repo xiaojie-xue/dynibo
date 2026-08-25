@@ -8,9 +8,10 @@ use std::{
 
 use dynibo_c::{
     DyniboLoad, DyniboPose, DyniboRobot, DyniboStatus, DyniboTwist, DyniboWorkspace,
-    dynibo_forward_velocity_kinematics, dynibo_gravity, dynibo_inverse_dynamics,
-    dynibo_robot_destroy, dynibo_robot_from_urdf, dynibo_robot_joint_count, dynibo_robot_link_id,
-    dynibo_workspace_create, dynibo_workspace_destroy,
+    dynibo_forward_dynamics, dynibo_forward_velocity_kinematics, dynibo_gravity,
+    dynibo_inverse_dynamics, dynibo_robot_destroy, dynibo_robot_from_urdf,
+    dynibo_robot_joint_count, dynibo_robot_link_id, dynibo_workspace_create,
+    dynibo_workspace_destroy,
 };
 
 struct CountingAllocator;
@@ -120,6 +121,23 @@ fn fixed_base_abi_hot_paths_do_not_allocate() {
                     qd.as_ptr(),
                     qdd.as_ptr(),
                     n,
+                    &load,
+                    1,
+                    output.as_mut_ptr(),
+                    output.len(),
+                ),
+                DyniboStatus::Ok
+            );
+            let generalized_forces = output;
+            assert_eq!(
+                dynibo_forward_dynamics(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    qd.as_ptr(),
+                    n,
+                    generalized_forces.as_ptr(),
+                    generalized_forces.len(),
                     &load,
                     1,
                     output.as_mut_ptr(),

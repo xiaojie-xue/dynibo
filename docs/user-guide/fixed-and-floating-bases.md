@@ -16,6 +16,12 @@ A floating-base robot has `G = J + 6`. Its generalized ordering begins with
 world-expressed angular and linear base motion. Supply the complete base state
 to calculations that depend on velocity or acceleration:
 
+The URDF root link must declare an inertial block with strictly positive mass.
+Models with a massless root remain valid in fixed-base mode, but are rejected
+when loaded with `BaseMode::Floating`. A positive root mass is a load-time
+requirement; forward dynamics additionally checks the complete articulated
+inertia for rotational or joint-subtree singularities.
+
 === "Rust"
 
     ```rust
@@ -59,6 +65,8 @@ Python and C-family adapters retain setter-based state for API compatibility.
 - Velocity and acceleration include the supplied base motion.
 - Jacobians gain six leading base columns.
 - Mass matrices and generalized forces gain six base rows or entries.
+- Forward dynamics returns six world-frame base acceleration entries before joint acceleration.
+- Forward dynamics uses the supplied pose and velocity but ignores the stored acceleration.
 - Inverse kinematics currently accepts fixed-base models only.
 
 Rust base states are immutable calculation inputs, so one robot can be shared

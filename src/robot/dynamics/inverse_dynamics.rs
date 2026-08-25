@@ -469,7 +469,7 @@ impl Model {
         Ok(accumulated_root_load)
     }
 
-    fn prepare_indexed_loads(
+    pub(super) fn prepare_indexed_loads(
         &self,
         loads: &[IndexedLoad],
         output: &mut [Wrench],

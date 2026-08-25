@@ -77,7 +77,7 @@ typedef struct DyniboTwist {
     double linear[3];  /**< Linear component. */
 } DyniboTwist;
 
-/** @brief External wrench applied at a link origin in that link's frame. */
+/** @brief Resisting wrench at a link origin in that link's frame. */
 typedef struct DyniboLoad {
     size_t link_id;  /**< ID returned by dynibo_robot_link_id(). */
     double torque[3]; /**< Torque component. */
@@ -507,6 +507,37 @@ DYNIBO_API DyniboStatus dynibo_gravity(
 DYNIBO_API DyniboStatus dynibo_inverse_dynamics(
     const DyniboRobot *robot, DyniboWorkspace *workspace,
     const double *q, const double *qd, const double *qdd, size_t state_len,
+    const DyniboLoad *loads, size_t load_count,
+    double *output, size_t output_len);
+
+/**
+ * @brief Computes articulated-body forward dynamics.
+ *
+ * The root pose and velocity come from the state stored in @p robot. A floating
+ * root's stored acceleration is ignored. For a floating base, generalized forces and
+ * output begin with world-frame angular and linear base components, followed by
+ * scalar joint components. External loads use the same resisting-wrench
+ * convention as dynibo_inverse_dynamics().
+ *
+ * @param[in] robot Robot handle.
+ * @param[in,out] workspace Workspace created for @p robot.
+ * @param[in] q Joint-position array containing `J` elements.
+ * @param[in] qd Joint-velocity array containing `J` elements.
+ * @param[in] state_len Number of elements in both state arrays; must equal `J`.
+ * @param[in] generalized_forces Generalized-force array containing `G` elements.
+ * @param[in] generalized_force_len Number of elements in @p generalized_forces; must equal `G`.
+ * @param[in] loads External resisting loads, or null when @p load_count is zero.
+ * @param[in] load_count Number of entries in @p loads.
+ * @param[out] output Caller-owned generalized-acceleration buffer.
+ * @param[in] output_len Number of elements in @p output; must equal `G`.
+ * @return DYNIBO_STATUS_OK on success, DYNIBO_STATUS_SOLVER_ERROR for singular
+ * articulated inertia, or another error status for invalid input.
+ * @note Input arrays must not overlap @p output.
+ */
+DYNIBO_API DyniboStatus dynibo_forward_dynamics(
+    const DyniboRobot *robot, DyniboWorkspace *workspace,
+    const double *q, const double *qd, size_t state_len,
+    const double *generalized_forces, size_t generalized_force_len,
     const DyniboLoad *loads, size_t load_count,
     double *output, size_t output_len);
 

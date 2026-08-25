@@ -35,7 +35,7 @@ impl Twist {
 /// Torque-first spatial force vector `[torque_x, torque_y, torque_z, force_x,
 /// force_y, force_z]`.
 ///
-/// External-load APIs interpret a wrench in its associated link frame at that
+/// Load APIs interpret a resisting wrench in its associated link frame at that
 /// link origin; floating-base generalized-force outputs use the world frame at
 /// the root origin.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
