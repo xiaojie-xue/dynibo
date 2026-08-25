@@ -7,7 +7,8 @@
 <p><strong>Fast &middot; Lightweight &middot; Reliable</strong></p>
 
 <p>
-  <a href="https://dynibo.readthedocs.io/">Documentation</a>
+  <a href="https://dynibo.readthedocs.io/">Documentation</a> &nbsp;&middot;&nbsp; 
+  <strong>English</strong> | <a href="README.zh.md">简体中文</a>
 </p>
 
 <p>
@@ -19,8 +20,6 @@
 </p>
 
 </div>
-
-English | [简体中文](README.zh.md)
 
 `dynibo` is a fast, lightweight, and reliable library for
 robot kinematics and dynamics. It loads robot topology from URDF at runtime and

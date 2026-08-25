@@ -12,6 +12,19 @@ theme:
   name: material
   custom_dir: overrides
   language: en
+  palette:
+    # Follow the visitor's operating-system preference until they choose a
+    # theme explicitly. Show the icon for the currently active mode.
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/white-balance-sunny
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/moon-waning-crescent
+        name: Switch to light mode
   features:
     - navigation.indexes
     - navigation.sections

@@ -9,6 +9,14 @@
 
 .dynibo-language-selector svg {
   flex: 0 0 auto;
+  height: 0.9rem;
+  opacity: 0.75;
+  width: 0.9rem;
+}
+
+.md-header__option [data-md-color-media] + .md-header__button svg {
+  height: 0.9rem;
+  width: 0.9rem;
 }
 
 .dynibo-language-selector__label {

@@ -26,3 +26,6 @@ __pycache__/
 # Operating-system metadata
 .DS_Store
 Thumbs.db
+
+# Python virtual environments
+/.venv*/

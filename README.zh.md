@@ -7,7 +7,8 @@
 <p><strong>Fast &middot; Lightweight &middot; Reliable</strong></p>
 
 <p>
-  <a href="https://dynibo.readthedocs.io/en/latest/zh/">中文文档</a>
+  <a href="https://dynibo.readthedocs.io/en/latest/zh/">文档</a> &nbsp;&middot;&nbsp;
+  <a href="README.md">English</a> | <strong>简体中文</strong>
 </p>
 
 <p>
@@ -19,8 +20,6 @@
 </p>
 
 </div>
-
-[English](README.md) | 简体中文
 
 `dynibo` 是一个快速、轻量且可靠的机器人运动学与动力学库。它在运行时从 URDF
 加载机器人，并通过 Robot 内部的可复用存储提供计算期零分配的接口；同时基于同一
