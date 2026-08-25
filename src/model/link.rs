@@ -2,7 +2,7 @@ use nalgebra::{Matrix3, Vector3};
 
 /// Identity and immutable inertial properties of one URDF link.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Link {
+pub(crate) struct Link {
     name: String,
     dynamics: LinkDynamics,
 }
@@ -42,22 +42,22 @@ impl Link {
     }
 
     /// Returns the link name loaded from the URDF.
-    pub fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         &self.name
     }
 
     /// Returns the link mass in kilograms.
-    pub const fn mass(&self) -> f64 {
+    pub(crate) const fn mass(&self) -> f64 {
         self.dynamics.mass
     }
 
     /// Returns the center of mass expressed in the link frame, in metres.
-    pub const fn center_of_mass(&self) -> &Vector3<f64> {
+    pub(crate) const fn center_of_mass(&self) -> &Vector3<f64> {
         &self.dynamics.center_of_mass
     }
 
     /// Returns the rotational inertia about the center of mass in the link frame.
-    pub const fn inertia(&self) -> &Matrix3<f64> {
+    pub(crate) const fn inertia(&self) -> &Matrix3<f64> {
         &self.dynamics.inertia
     }
 

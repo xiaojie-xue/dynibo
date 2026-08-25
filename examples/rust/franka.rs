@@ -12,10 +12,9 @@ fn print_vector(label: &str, values: &[f64]) {
 
 fn main() -> dynibo::Result<()> {
     let urdf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/data/franka_fer.urdf");
-    let robot = Robot::from_urdf(urdf)?;
+    let mut robot = Robot::from_urdf(urdf)?;
     let base = BaseState::fixed();
     let flange = robot.link_id("fer_link8")?;
-    let mut workspace = robot.workspace();
 
     // Only non-fixed joints occupy state-vector entries; fer_joint8 is fixed.
     let q = [0.0, -0.3, 0.0, -1.8, 0.0, 1.5, 0.7];
@@ -32,30 +31,16 @@ fn main() -> dynibo::Result<()> {
     let mut joint_forces = vec![0.0; generalized_count];
 
     // forward_kinematics -- target-link pose in the world frame.
-    let pose = robot.forward_kinematics(&base, &q, flange, &mut workspace)?;
+    let pose = robot.forward_kinematics(&base, &q, flange)?;
 
     // jacobian and jacobian_derivative -- column-major, angular rows first.
-    robot.jacobian(&base, &q, flange, &mut workspace, &mut jacobian)?;
-    robot.jacobian_derivative(
-        &base,
-        &q,
-        &qd,
-        flange,
-        &mut workspace,
-        &mut jacobian_derivative,
-    )?;
+    robot.jacobian(&base, &q, flange, &mut jacobian)?;
+    robot.jacobian_derivative(&base, &q, &qd, flange, &mut jacobian_derivative)?;
 
     // forward_velocity_kinematics and forward_acceleration_kinematics.
-    let velocity = robot.forward_velocity_kinematics(
-        &base,
-        &q,
-        &qd,
-        flange,
-        &Isometry3::identity(),
-        &mut workspace,
-    )?;
-    let acceleration =
-        robot.forward_acceleration_kinematics(&base, &q, &qd, &qdd, flange, &mut workspace)?;
+    let velocity =
+        robot.forward_velocity_kinematics(&base, &q, &qd, flange, &Isometry3::identity())?;
+    let acceleration = robot.forward_acceleration_kinematics(&base, &q, &qd, &qdd, flange)?;
 
     // inverse_kinematics -- recover a known, reachable pose with damped least squares.
     let mut ik_solution = vec![0.0; robot.joint_count()];
@@ -65,29 +50,20 @@ fn main() -> dynibo::Result<()> {
         flange,
         &pose,
         InverseKinematicsOptions::default(),
-        &mut workspace,
         &mut ik_solution,
     )?;
 
     // mass_matrix and velocity_product_forces.
-    robot.mass_matrix(&base, &q, &mut workspace, &mut mass_matrix)?;
-    robot.velocity_product_forces(&base, &q, &qd, &mut workspace, &mut velocity_forces)?;
+    robot.mass_matrix(&base, &q, &mut mass_matrix)?;
+    robot.velocity_product_forces(&base, &q, &qd, &mut velocity_forces)?;
 
     // gravity and inverse_dynamics, both with a link-local external load.
     let loads = [IndexedLoad {
         link: flange,
         wrench: Wrench::new(Vector3::zeros(), Vector3::new(0.0, 0.0, -5.0)),
     }];
-    robot.gravity(&base, &q, &loads, &mut workspace, &mut gravity)?;
-    robot.inverse_dynamics(
-        &base,
-        &q,
-        &qd,
-        &qdd,
-        &loads,
-        &mut workspace,
-        &mut joint_forces,
-    )?;
+    robot.gravity(&base, &q, &loads, &mut gravity)?;
+    robot.inverse_dynamics(&base, &q, &qd, &qdd, &loads, &mut joint_forces)?;
 
     println!(
         "loaded {}: {} links, {} non-fixed joints",

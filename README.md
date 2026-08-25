@@ -24,7 +24,7 @@ English | [简体中文](README.zh.md)
 
 `dynibo` is a fast, lightweight, and reliable library for
 robot kinematics and dynamics. It loads robot topology from URDF at runtime and
-provides allocation-free calculations through reusable workspaces. Python and
+provides allocation-free calculations through reusable per-robot storage. Python and
 C/C++ interfaces are available on top of the same Rust core.
 
 ## Features
@@ -33,9 +33,8 @@ C/C++ interfaces are available on top of the same Rust core.
 
 Across the benchmarks below, Dynibo runs 1.19–2.51× as fast as Pinocchio for the
 measured core operations. It is written in Rust and keeps allocation outside the
-calculation loop. After a `Workspace` and output buffers are created, the main
-kinematics and dynamics routines reuse that memory without allocating or
-resizing.
+calculation loop. After a `Robot` and output buffers are created, the main
+kinematics and dynamics routines reuse internal memory without allocating or resizing.
 
 The table below shows Dynibo's speedup over Pinocchio for core kinematics and
 dynamics operations.
@@ -73,7 +72,7 @@ dynamics interfaces:
 - `gravity` — gravity compensation with optional external loads
 - `inverse_dynamics` — recursive Newton–Euler inverse dynamics
 
-The API is built around a small set of types: `Robot`, `Workspace`, `LinkId`,
+The API is built around a small set of types: `Robot`, `LinkId`,
 `Frame`, `Twist`, and `Wrench`. Rust, Python, C, and C++ interfaces share the
 same Rust implementation.
 
@@ -81,7 +80,7 @@ same Rust implementation.
 
 Dynibo is thoroughly unit-tested. Tests cover finite-difference kinematics,
 dynamics regressions, branched robots and external loads, inverse kinematics,
-invalid inputs, workspace ownership and reuse, and allocation-free calculation.
+invalid inputs, model-scoped handles, repeated calculation, and allocation-free execution.
 An independent Pinocchio oracle also compares complete FK, Jacobian, Jacobian
 time-derivative, mass matrix, velocity-product forces, gravity, and RNEA outputs over
 deterministic robot states.
@@ -105,19 +104,18 @@ Add the Cargo package:
 cargo add dynibo
 ```
 
-Load a URDF, create a reusable workspace, and compute a target-link pose:
+Load a URDF and compute a target-link pose:
 
 ```rust
 use dynibo::{BaseState, Robot};
 
 fn main() -> dynibo::Result<()> {
-    let robot = Robot::from_urdf("robot.urdf")?;
+    let mut robot = Robot::from_urdf("robot.urdf")?;
     let base = BaseState::fixed();
     let tool = robot.link_id("tool")?;
-    let mut workspace = robot.workspace();
     let q = vec![0.0; robot.joint_count()];
 
-    let pose = robot.forward_kinematics(&base, &q, tool, &mut workspace)?;
+    let pose = robot.forward_kinematics(&base, &q, tool)?;
     println!("translation: {}", pose.translation.vector.transpose());
     Ok(())
 }
@@ -131,7 +129,7 @@ Install the Python package from PyPI:
 python -m pip install dynibo
 ```
 
-The Python binding owns its reusable native workspace:
+The Python binding owns its reusable native calculation storage:
 
 ```python
 from dynibo import Robot

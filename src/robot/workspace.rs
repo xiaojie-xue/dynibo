@@ -2,11 +2,13 @@ use nalgebra::{Matrix3, Vector3};
 
 use crate::{Frame, Wrench};
 
+use super::Model;
+
 /// An opaque, model-scoped identifier for a link.
 ///
 /// A `LinkId` is valid for the robot model from which it was obtained, including
-/// clones of that [`crate::Robot`]. It is a process-local handle and is not
-/// intended for persistence or serialization.
+/// instances created with [`crate::Robot::fork`]. It is a process-local handle
+/// and is not intended for persistence or serialization.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LinkId {
     pub(super) model_id: u64,
@@ -28,18 +30,9 @@ pub struct IndexedLoad {
     pub wrench: Wrench,
 }
 
-/// Reusable storage for runtime-sized robot calculations.
-///
-/// A workspace is created by [`crate::Robot::workspace`] and is bound to that
-/// robot model, including clones of that [`crate::Robot`]. Creating it allocates
-/// all required buffers; calculations that reuse it do not resize those
-/// buffers. Use a distinct workspace for each concurrent calculation.
-#[derive(Clone, Debug)]
-pub struct Workspace {
-    pub(super) model_id: u64,
-    pub(super) joint_count: usize,
-    pub(super) model_joint_count: usize,
-    pub(super) generalized_count: usize,
+/// Instance-local reusable storage for runtime-sized calculations.
+#[derive(Debug)]
+pub(super) struct Workspace {
     pub(super) frames: Vec<Frame>,
     pub(super) angular_velocities: Vec<Vector3<f64>>,
     pub(super) angular_accelerations: Vec<Vector3<f64>>,
@@ -58,17 +51,10 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    pub(super) fn new(
-        model_id: u64,
-        joint_count: usize,
-        model_joint_count: usize,
-        generalized_count: usize,
-    ) -> Self {
+    pub(super) fn new(model: &Model) -> Self {
+        let joint_count = model.joint_count();
+        let model_joint_count = model.model_joint_count();
         Self {
-            model_id,
-            joint_count,
-            model_joint_count,
-            generalized_count,
             frames: vec![Frame::identity(); model_joint_count],
             angular_velocities: vec![Vector3::zeros(); model_joint_count],
             angular_accelerations: vec![Vector3::zeros(); model_joint_count],
@@ -85,15 +71,5 @@ impl Workspace {
             step: vec![0.0; joint_count],
             ancestor_path: vec![0; model_joint_count],
         }
-    }
-
-    /// Returns the non-fixed joint count for which this workspace was allocated.
-    pub const fn joint_count(&self) -> usize {
-        self.joint_count
-    }
-
-    /// Returns the generalized-vector size for which this workspace was allocated.
-    pub const fn generalized_count(&self) -> usize {
-        self.generalized_count
     }
 }

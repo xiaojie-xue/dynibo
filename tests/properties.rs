@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use approx::assert_relative_eq;
-use dynibo::{BaseMode, BaseState, Frame, IndexedLoad, Robot, Twist, Workspace, Wrench};
+use dynibo::{BaseMode, BaseState, Frame, IndexedLoad, Robot, Twist, Wrench};
 use nalgebra::{DMatrix, Vector3};
 
 fn tree_arm() -> Robot {
@@ -30,20 +30,12 @@ fn assert_slice_close(actual: &[f64], expected: &[f64], epsilon: f64) {
 
 /// Extracts the mass matrix column-wise from Newton-Euler evaluations:
 /// `M e_j = RNEA(q, 0, e_j) - RNEA(q, 0, 0)`.
-fn rnea_mass_matrix(robot: &Robot, q: &[f64], workspace: &mut Workspace) -> Vec<f64> {
+fn rnea_mass_matrix(robot: &mut Robot, q: &[f64]) -> Vec<f64> {
     let joint_count = robot.joint_count();
     let zero = vec![0.0; joint_count];
     let mut bias = vec![0.0; joint_count];
     robot
-        .inverse_dynamics(
-            &dynibo::BaseState::fixed(),
-            q,
-            &zero,
-            &zero,
-            &[],
-            workspace,
-            &mut bias,
-        )
+        .inverse_dynamics(&dynibo::BaseState::fixed(), q, &zero, &zero, &[], &mut bias)
         .unwrap();
     let mut mass = vec![0.0; joint_count * joint_count];
     for column in 0..joint_count {
@@ -57,7 +49,6 @@ fn rnea_mass_matrix(robot: &Robot, q: &[f64], workspace: &mut Workspace) -> Vec<
                 &zero,
                 &unit_acceleration,
                 &[],
-                workspace,
                 &mut torque,
             )
             .unwrap();
@@ -70,9 +61,8 @@ fn rnea_mass_matrix(robot: &Robot, q: &[f64], workspace: &mut Workspace) -> Vec<
 
 #[test]
 fn mass_matrix_matches_rnea_columns_and_keeps_structural_guarantees() {
-    for robot in [tree_arm(), mixed_oracle_arm()] {
+    for mut robot in [tree_arm(), mixed_oracle_arm()] {
         let joint_count = robot.joint_count();
-        let mut workspace = robot.workspace();
         for sample in 0..16 {
             let q: Vec<f64> = (0..joint_count)
                 .map(|joint| {
@@ -82,9 +72,9 @@ fn mass_matrix_matches_rnea_columns_and_keeps_structural_guarantees() {
                 .collect();
             let mut mass = vec![f64::NAN; joint_count * joint_count];
             robot
-                .mass_matrix(&dynibo::BaseState::fixed(), &q, &mut workspace, &mut mass)
+                .mass_matrix(&dynibo::BaseState::fixed(), &q, &mut mass)
                 .unwrap();
-            let expected = rnea_mass_matrix(&robot, &q, &mut workspace);
+            let expected = rnea_mass_matrix(&mut robot, &q);
             assert_slice_close(&mass, &expected, 2.0e-11);
 
             for row in 0..joint_count {
@@ -114,7 +104,7 @@ fn mass_matrix_matches_rnea_columns_and_keeps_structural_guarantees() {
 
 #[test]
 fn floating_mass_matrix_propagates_through_fixed_ancestors() {
-    let robot = Robot::from_urdf_with_base(
+    let mut robot = Robot::from_urdf_with_base(
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/oracle_mixed.urdf"),
         BaseMode::Floating,
     )
@@ -124,9 +114,7 @@ fn floating_mass_matrix_propagates_through_fixed_ancestors() {
     let generalized_count = robot.generalized_count();
     let mut mass = vec![0.0; generalized_count * generalized_count];
 
-    robot
-        .mass_matrix(&base, &q, &mut robot.workspace(), &mut mass)
-        .unwrap();
+    robot.mass_matrix(&base, &q, &mut mass).unwrap();
 
     let mass = DMatrix::from_column_slice(generalized_count, generalized_count, &mass);
     assert_relative_eq!(mass, mass.transpose(), epsilon = 2.0e-12);
@@ -134,23 +122,16 @@ fn floating_mass_matrix_propagates_through_fixed_ancestors() {
 
 #[test]
 fn deterministic_tree_jacobians_match_finite_difference() {
-    let robot = tree_arm();
+    let mut robot = tree_arm();
     let epsilon = 1.0e-7;
 
     for target_name in ["left_tool", "right_tool"] {
         let target = robot.link_id(target_name).unwrap();
-        let mut workspace = robot.workspace();
         for sample in 0..16 {
             let q = deterministic_state(sample, 0.0, 0.8);
             let mut jacobian = [0.0; 42];
             robot
-                .jacobian(
-                    &dynibo::BaseState::fixed(),
-                    &q,
-                    target,
-                    &mut workspace,
-                    &mut jacobian,
-                )
+                .jacobian(&dynibo::BaseState::fixed(), &q, target, &mut jacobian)
                 .unwrap();
 
             for joint in 0..7 {
@@ -159,20 +140,10 @@ fn deterministic_tree_jacobians_match_finite_difference() {
                 plus_q[joint] += epsilon;
                 minus_q[joint] -= epsilon;
                 let plus = robot
-                    .forward_kinematics(
-                        &dynibo::BaseState::fixed(),
-                        &plus_q,
-                        target,
-                        &mut workspace,
-                    )
+                    .forward_kinematics(&dynibo::BaseState::fixed(), &plus_q, target)
                     .unwrap();
                 let minus = robot
-                    .forward_kinematics(
-                        &dynibo::BaseState::fixed(),
-                        &minus_q,
-                        target,
-                        &mut workspace,
-                    )
+                    .forward_kinematics(&dynibo::BaseState::fixed(), &minus_q, target)
                     .unwrap();
                 let angular =
                     (plus.rotation * minus.rotation.inverse()).scaled_axis() / (2.0 * epsilon);
@@ -201,10 +172,9 @@ fn sample_state(joint_count: usize, sample: usize, phase: f64, amplitude: f64) -
 
 #[test]
 fn velocity_product_matches_rnea_minus_gravity() {
-    for robot in [tree_arm(), mixed_oracle_arm()] {
+    for mut robot in [tree_arm(), mixed_oracle_arm()] {
         let joint_count = robot.joint_count();
         let zero = vec![0.0; joint_count];
-        let mut workspace = robot.workspace();
         for sample in 0..16 {
             let q = sample_state(joint_count, sample, 0.2, 0.9);
             let qd = sample_state(joint_count, sample, 0.9, 0.7);
@@ -214,32 +184,17 @@ fn velocity_product_matches_rnea_minus_gravity() {
                     &dynibo::BaseState::fixed(),
                     &q,
                     &qd,
-                    &mut workspace,
                     &mut velocity_product,
                 )
                 .unwrap();
 
             let mut gravity = vec![0.0; robot.generalized_count()];
             robot
-                .gravity(
-                    &dynibo::BaseState::fixed(),
-                    &q,
-                    &[],
-                    &mut workspace,
-                    &mut gravity,
-                )
+                .gravity(&dynibo::BaseState::fixed(), &q, &[], &mut gravity)
                 .unwrap();
             let mut bias = vec![0.0; robot.generalized_count()];
             robot
-                .inverse_dynamics(
-                    &dynibo::BaseState::fixed(),
-                    &q,
-                    &qd,
-                    &zero,
-                    &[],
-                    &mut workspace,
-                    &mut bias,
-                )
+                .inverse_dynamics(&dynibo::BaseState::fixed(), &q, &qd, &zero, &[], &mut bias)
                 .unwrap();
             let expected: Vec<f64> = bias
                 .iter()
@@ -250,13 +205,7 @@ fn velocity_product_matches_rnea_minus_gravity() {
 
             let mut zero_product = vec![f64::NAN; robot.generalized_count()];
             robot
-                .velocity_product_forces(
-                    &dynibo::BaseState::fixed(),
-                    &q,
-                    &zero,
-                    &mut workspace,
-                    &mut zero_product,
-                )
+                .velocity_product_forces(&dynibo::BaseState::fixed(), &q, &zero, &mut zero_product)
                 .unwrap();
             assert_slice_close(
                 &zero_product,
@@ -270,14 +219,13 @@ fn velocity_product_matches_rnea_minus_gravity() {
 #[test]
 fn jacobian_derivative_matches_zero_acceleration_and_finite_difference() {
     let epsilon = 1.0e-7;
-    for (robot, target_names) in [
+    for (mut robot, target_names) in [
         (tree_arm(), &["left_tool", "right_tool"][..]),
         (mixed_oracle_arm(), &["tool"][..]),
     ] {
         let joint_count = robot.joint_count();
         for &target_name in target_names {
             let target = robot.link_id(target_name).unwrap();
-            let mut workspace = robot.workspace();
             for sample in 0..8 {
                 let q = sample_state(joint_count, sample, 0.3, 0.85);
                 let qd = sample_state(joint_count, sample, 1.2, 0.75);
@@ -290,7 +238,6 @@ fn jacobian_derivative_matches_zero_acceleration_and_finite_difference() {
                         &q,
                         &qd,
                         target,
-                        &mut workspace,
                         &mut derivative,
                     )
                     .unwrap();
@@ -303,7 +250,6 @@ fn jacobian_derivative_matches_zero_acceleration_and_finite_difference() {
                         &qd,
                         &zero,
                         target,
-                        &mut workspace,
                     )
                     .unwrap();
                 let contracted: Vec<f64> = (0..6)
@@ -321,22 +267,10 @@ fn jacobian_derivative_matches_zero_acceleration_and_finite_difference() {
                 let mut plus = vec![0.0; 6 * joint_count];
                 let mut minus = vec![0.0; 6 * joint_count];
                 robot
-                    .jacobian(
-                        &dynibo::BaseState::fixed(),
-                        &plus_q,
-                        target,
-                        &mut workspace,
-                        &mut plus,
-                    )
+                    .jacobian(&dynibo::BaseState::fixed(), &plus_q, target, &mut plus)
                     .unwrap();
                 robot
-                    .jacobian(
-                        &dynibo::BaseState::fixed(),
-                        &minus_q,
-                        target,
-                        &mut workspace,
-                        &mut minus,
-                    )
+                    .jacobian(&dynibo::BaseState::fixed(), &minus_q, target, &mut minus)
                     .unwrap();
                 for index in 0..6 * joint_count {
                     assert_relative_eq!(
@@ -349,20 +283,12 @@ fn jacobian_derivative_matches_zero_acceleration_and_finite_difference() {
         }
 
         // The root link has no moving ancestor joints.
-        let root = robot.link_id(robot.root_link().name()).unwrap();
-        let mut workspace = robot.workspace();
+        let root = robot.root_link_id();
         let q = sample_state(joint_count, 0, 0.3, 0.85);
         let qd = sample_state(joint_count, 0, 1.2, 0.75);
         let mut derivative = vec![f64::NAN; 6 * joint_count];
         robot
-            .jacobian_derivative(
-                &dynibo::BaseState::fixed(),
-                &q,
-                &qd,
-                root,
-                &mut workspace,
-                &mut derivative,
-            )
+            .jacobian_derivative(&dynibo::BaseState::fixed(), &q, &qd, root, &mut derivative)
             .unwrap();
         assert_slice_close(&derivative, &vec![0.0; 6 * joint_count], 0.0);
     }
@@ -370,7 +296,7 @@ fn jacobian_derivative_matches_zero_acceleration_and_finite_difference() {
 
 #[test]
 fn deterministic_dynamics_preserve_gravity_and_load_invariants() {
-    let robot = tree_arm();
+    let mut robot = tree_arm();
     let left = robot.link_id("left_tool").unwrap();
     let right = robot.link_id("right_tool").unwrap();
     let left_load = IndexedLoad {
@@ -382,7 +308,6 @@ fn deterministic_dynamics_preserve_gravity_and_load_invariants() {
         wrench: Wrench::new(Vector3::new(-0.4, 0.1, 0.2), Vector3::new(-0.6, 0.8, 0.3)),
     };
     let zero = [0.0; 7];
-    let mut workspace = robot.workspace();
 
     for sample in 0..32 {
         let q = deterministic_state(sample, 0.2, 0.85);
@@ -394,11 +319,9 @@ fn deterministic_dynamics_preserve_gravity_and_load_invariants() {
         let base = dynibo::BaseState::fixed_at(base).unwrap();
         let mut gravity = [0.0; 7];
         let mut inverse = [0.0; 7];
+        robot.gravity(&base, &q, &[], &mut gravity).unwrap();
         robot
-            .gravity(&base, &q, &[], &mut workspace, &mut gravity)
-            .unwrap();
-        robot
-            .inverse_dynamics(&base, &q, &zero, &zero, &[], &mut workspace, &mut inverse)
+            .inverse_dynamics(&base, &q, &zero, &zero, &[], &mut inverse)
             .unwrap();
         assert_slice_close(&gravity, &inverse, 3.0e-12);
 
@@ -406,19 +329,13 @@ fn deterministic_dynamics_preserve_gravity_and_load_invariants() {
         let mut right_only = [0.0; 7];
         let mut both = [0.0; 7];
         robot
-            .gravity(&base, &q, &[left_load], &mut workspace, &mut left_only)
+            .gravity(&base, &q, &[left_load], &mut left_only)
             .unwrap();
         robot
-            .gravity(&base, &q, &[right_load], &mut workspace, &mut right_only)
+            .gravity(&base, &q, &[right_load], &mut right_only)
             .unwrap();
         robot
-            .gravity(
-                &base,
-                &q,
-                &[left_load, right_load],
-                &mut workspace,
-                &mut both,
-            )
+            .gravity(&base, &q, &[left_load, right_load], &mut both)
             .unwrap();
         let expected: [f64; 7] =
             std::array::from_fn(|joint| left_only[joint] + right_only[joint] - gravity[joint]);
@@ -428,8 +345,7 @@ fn deterministic_dynamics_preserve_gravity_and_load_invariants() {
 
 #[test]
 fn mixed_joint_mass_matrix_is_symmetric_and_positive_on_moving_coordinates() {
-    let robot = mixed_oracle_arm();
-    let mut workspace = robot.workspace();
+    let mut robot = mixed_oracle_arm();
     let zero = [0.0; 3];
 
     for sample in 0..16 {
@@ -446,7 +362,6 @@ fn mixed_joint_mass_matrix_is_symmetric_and_positive_on_moving_coordinates() {
                 &zero,
                 &zero,
                 &[],
-                &mut workspace,
                 &mut bias,
             )
             .unwrap();
@@ -463,7 +378,6 @@ fn mixed_joint_mass_matrix_is_symmetric_and_positive_on_moving_coordinates() {
                     &zero,
                     &unit_acceleration,
                     &[],
-                    &mut workspace,
                     &mut torque,
                 )
                 .unwrap();

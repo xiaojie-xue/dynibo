@@ -2,7 +2,7 @@ use nalgebra::Vector3;
 
 use crate::{BaseState, Frame, JointType, Result, Twist, Wrench};
 
-use super::super::{FLOATING_BASE_DOF, IndexedLoad, Robot, Workspace};
+use super::super::{FLOATING_BASE_DOF, IndexedLoad, Model, Robot, Workspace};
 use super::{add_wrench, wrench_to_parent, write_world_wrench};
 
 const GRAVITY: f64 = 9.80665;
@@ -25,6 +25,59 @@ struct GravityScratch<'a> {
 impl Robot {
     /// Writes velocity-product generalized forces `C(q, qd) * qd`.
     ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid base state or input/output length.
+    pub fn velocity_product_forces(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        qd: &[f64],
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.model
+            .velocity_product_forces(base, q, qd, &mut self.workspace, output)
+    }
+
+    /// Writes Newton-Euler generalized forces into caller-owned output.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid base state, input/output length, or load link ID.
+    #[allow(clippy::too_many_arguments)]
+    pub fn inverse_dynamics(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        qd: &[f64],
+        qdd: &[f64],
+        loads: &[IndexedLoad],
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.model
+            .inverse_dynamics(base, q, qd, qdd, loads, &mut self.workspace, output)
+    }
+
+    /// Writes gravity and external-load generalized forces into caller-owned output.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid base state, input/output length, or load link ID.
+    pub fn gravity(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        loads: &[IndexedLoad],
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.model
+            .gravity(base, q, loads, &mut self.workspace, output)
+    }
+}
+
+impl Model {
+    /// Writes velocity-product generalized forces `C(q, qd) * qd`.
+    ///
     /// Gravity, prescribed base acceleration, and external loads are excluded.
     /// For a floating base, the supplied base velocity participates in the result
     /// and output is ordered `[base torque, base force, joint forces]`. The
@@ -32,8 +85,8 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error for invalid input or output lengths or workspace.
-    pub fn velocity_product_forces(
+    /// Returns an error for invalid input or output lengths.
+    fn velocity_product_forces(
         &self,
         base: &BaseState,
         q: &[f64],
@@ -42,7 +95,6 @@ impl Robot {
         output: &mut [f64],
     ) -> Result<()> {
         self.validate_base_state(base)?;
-        self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
         self.validate_output("velocity product output", output)?;
@@ -87,9 +139,9 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error for invalid lengths, link IDs, or workspace.
+    /// Returns an error for invalid lengths or link IDs.
     #[allow(clippy::too_many_arguments)]
-    pub fn inverse_dynamics(
+    fn inverse_dynamics(
         &self,
         base: &BaseState,
         q: &[f64],
@@ -100,7 +152,6 @@ impl Robot {
         output: &mut [f64],
     ) -> Result<()> {
         self.validate_base_state(base)?;
-        self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
         self.validate_slice("qdd", qdd)?;
@@ -132,8 +183,8 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error for invalid lengths, link IDs, or workspace.
-    pub fn gravity(
+    /// Returns an error for invalid lengths or link IDs.
+    fn gravity(
         &self,
         base: &BaseState,
         q: &[f64],
@@ -142,7 +193,6 @@ impl Robot {
         output: &mut [f64],
     ) -> Result<()> {
         self.validate_base_state(base)?;
-        self.validate_workspace(workspace)?;
         self.validate_slice("q", q)?;
         self.validate_output("gravity output", output)?;
         self.gravity_for_base(q, base.frame(), loads, workspace, output)
@@ -471,7 +521,7 @@ mod tests {
     use super::*;
     use crate::Error;
 
-    fn robot() -> Robot {
+    fn fixture() -> Robot {
         Robot::from_urdf(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_arm.urdf"))
             .unwrap()
     }
@@ -488,44 +538,40 @@ mod tests {
 
     #[test]
     fn dynamics_kernels_reject_corrupted_workspace_buffers() {
-        let robot = robot();
+        let mut robot = fixture();
         let base = BaseState::fixed();
         let q = [0.0; 4];
         let mut output = [0.0; 4];
 
-        let mut workspace = robot.workspace();
-        workspace.frames.pop();
+        robot.workspace.frames.pop();
         assert_wrong_workspace_length(
-            robot.velocity_product_forces(&base, &q, &q, &mut workspace, &mut output),
+            robot.velocity_product_forces(&base, &q, &q, &mut output),
             "transform workspace",
         );
 
-        let mut workspace = robot.workspace();
-        workspace.frames.pop();
+        let mut robot = fixture();
+        robot.workspace.frames.pop();
         assert_wrong_workspace_length(
-            robot.inverse_dynamics(&base, &q, &q, &q, &[], &mut workspace, &mut output),
+            robot.inverse_dynamics(&base, &q, &q, &q, &[], &mut output),
             "transform workspace",
         );
 
-        let mut workspace = robot.workspace();
-        workspace.frames.pop();
+        let mut robot = fixture();
+        robot.workspace.frames.pop();
         assert_wrong_workspace_length(
-            robot.gravity(&base, &q, &[], &mut workspace, &mut output),
+            robot.gravity(&base, &q, &[], &mut output),
             "transform workspace",
         );
 
-        let mut workspace = robot.workspace();
-        workspace.angular_accelerations.pop();
+        let mut robot = fixture();
+        robot.workspace.angular_accelerations.pop();
         assert_wrong_workspace_length(
-            robot.gravity(&base, &q, &[], &mut workspace, &mut output),
+            robot.gravity(&base, &q, &[], &mut output),
             "gravity workspace",
         );
 
-        let mut workspace = robot.workspace();
-        workspace.link_loads.pop();
-        assert_wrong_workspace_length(
-            robot.gravity(&base, &q, &[], &mut workspace, &mut output),
-            "load workspace",
-        );
+        let mut robot = fixture();
+        robot.workspace.link_loads.pop();
+        assert_wrong_workspace_length(robot.gravity(&base, &q, &[], &mut output), "load workspace");
     }
 }

@@ -23,7 +23,7 @@
 [English](README.md) | 简体中文
 
 `dynibo` 是一个快速、轻量且可靠的机器人运动学与动力学库。它在运行时从 URDF
-加载机器人，并通过可复用的 Workspace 提供计算期零分配的接口；同时基于同一
+加载机器人，并通过 Robot 内部的可复用存储提供计算期零分配的接口；同时基于同一
 套 Rust 核心开放 Python 与 C/C++ 接口。
 
 ## 特性
@@ -31,8 +31,8 @@
 ### 快速
 
 在下列 benchmark 所测量的核心操作中，Dynibo 的运行速度是 Pinocchio 的
-1.19–2.51 倍。Dynibo 基于 Rust 实现，并将内存分配移出计算循环。创建 `Workspace`
-和输出 buffer 后，主要运动学与动力学接口会复用已有内存，不再分配或调整容量。
+1.19–2.51 倍。Dynibo 基于 Rust 实现，并将内存分配移出计算循环。创建 `Robot`
+和输出 buffer 后，主要运动学与动力学接口会复用内部存储，不再分配或调整容量。
 
 下表展示 Dynibo 相对 Pinocchio 在核心运动学与动力学接口上的加速比。
 
@@ -67,13 +67,13 @@ Dynibo 专注于最常用的机器人运动学与动力学接口：
 - `gravity` — 重力补偿，可附加外部载荷
 - `inverse_dynamics` — 递归 Newton–Euler 逆动力学
 
-API 围绕少量核心类型构建：`Robot`、`Workspace`、`LinkId`、`Frame`、`Twist` 和
+API 围绕少量核心类型构建：`Robot`、`LinkId`、`Frame`、`Twist` 和
 `Wrench`。Rust、Python、C 和 C++ 接口共用同一套 Rust 实现。
 
 ### 可靠
 
 Dynibo 经过了深入的单元测试。测试覆盖有限差分运动学、动力学回归、树状机器人与外部
-载荷、逆运动学、非法输入、Workspace 归属与复用，以及计算期零分配。独立的 Pinocchio
+载荷、逆运动学、非法输入、模型作用域 handle、重复计算，以及计算期零分配。独立的 Pinocchio
 oracle 还会在确定性机器人状态下完整对比 FK、Jacobian、Jacobian 时间导数、质量矩阵、速度乘积力、gravity 和 RNEA 输出。
 
 ## 依赖
@@ -95,18 +95,18 @@ Python wheel 已包含原生库，无需额外的 Python 运行时依赖。
 cargo add dynibo
 ```
 
-加载 URDF、创建可复用的 workspace，并计算目标 link 位姿：
+加载 URDF 并计算目标 link 位姿：
 
 ```rust
-use dynibo::Robot;
+use dynibo::{BaseState, Robot};
 
 fn main() -> dynibo::Result<()> {
-    let robot = Robot::from_urdf("robot.urdf")?;
+    let mut robot = Robot::from_urdf("robot.urdf")?;
+    let base = BaseState::fixed();
     let tool = robot.link_id("tool")?;
-    let mut workspace = robot.workspace();
     let q = vec![0.0; robot.joint_count()];
 
-    let pose = robot.forward_kinematics(&q, tool, &mut workspace)?;
+    let pose = robot.forward_kinematics(&base, &q, tool)?;
     println!("translation: {}", pose.translation.vector.transpose());
     Ok(())
 }
@@ -120,7 +120,7 @@ fn main() -> dynibo::Result<()> {
 python -m pip install dynibo
 ```
 
-Python binding 会在内部持有并复用原生 workspace：
+Python binding 会在内部持有并复用原生计算存储：
 
 ```python
 from dynibo import Robot

@@ -1,6 +1,8 @@
 use nalgebra::{Isometry3, Translation3, Unit, UnitQuaternion, Vector3};
 
-use crate::{Error, Frame, Result, Wrench};
+#[cfg(test)]
+use crate::Wrench;
+use crate::{Error, Frame, Result};
 
 /// Joint motion supported by `Robot`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -15,13 +17,12 @@ pub enum JointType {
 
 /// Kinematic and state properties of one URDF joint.
 #[derive(Clone, Debug)]
-pub struct Joint {
+pub(crate) struct Joint {
     name: String,
     kinematics: JointKinematics,
     lower_limit: f64,
     upper_limit: f64,
     velocity_limit: f64,
-    home_offset: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -86,49 +87,51 @@ impl Joint {
             lower_limit,
             upper_limit,
             velocity_limit,
-            home_offset: 0.0,
         })
     }
 
     /// Returns the joint name loaded from the URDF.
-    pub fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         &self.name
     }
 
     /// Returns the joint motion type.
-    pub const fn joint_type(&self) -> JointType {
+    pub(crate) const fn joint_type(&self) -> JointType {
         self.kinematics.joint_type
     }
 
     /// Returns the minimum joint position, in radians or metres.
-    pub const fn lower_limit(&self) -> f64 {
+    pub(crate) const fn lower_limit(&self) -> f64 {
         self.lower_limit
     }
 
     /// Returns the maximum joint position, in radians or metres.
-    pub const fn upper_limit(&self) -> f64 {
+    pub(crate) const fn upper_limit(&self) -> f64 {
         self.upper_limit
     }
 
     /// Returns the maximum absolute velocity, in radians or metres per second.
-    pub const fn velocity_limit(&self) -> f64 {
+    pub(crate) const fn velocity_limit(&self) -> f64 {
         self.velocity_limit
     }
 
     /// Returns the fixed transform from the parent link to the joint.
-    pub const fn origin(&self) -> &Frame {
+    #[cfg(test)]
+    pub(crate) const fn origin(&self) -> &Frame {
         &self.kinematics.origin
     }
 
     /// Returns the normalized motion axis expressed in the joint frame.
     ///
     /// Fixed joints have no motion axis and return an internal placeholder.
-    pub const fn axis(&self) -> &Unit<Vector3<f64>> {
+    #[cfg(test)]
+    pub(crate) const fn axis(&self) -> &Unit<Vector3<f64>> {
         &self.kinematics.axis
     }
 
     /// Computes the parent-to-child transform at position `q`.
-    pub fn frame(&self, q: f64) -> Frame {
+    #[cfg(test)]
+    pub(crate) fn frame(&self, q: f64) -> Frame {
         self.kinematics.frame(q)
     }
 
@@ -136,7 +139,8 @@ impl Joint {
     ///
     /// Revolute joints return torque and prismatic joints return force. Fixed
     /// joints always return zero.
-    pub fn active_force(&self, load: Wrench) -> f64 {
+    #[cfg(test)]
+    pub(crate) fn active_force(&self, load: Wrench) -> f64 {
         match self.kinematics.joint_type {
             JointType::Revolute => load.torque.dot(self.kinematics.axis.as_ref()),
             JointType::Prismatic => load.force.dot(self.kinematics.axis.as_ref()),
@@ -149,19 +153,8 @@ impl Joint {
     }
 
     /// Returns whether `q` lies outside the joint position limits.
-    pub fn is_over_limit(&self, q: f64) -> bool {
+    pub(crate) fn is_over_limit(&self, q: f64) -> bool {
         q > self.upper_limit + 1.0e-12 || q < self.lower_limit - 1.0e-12
-    }
-
-    /// Returns the stored home-position offset.
-    pub const fn home_offset(&self) -> f64 {
-        self.home_offset
-    }
-
-    /// Stores a home-position offset and returns it.
-    pub fn set_home_offset(&mut self, offset: f64) -> f64 {
-        self.home_offset = offset;
-        offset
     }
 }
 
@@ -199,8 +192,8 @@ mod tests {
     }
 
     #[test]
-    fn preserves_parameters_and_home_offset() {
-        let mut joint = Joint::new(
+    fn preserves_parameters() {
+        let joint = Joint::new(
             "joint_1",
             JointType::Revolute,
             Isometry3::from_parts(
@@ -224,8 +217,6 @@ mod tests {
         assert!(joint.is_over_limit(4.0));
         assert!(joint.is_over_limit(-4.0));
         assert!(!joint.is_over_limit(0.0));
-        assert_abs_diff_eq!(joint.set_home_offset(-0.25), -0.25);
-        assert_abs_diff_eq!(joint.home_offset(), -0.25);
         assert_abs_diff_eq!(
             joint.active_force(Wrench::new(Vector3::new(1.0, 2.0, 3.0), Vector3::zeros())),
             3.0

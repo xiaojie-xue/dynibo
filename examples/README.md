@@ -16,8 +16,8 @@ kinematics and dynamics calculation:
 
 ## Rust
 
-[`rust/franka.rs`](rust/franka.rs) uses the native Rust API and its reusable
-`Workspace`:
+[`rust/franka.rs`](rust/franka.rs) uses the native Rust API and the reusable
+calculation storage owned by `Robot`:
 
 ```bash
 cargo run --example franka

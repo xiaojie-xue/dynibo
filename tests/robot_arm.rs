@@ -8,7 +8,7 @@ use std::{
 };
 
 use approx::{assert_abs_diff_eq, assert_relative_eq};
-use dynibo::{Error, Frame, IndexedLoad, InverseKinematicsOptions, Link, Robot, Twist, Wrench};
+use dynibo::{Error, Frame, IndexedLoad, InverseKinematicsOptions, LinkId, Robot, Twist, Wrench};
 use nalgebra::{Isometry3, Matrix3, SMatrix, SVector, Translation3, UnitQuaternion, Vector3};
 
 type JointVector<const N: usize> = SVector<f64, N>;
@@ -17,195 +17,167 @@ type Jacobian<const N: usize> = SMatrix<f64, 6, N>;
 const STANDARD_GRAVITY: f64 = 9.80665;
 
 #[derive(Clone, Copy)]
-struct Load<'a> {
-    link: &'a Link,
+struct Load {
+    link: LinkId,
     wrench: Wrench,
 }
 
 trait DynamicTestApi {
     fn test_forward_kinematics<const N: usize>(
-        &self,
+        &mut self,
         q: &JointVector<N>,
-        target: &Link,
+        target: LinkId,
     ) -> dynibo::Result<Frame>;
     fn test_jacobian<const N: usize>(
-        &self,
+        &mut self,
         q: &JointVector<N>,
-        target: &Link,
+        target: LinkId,
     ) -> dynibo::Result<Jacobian<N>>;
     fn test_inverse_kinematics<const N: usize>(
-        &self,
+        &mut self,
         initial_q: &JointVector<N>,
-        target: &Link,
+        target: LinkId,
         desired: &Frame,
         options: InverseKinematicsOptions,
     ) -> dynibo::Result<JointVector<N>>;
     fn test_forward_velocity_kinematics<const N: usize>(
-        &self,
+        &mut self,
         q: &JointVector<N>,
         qd: &JointVector<N>,
-        target: &Link,
+        target: LinkId,
         base: &Frame,
         tool: &Frame,
     ) -> dynibo::Result<Twist>;
     fn test_forward_acceleration_kinematics<const N: usize>(
-        &self,
+        &mut self,
         q: &JointVector<N>,
         qd: &JointVector<N>,
         qdd: &JointVector<N>,
-        target: &Link,
+        target: LinkId,
     ) -> dynibo::Result<Twist>;
     fn test_gravity<const N: usize>(
-        &self,
+        &mut self,
         q: &JointVector<N>,
         base: &Frame,
-        loads: &[Load<'_>],
+        loads: &[Load],
     ) -> dynibo::Result<JointVector<N>>;
     fn test_inverse_dynamics<const N: usize>(
-        &self,
+        &mut self,
         q: &JointVector<N>,
         qd: &JointVector<N>,
         qdd: &JointVector<N>,
-        loads: &[Load<'_>],
+        loads: &[Load],
     ) -> dynibo::Result<JointVector<N>>;
 }
 
 impl DynamicTestApi for Robot {
     fn test_forward_kinematics<const N: usize>(
-        &self,
+        &mut self,
         q: &JointVector<N>,
-        target: &Link,
+        target: LinkId,
     ) -> dynibo::Result<Frame> {
-        let mut workspace = self.workspace();
-        self.forward_kinematics(
-            &dynibo::BaseState::fixed(),
-            q.as_slice(),
-            self.link_id(target.name())?,
-            &mut workspace,
-        )
+        self.forward_kinematics(&dynibo::BaseState::fixed(), q.as_slice(), target)
     }
 
     fn test_jacobian<const N: usize>(
-        &self,
+        &mut self,
         q: &JointVector<N>,
-        target: &Link,
+        target: LinkId,
     ) -> dynibo::Result<Jacobian<N>> {
-        let mut workspace = self.workspace();
         let mut output = Jacobian::<N>::zeros();
         self.jacobian(
             &dynibo::BaseState::fixed(),
             q.as_slice(),
-            self.link_id(target.name())?,
-            &mut workspace,
+            target,
             output.as_mut_slice(),
         )?;
         Ok(output)
     }
 
     fn test_inverse_kinematics<const N: usize>(
-        &self,
+        &mut self,
         initial_q: &JointVector<N>,
-        target: &Link,
+        target: LinkId,
         desired: &Frame,
         options: InverseKinematicsOptions,
     ) -> dynibo::Result<JointVector<N>> {
-        let mut workspace = self.workspace();
         let mut output = JointVector::<N>::zeros();
         self.inverse_kinematics(
             &dynibo::BaseState::fixed(),
             initial_q.as_slice(),
-            self.link_id(target.name())?,
+            target,
             desired,
             options,
-            &mut workspace,
             output.as_mut_slice(),
         )?;
         Ok(output)
     }
 
     fn test_forward_velocity_kinematics<const N: usize>(
-        &self,
+        &mut self,
         q: &JointVector<N>,
         qd: &JointVector<N>,
-        target: &Link,
+        target: LinkId,
         base: &Frame,
         tool: &Frame,
     ) -> dynibo::Result<Twist> {
         let base = dynibo::BaseState::fixed_at(*base)?;
-        let mut workspace = self.workspace();
-        self.forward_velocity_kinematics(
-            &base,
-            q.as_slice(),
-            qd.as_slice(),
-            self.link_id(target.name())?,
-            tool,
-            &mut workspace,
-        )
+        self.forward_velocity_kinematics(&base, q.as_slice(), qd.as_slice(), target, tool)
     }
 
     fn test_forward_acceleration_kinematics<const N: usize>(
-        &self,
+        &mut self,
         q: &JointVector<N>,
         qd: &JointVector<N>,
         qdd: &JointVector<N>,
-        target: &Link,
+        target: LinkId,
     ) -> dynibo::Result<Twist> {
-        let mut workspace = self.workspace();
         self.forward_acceleration_kinematics(
             &dynibo::BaseState::fixed(),
             q.as_slice(),
             qd.as_slice(),
             qdd.as_slice(),
-            self.link_id(target.name())?,
-            &mut workspace,
+            target,
         )
     }
 
     fn test_gravity<const N: usize>(
-        &self,
+        &mut self,
         q: &JointVector<N>,
         base: &Frame,
-        loads: &[Load<'_>],
+        loads: &[Load],
     ) -> dynibo::Result<JointVector<N>> {
         let loads = loads
             .iter()
             .map(|load| {
                 Ok(IndexedLoad {
-                    link: self.link_id(load.link.name())?,
+                    link: load.link,
                     wrench: load.wrench,
                 })
             })
             .collect::<dynibo::Result<Vec<_>>>()?;
         let base = dynibo::BaseState::fixed_at(*base)?;
-        let mut workspace = self.workspace();
         let mut output = JointVector::<N>::zeros();
-        self.gravity(
-            &base,
-            q.as_slice(),
-            &loads,
-            &mut workspace,
-            output.as_mut_slice(),
-        )?;
+        self.gravity(&base, q.as_slice(), &loads, output.as_mut_slice())?;
         Ok(output)
     }
 
     fn test_inverse_dynamics<const N: usize>(
-        &self,
+        &mut self,
         q: &JointVector<N>,
         qd: &JointVector<N>,
         qdd: &JointVector<N>,
-        loads: &[Load<'_>],
+        loads: &[Load],
     ) -> dynibo::Result<JointVector<N>> {
         let loads = loads
             .iter()
             .map(|load| {
                 Ok(IndexedLoad {
-                    link: self.link_id(load.link.name())?,
+                    link: load.link,
                     wrench: load.wrench,
                 })
             })
             .collect::<dynibo::Result<Vec<_>>>()?;
-        let mut workspace = self.workspace();
         let mut output = JointVector::<N>::zeros();
         self.inverse_dynamics(
             &dynibo::BaseState::fixed(),
@@ -213,7 +185,6 @@ impl DynamicTestApi for Robot {
             qd.as_slice(),
             qdd.as_slice(),
             &loads,
-            &mut workspace,
             output.as_mut_slice(),
         )?;
         Ok(output)
@@ -224,9 +195,8 @@ fn test_arm() -> Robot {
     Robot::from_urdf(urdf_path("test_arm.urdf")).expect("test URDF must load")
 }
 
-fn end_link(arm: &Robot) -> &Link {
-    arm.links()
-        .last()
+fn end_link(arm: &Robot) -> LinkId {
+    arm.link_id_at(arm.link_count() - 1)
         .expect("test chain must have an end link")
 }
 
@@ -244,14 +214,14 @@ fn tree_arm() -> Robot {
 #[test]
 fn loaded_link_preserves_its_inertial_parameters() {
     let arm = test_arm();
-    let link = arm.link("test_link_2").unwrap();
+    let link = arm.link_id("test_link_2").unwrap();
 
-    assert_eq!(link.name(), "test_link_2");
-    assert_eq!(link.mass(), 7.016);
-    assert_abs_diff_eq!(link.center_of_mass().z, 0.129994);
+    assert_eq!(arm.link_name(link).unwrap(), "test_link_2");
+    assert_eq!(arm.link_mass(link).unwrap(), 7.016);
+    assert_abs_diff_eq!(arm.link_center_of_mass(link).unwrap().z, 0.129994);
     assert_eq!(
-        link.inertia(),
-        &Matrix3::new(
+        arm.link_inertia(link).unwrap(),
+        Matrix3::new(
             0.016533114,
             0.000002097,
             0.006290504,
@@ -267,50 +237,39 @@ fn loaded_link_preserves_its_inertial_parameters() {
 
 #[test]
 fn urdf_rs_loads_test_arm_and_checks_calculation_size() {
-    let arm = test_arm();
+    let mut arm = test_arm();
     assert_eq!(arm.name(), "test_arm");
-    assert_eq!(arm.links().len(), 5);
-    assert_eq!(arm.links()[0].name(), "test_base_link");
-    assert_eq!(arm.links()[1].name(), "test_link_1");
-    assert_eq!(arm.joints().len(), 4);
-    assert_eq!(arm.joints()[0].name(), "test_joint_1");
+    assert_eq!(arm.link_count(), 5);
+    assert_eq!(arm.link_name(arm.root_link_id()).unwrap(), "test_base_link");
+    assert_eq!(
+        arm.link_name(arm.link_id_at(1).unwrap()).unwrap(),
+        "test_link_1"
+    );
+    assert_eq!(arm.joint_count(), 4);
+    assert_eq!(arm.joint_name(0).unwrap(), "test_joint_1");
     assert_eq!(arm.link_count(), 5);
     assert_eq!(arm.joint_count(), 4);
-    assert_eq!(arm.link("test_link_1").unwrap().name(), "test_link_1");
+    assert_eq!(
+        arm.link_name(arm.link_id("test_link_1").unwrap()).unwrap(),
+        "test_link_1"
+    );
     assert!(matches!(
-        arm.link("missing_link"),
+        arm.link_id("missing_link"),
         Err(Error::UnknownLink { name }) if name == "missing_link"
     ));
     let link_id = arm.link_id("test_link_1").unwrap();
-    let mut workspace = arm.workspace();
-    arm.forward_kinematics(
-        &dynibo::BaseState::fixed(),
-        &[0.0; 4],
-        link_id,
-        &mut workspace,
-    )
-    .expect("a model-owned link ID remains valid");
+    arm.forward_kinematics(&dynibo::BaseState::fixed(), &[0.0; 4], link_id)
+        .expect("a model-owned link ID remains valid");
     let other_arm = test_arm();
     let other_link_id = other_arm.link_id("test_link_1").unwrap();
     assert!(matches!(
-        arm.forward_kinematics(
-            &dynibo::BaseState::fixed(),
-            &[0.0; 4],
-            other_link_id,
-            &mut workspace
-        ),
+        arm.forward_kinematics(&dynibo::BaseState::fixed(), &[0.0; 4], other_link_id),
         Err(Error::InvalidLinkId)
     ));
-    assert_abs_diff_eq!(arm.links()[2].mass(), 7.016);
-    assert_abs_diff_eq!(arm.joints()[1].origin().translation.vector.z, 0.108);
+    assert_abs_diff_eq!(arm.link_mass(arm.link_id_at(2).unwrap()).unwrap(), 7.016);
 
     let wrong_size = arm
-        .forward_kinematics(
-            &dynibo::BaseState::fixed(),
-            &[0.0; 3],
-            link_id,
-            &mut workspace,
-        )
+        .forward_kinematics(&dynibo::BaseState::fixed(), &[0.0; 3], link_id)
         .unwrap_err();
     assert!(matches!(
         wrong_size,
@@ -334,7 +293,7 @@ fn urdf_loading_reports_missing_and_malformed_files() {
 
 #[test]
 fn jacobian_agrees_with_forward_kinematics_finite_difference() {
-    let arm = test_arm();
+    let mut arm = test_arm();
     let q = JointVector::<4>::new(0.147607, 1.014764, -1.840751, 0.825987);
     let jacobian = arm.test_jacobian(&q, end_link(&arm)).unwrap();
     let epsilon = 1.0e-7;
@@ -367,7 +326,7 @@ fn jacobian_agrees_with_forward_kinematics_finite_difference() {
 
 #[test]
 fn test_arm_jacobian_matches_numeric_reference() {
-    let arm = test_arm();
+    let mut arm = test_arm();
     let q = JointVector::<4>::new(0.205506, 1.443005, -2.645997, 1.202992);
     let expected = nalgebra::SMatrix::<f64, 6, 4>::from_row_slice(&[
         -0.0000, 0.2041, 0.2041, 0.2041, -0.0000, -0.9790, -0.9790, -0.9790, 1.0000, 0.0000,
@@ -395,7 +354,7 @@ fn test_arm_jacobian_matches_numeric_reference() {
 
 #[test]
 fn damped_inverse_kinematics_reaches_a_known_pose() {
-    let arm = test_arm();
+    let mut arm = test_arm();
     let target = end_link(&arm);
     let expected_q = JointVector::<4>::new(0.2, 1.0, -1.2, 0.45);
     let desired = arm.test_forward_kinematics(&expected_q, target).unwrap();
@@ -426,7 +385,7 @@ fn damped_inverse_kinematics_reaches_a_known_pose() {
 
 #[test]
 fn inverse_kinematics_reports_specific_solver_errors() {
-    let arm = test_arm();
+    let mut arm = test_arm();
     let initial_q = JointVector::<4>::zeros();
     let unreachable =
         Frame::from_parts(Translation3::new(1.0, 0.0, 0.0), UnitQuaternion::identity());
@@ -435,7 +394,7 @@ fn inverse_kinematics_reports_specific_solver_errors() {
         ..InverseKinematicsOptions::default()
     };
     let error = arm
-        .test_inverse_kinematics(&initial_q, arm.root_link(), &unreachable, options)
+        .test_inverse_kinematics(&initial_q, arm.root_link_id(), &unreachable, options)
         .unwrap_err();
     assert!(matches!(
         error,
@@ -512,7 +471,7 @@ fn inverse_kinematics_reports_specific_solver_errors() {
 
 #[test]
 fn inverse_kinematics_validates_every_option_and_target_component() {
-    let arm = test_arm();
+    let mut arm = test_arm();
     let target = end_link(&arm);
     let initial_q = JointVector::<4>::zeros();
     let desired = Frame::identity();
@@ -567,7 +526,7 @@ fn inverse_kinematics_validates_every_option_and_target_component() {
     assert!(matches!(
         arm.test_inverse_kinematics(
             &initial_q,
-            arm.root_link(),
+            arm.root_link_id(),
             &unreachable,
             numerically_singular,
         ),
@@ -585,7 +544,7 @@ fn inverse_kinematics_validates_every_option_and_target_component() {
     assert!(matches!(
         arm.test_inverse_kinematics(
             &initial_q,
-            arm.root_link(),
+            arm.root_link_id(),
             &rotation_only,
             one_iteration,
         ),
@@ -610,7 +569,7 @@ fn inverse_kinematics_validates_every_option_and_target_component() {
 
 #[test]
 fn velocity_is_jacobian_times_joint_velocity() {
-    let arm = test_arm();
+    let mut arm = test_arm();
     let q = JointVector::<4>::new(PI / 12.0, PI / 3.0, -PI / 2.0, PI / 6.0);
     let qd = q;
     let velocity = arm
@@ -669,7 +628,7 @@ fn velocity_is_jacobian_times_joint_velocity() {
 
 #[test]
 fn forward_acceleration_matches_finite_difference() {
-    let arm = test_arm();
+    let mut arm = test_arm();
     let q = JointVector::<4>::new(0.2, 1.1, -0.7, 0.4);
     let qd = JointVector::<4>::new(-0.3, 0.5, -0.2, 0.8);
     let epsilon = 1.0e-7;
@@ -689,7 +648,7 @@ fn forward_acceleration_matches_finite_difference() {
         epsilon = 2.0e-8
     );
 
-    let mixed_arm = Robot::from_urdf(urdf_path("mixed_arm.urdf")).unwrap();
+    let mut mixed_arm = Robot::from_urdf(urdf_path("mixed_arm.urdf")).unwrap();
     let mixed_q = JointVector::<2>::new(0.4, 0.2);
     let mixed_qd = JointVector::<2>::new(-0.3, 0.5);
     let mixed_numerical = (mixed_arm
@@ -740,8 +699,7 @@ fn forward_acceleration_matches_finite_difference() {
 
 #[test]
 fn fixed_joint_has_constant_pose_and_no_motion_or_generalized_force() {
-    let arm = Robot::from_urdf(urdf_path("fixed_arm.urdf")).unwrap();
-    assert_eq!(arm.joints().len(), 1);
+    let mut arm = Robot::from_urdf(urdf_path("fixed_arm.urdf")).unwrap();
     assert_eq!(arm.joint_count(), 0);
     let target = end_link(&arm);
     let zero = JointVector::<0>::zeros();
@@ -787,7 +745,7 @@ fn fixed_joint_has_constant_pose_and_no_motion_or_generalized_force() {
 
 #[test]
 fn two_link_gravity_matches_closed_form_oracle() {
-    let arm = Robot::from_urdf(urdf_path("gravity_arm.urdf")).unwrap();
+    let mut arm = Robot::from_urdf(urdf_path("gravity_arm.urdf")).unwrap();
     let q = JointVector::<2>::new(FRAC_PI_2, FRAC_PI_2);
     let tau = arm.test_gravity(&q, &Frame::identity(), &[]).unwrap();
     assert_relative_eq!(
@@ -812,7 +770,7 @@ fn two_link_gravity_matches_closed_form_oracle() {
 
 #[test]
 fn single_revolute_pendulum_matches_closed_form_oracle() {
-    let arm = Robot::from_urdf(urdf_path("single_revolute.urdf")).unwrap();
+    let mut arm = Robot::from_urdf(urdf_path("single_revolute.urdf")).unwrap();
     let target = end_link(&arm);
     let mass = 2.0;
     let center_distance = 0.3;
@@ -877,7 +835,7 @@ fn single_revolute_pendulum_matches_closed_form_oracle() {
 
 #[test]
 fn revolute_prismatic_arm_matches_closed_form_oracle() {
-    let arm = Robot::from_urdf(urdf_path("mixed_arm.urdf")).unwrap();
+    let mut arm = Robot::from_urdf(urdf_path("mixed_arm.urdf")).unwrap();
     let target = end_link(&arm);
     let q = JointVector::<2>::new(PI / 6.0, 0.25);
     let qd = JointVector::<2>::new(0.4, -0.3);
@@ -976,7 +934,7 @@ fn revolute_prismatic_arm_matches_closed_form_oracle() {
 
 #[test]
 fn inverse_dynamics_matches_test_arm_numeric_reference() {
-    let arm = test_arm();
+    let mut arm = test_arm();
     let set_q = JointVector::<4>::new(1.5708, 1.0472, -1.0472, 0.5236);
     let zero = JointVector::<4>::zeros();
     let random = JointVector::<4>::new(-0.2, 0.5, -0.3, 0.8);
@@ -1032,7 +990,7 @@ fn inverse_dynamics_matches_test_arm_numeric_reference() {
 
 #[test]
 fn prismatic_inverse_dynamics_projects_linear_inertia_onto_its_axis() {
-    let arm = Robot::from_urdf(urdf_path("mixed_arm.urdf")).unwrap();
+    let mut arm = Robot::from_urdf(urdf_path("mixed_arm.urdf")).unwrap();
     let zero = JointVector::<2>::zeros();
     let gravity = arm.test_gravity(&zero, &Frame::identity(), &[]).unwrap();
     let accelerated = arm
@@ -1048,14 +1006,14 @@ fn prismatic_inverse_dynamics_projects_linear_inertia_onto_its_axis() {
 
 #[test]
 fn tree_external_loads_are_isolated_and_add_linearly() {
-    let arm = tree_arm();
+    let mut arm = tree_arm();
     let q = JointVector::<7>::from_row_slice(&[0.2, -0.3, 0.4, -0.5, 0.6, -0.7, 0.8]);
     let left = Load {
-        link: arm.link("left_tool").unwrap(),
+        link: arm.link_id("left_tool").unwrap(),
         wrench: Wrench::new(Vector3::new(0.3, -0.2, 0.4), Vector3::new(1.0, 0.5, -0.7)),
     };
     let right = Load {
-        link: arm.link("right_tool").unwrap(),
+        link: arm.link_id("right_tool").unwrap(),
         wrench: Wrench::new(Vector3::new(-0.4, 0.1, 0.2), Vector3::new(-0.6, 0.8, 0.3)),
     };
 
