@@ -15,9 +15,24 @@ URDF = (
     if len(sys.argv) > 1
     else Path("tests/data/test_arm.urdf").resolve()
 )
+REFERENCE = (
+    Path(sys.argv.pop(1)).resolve()
+    if len(sys.argv) > 1
+    else URDF.with_name("pinocchio_reference_v1.tsv")
+)
 SOURCE_PACKAGE = Path(__file__).resolve().parents[2] / "bindings" / "python" / "dynibo"
 if Path(dynibo.__file__).resolve().parent == SOURCE_PACKAGE:
     raise RuntimeError("package test imported bindings/python/dynibo from the source tree")
+
+
+def reference(key: str) -> tuple[float, ...]:
+    for line in REFERENCE.read_text(encoding="utf-8").splitlines():
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split("\t")
+        if fields[0] == key:
+            return tuple(float(value) for value in fields[1:])
+    raise RuntimeError(f"missing binding reference {key!r} in {REFERENCE}")
 
 
 class PackageTests(unittest.TestCase):
@@ -106,26 +121,60 @@ class PackageTests(unittest.TestCase):
             URDF, dynibo.BaseMode.FLOATING
         ) as robot:
             target = robot.link_id("test_link_4")
-            q = [0.0] * robot.joint_count
+            q = reference("q")
+            qd = reference("qd")
+            qdd = reference("qdd")
+            base_translation = reference("floating_base_translation")
+            base_rotation = reference("floating_base_rotation_xyzw")
+            base_velocity = reference("floating_base_velocity")
+            base_acceleration = reference("floating_base_acceleration")
             robot.set_floating_base_state(
-                dynibo.Pose(translation=(0.2, -0.3, 0.4)),
-                dynibo.Twist(angular=(0.1, -0.2, 0.3), linear=(0.4, 0.2, -0.1)),
-                dynibo.Twist(angular=(-0.1, 0.05, 0.2), linear=(0.3, -0.2, 0.1)),
+                dynibo.Pose(
+                    translation=base_translation,
+                    rotation_xyzw=base_rotation,
+                ),
+                dynibo.Twist(angular=base_velocity[:3], linear=base_velocity[3:]),
+                dynibo.Twist(
+                    angular=base_acceleration[:3], linear=base_acceleration[3:]
+                ),
             )
             self.assertEqual(robot.generalized_count, robot.joint_count + 6)
             self.assertEqual(len(robot.jacobian(q, target)), 6 * robot.generalized_count)
             self.assertEqual(len(robot.mass_matrix(q)), robot.generalized_count**2)
-            self.assertEqual(len(robot.gravity(q)), robot.generalized_count)
-            self.assertEqual(
-                len(robot.inverse_dynamics(q, q, q)), robot.generalized_count
-            )
-            forces = robot.inverse_dynamics(q, q, q)
-            acceleration = robot.forward_dynamics(q, q, forces)
-            expected_base = (-0.1, 0.05, 0.2, 0.3, -0.2, 0.1)
-            for actual, expected_value in zip(acceleration[:6], expected_base):
+            pose = robot.forward_kinematics(q, target)
+            for actual, expected_value in zip(
+                pose.translation, reference("floating_fk_translation")
+            ):
+                self.assertAlmostEqual(actual, expected_value, delta=2.0e-12)
+            for actual, expected_value in zip(
+                robot.gravity(q), reference("floating_gravity")
+            ):
+                self.assertAlmostEqual(actual, expected_value, delta=2.0e-10)
+            forces = robot.inverse_dynamics(q, qd, qdd)
+            for actual, expected_value in zip(forces, reference("floating_rnea")):
+                self.assertAlmostEqual(actual, expected_value, delta=2.0e-10)
+            recovered = robot.forward_dynamics(q, qd, forces)
+            expected_acceleration = base_acceleration + qdd
+            for actual, expected_value in zip(recovered, expected_acceleration):
                 self.assertAlmostEqual(actual, expected_value, delta=2.0e-9)
-            for actual in acceleration[6:]:
-                self.assertAlmostEqual(actual, 0.0, delta=2.0e-9)
+            load_values = reference("floating_load")
+            load = dynibo.Load(
+                target,
+                torque=load_values[:3],
+                force=load_values[3:],
+            )
+            loaded_forces = robot.inverse_dynamics(q, qd, qdd, loads=[load])
+            for actual, expected_value in zip(
+                loaded_forces, reference("floating_rnea_loaded")
+            ):
+                self.assertAlmostEqual(actual, expected_value, delta=2.0e-10)
+            loaded_recovered = robot.forward_dynamics(
+                q, qd, loaded_forces, loads=[load]
+            )
+            for actual, expected_value in zip(
+                loaded_recovered, expected_acceleration
+            ):
+                self.assertAlmostEqual(actual, expected_value, delta=2.0e-9)
             with self.assertRaisesRegex(ValueError, "does not support a floating base"):
                 robot.inverse_kinematics(q, target, robot.forward_kinematics(q, target))
 
@@ -177,30 +226,20 @@ class PackageTests(unittest.TestCase):
         )
 
     def test_pinocchio_numeric_reference(self) -> None:
-        q = [0.2, 1.0, -0.7, 0.4]
-        qd = [-0.3, 0.5, -0.2, 0.8]
-        qdd = [0.7, -0.4, 0.1, 0.3]
+        q = reference("q")
+        qd = reference("qd")
+        qdd = reference("qdd")
         pose = self.robot.forward_kinematics(q, self.target)
         for actual, expected in zip(
             pose.translation,
-            (0.450338323287074, 0.09128809750443889, 0.46592677713692876),
+            reference("fk_translation"),
         ):
             self.assertAlmostEqual(actual, expected, delta=2.0e-12)
 
         gravity = self.robot.gravity(q)
-        expected_gravity = (
-            1.7763568394002505e-15,
-            39.629058959145354,
-            17.60815765611755,
-            0.053134179784508524,
-        )
+        expected_gravity = reference("gravity")
         dynamics = self.robot.inverse_dynamics(q, qd, qdd)
-        expected_dynamics = (
-            1.7649236924309104,
-            38.319908179086525,
-            17.136450444507805,
-            0.05169960944426318,
-        )
+        expected_dynamics = reference("rnea")
         for actual, expected in zip(gravity, expected_gravity):
             self.assertAlmostEqual(actual, expected, delta=2.0e-10)
         for actual, expected in zip(dynamics, expected_dynamics):

@@ -24,6 +24,21 @@ Run the default suite with:
 cargo test --workspace --all-targets --locked
 ```
 
+When Pinocchio is available through `pkg-config`, the `pinocchio-tests` feature
+adds two independent oracle layers. `pinocchio_oracle` exercises the maintained
+serial, mixed-joint, branched, and free-flyer fixtures, including single- and
+multi-link external loads in RNEA and ABA. `generated_pinocchio` runs the same
+24 models and eight states per model through FK, velocity and acceleration
+kinematics, Jacobian and its derivative, mass matrix, gravity,
+velocity-product forces, RNEA, and ABA:
+
+```bash
+cargo test -p dynibo --locked --features pinocchio-tests --tests
+```
+
+The generated conformance suites accept the reproduction and corpus-size
+environment variables documented below.
+
 Reproduce one generated model with:
 
 ```bash
@@ -68,4 +83,6 @@ well as scratch-buffer clearing.
 
 Allocation tests remain separate because they own process-global allocators.
 Installed C, C++, and Python package tests also remain black-box tests rather
-than using Rust test helpers.
+than using Rust test helpers. They consume the versioned
+`tests/data/pinocchio_reference_v1.tsv` corpus; the feature-gated Pinocchio
+oracle verifies that committed corpus before package tests reuse it.

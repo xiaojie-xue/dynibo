@@ -8,4 +8,6 @@ pub mod model_gen;
 pub mod numeric;
 pub mod observation;
 pub mod operations;
+#[cfg(feature = "pinocchio-tests")]
+pub mod pinocchio;
 pub mod states;

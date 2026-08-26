@@ -30,6 +30,10 @@ unsafe extern "C" {
         context: *const std::ffi::c_void,
         joint_name: *const std::ffi::c_char,
     ) -> usize;
+    fn dynibo_pinocchio_frame_index(
+        context: *const std::ffi::c_void,
+        frame_name: *const std::ffi::c_char,
+    ) -> usize;
     fn dynibo_pinocchio_link_frame_values(
         context: *mut std::ffi::c_void,
         q: *const f64,
@@ -87,6 +91,16 @@ unsafe extern "C" {
         load: *const f64,
         acceleration: *mut f64,
     );
+    fn dynibo_pinocchio_aba_with_loads_values(
+        context: *mut std::ffi::c_void,
+        q: *const f64,
+        qd: *const f64,
+        torque: *const f64,
+        frame_indices: *const usize,
+        loads: *const f64,
+        load_count: usize,
+        acceleration: *mut f64,
+    );
     fn dynibo_pinocchio_mass_matrix_values(
         context: *mut std::ffi::c_void,
         q: *const f64,
@@ -104,6 +118,16 @@ unsafe extern "C" {
         qd: *const f64,
         qdd: *const f64,
         load: *const f64,
+        torque: *mut f64,
+    );
+    fn dynibo_pinocchio_rnea_with_loads_values(
+        context: *mut std::ffi::c_void,
+        q: *const f64,
+        qd: *const f64,
+        qdd: *const f64,
+        frame_indices: *const usize,
+        loads: *const f64,
+        load_count: usize,
         torque: *mut f64,
     );
     fn dynibo_pinocchio_floating_rnea_values(
@@ -124,6 +148,12 @@ struct JointMapping {
     configuration_index: usize,
     configuration_dimension: usize,
     velocity_index: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PinocchioLoad {
+    frame_index: usize,
+    wrench: Wrench,
 }
 
 pub struct PinocchioContext {
@@ -189,6 +219,100 @@ impl PinocchioContext {
             velocity_size,
             joint_mappings,
         }
+    }
+
+    pub fn load(&self, frame_name: &str, wrench: Wrench) -> PinocchioLoad {
+        let frame_name = CString::new(frame_name).unwrap();
+        // SAFETY: the context and frame name are valid for this query.
+        let frame_index =
+            unsafe { dynibo_pinocchio_frame_index(self.pointer.as_ptr(), frame_name.as_ptr()) };
+        assert_ne!(
+            frame_index,
+            usize::MAX,
+            "Pinocchio frame {frame_name:?} must exist"
+        );
+        PinocchioLoad {
+            frame_index,
+            wrench,
+        }
+    }
+
+    fn load_buffers(loads: &[PinocchioLoad]) -> (Vec<usize>, Vec<f64>) {
+        let frame_indices = loads.iter().map(|load| load.frame_index).collect();
+        let mut values = Vec::with_capacity(6 * loads.len());
+        for load in loads {
+            values.extend_from_slice(&[
+                load.wrench.torque.x,
+                load.wrench.torque.y,
+                load.wrench.torque.z,
+                load.wrench.force.x,
+                load.wrench.force.y,
+                load.wrench.force.z,
+            ]);
+        }
+        (frame_indices, values)
+    }
+
+    fn pinocchio_joint_forces(&self, forces: &[f64]) -> Vec<f64> {
+        assert_eq!(forces.len(), self.joint_mappings.len());
+        let mut pinocchio = vec![0.0; self.velocity_size];
+        for (joint, mapping) in self.joint_mappings.iter().enumerate() {
+            pinocchio[mapping.velocity_index.expect("active joint")] = forces[joint];
+        }
+        pinocchio
+    }
+
+    fn rnea_with_loads_raw(
+        &mut self,
+        configuration: &[f64],
+        velocity: &[f64],
+        acceleration: &[f64],
+        loads: &[PinocchioLoad],
+    ) -> Vec<f64> {
+        let (frame_indices, load_values) = Self::load_buffers(loads);
+        let mut output = vec![0.0; self.velocity_size];
+        // SAFETY: state and output buffers match the model dimensions; each
+        // frame index has one six-element wrench in `load_values`.
+        unsafe {
+            dynibo_pinocchio_rnea_with_loads_values(
+                self.pointer.as_ptr(),
+                configuration.as_ptr(),
+                velocity.as_ptr(),
+                acceleration.as_ptr(),
+                frame_indices.as_ptr(),
+                load_values.as_ptr(),
+                loads.len(),
+                output.as_mut_ptr(),
+            )
+        };
+        output
+    }
+
+    fn aba_with_loads_raw(
+        &mut self,
+        configuration: &[f64],
+        velocity: &[f64],
+        generalized_forces: &[f64],
+        loads: &[PinocchioLoad],
+    ) -> Vec<f64> {
+        assert_eq!(generalized_forces.len(), self.velocity_size);
+        let (frame_indices, load_values) = Self::load_buffers(loads);
+        let mut output = vec![0.0; self.velocity_size];
+        // SAFETY: state, force, and output buffers match the model dimensions;
+        // each frame index has one six-element wrench in `load_values`.
+        unsafe {
+            dynibo_pinocchio_aba_with_loads_values(
+                self.pointer.as_ptr(),
+                configuration.as_ptr(),
+                velocity.as_ptr(),
+                generalized_forces.as_ptr(),
+                frame_indices.as_ptr(),
+                load_values.as_ptr(),
+                loads.len(),
+                output.as_mut_ptr(),
+            )
+        };
+        output
     }
 
     pub fn state(&self, q: &[f64], qd: &[f64], qdd: &[f64]) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
@@ -403,6 +527,26 @@ impl PinocchioContext {
         self.dynibo_joint_order(&pinocchio)
     }
 
+    pub fn rnea_with_loads(
+        &mut self,
+        configuration: &[f64],
+        velocity: &[f64],
+        acceleration: &[f64],
+        loads: &[PinocchioLoad],
+    ) -> Vec<f64> {
+        let pinocchio = self.rnea_with_loads_raw(configuration, velocity, acceleration, loads);
+        self.dynibo_joint_order(&pinocchio)
+    }
+
+    pub fn gravity_with_loads(
+        &mut self,
+        configuration: &[f64],
+        loads: &[PinocchioLoad],
+    ) -> Vec<f64> {
+        let zero = vec![0.0; self.velocity_size];
+        self.rnea_with_loads(configuration, &zero, &zero, loads)
+    }
+
     pub fn aba(&mut self, configuration: &[f64], velocity: &[f64], torque: &[f64]) -> Vec<f64> {
         assert_eq!(torque.len(), self.joint_mappings.len());
         let mut pinocchio_torque = vec![0.0; self.velocity_size];
@@ -423,6 +567,19 @@ impl PinocchioContext {
             )
         };
         self.dynibo_joint_order(&pinocchio_acceleration)
+    }
+
+    pub fn aba_with_loads(
+        &mut self,
+        configuration: &[f64],
+        velocity: &[f64],
+        torque: &[f64],
+        loads: &[PinocchioLoad],
+    ) -> Vec<f64> {
+        let pinocchio_torque = self.pinocchio_joint_forces(torque);
+        let acceleration =
+            self.aba_with_loads_raw(configuration, velocity, &pinocchio_torque, loads);
+        self.dynibo_joint_order(&acceleration)
     }
 
     pub fn aba_with_link_load(
@@ -494,6 +651,41 @@ impl PinocchioContext {
             )
         };
 
+        self.floating_acceleration_order(&pinocchio_acceleration, base, base_velocity)
+    }
+
+    pub fn floating_aba_with_loads(
+        &mut self,
+        configuration: &[f64],
+        velocity: &[f64],
+        generalized_forces: &[f64],
+        base: &Frame,
+        base_velocity: Twist,
+        loads: &[PinocchioLoad],
+    ) -> Vec<f64> {
+        assert_eq!(generalized_forces.len(), 6 + self.joint_mappings.len());
+        let mut pinocchio_force = vec![0.0; self.velocity_size];
+        let world_to_base = base.rotation.inverse();
+        let local_torque = world_to_base * Vector3::from_column_slice(&generalized_forces[..3]);
+        let local_force = world_to_base * Vector3::from_column_slice(&generalized_forces[3..6]);
+        pinocchio_force[..3].copy_from_slice(local_force.as_slice());
+        pinocchio_force[3..6].copy_from_slice(local_torque.as_slice());
+        for (joint, mapping) in self.joint_mappings.iter().enumerate() {
+            pinocchio_force[mapping.velocity_index.expect("active joint")] =
+                generalized_forces[6 + joint];
+        }
+        let acceleration =
+            self.aba_with_loads_raw(configuration, velocity, &pinocchio_force, loads);
+        self.floating_acceleration_order(&acceleration, base, base_velocity)
+    }
+
+    fn floating_acceleration_order(
+        &self,
+        pinocchio_acceleration: &[f64],
+        base: &Frame,
+        base_velocity: Twist,
+    ) -> Vec<f64> {
+        let world_to_base = base.rotation.inverse();
         let local_linear_velocity = world_to_base * base_velocity.linear;
         let local_angular_velocity = world_to_base * base_velocity.angular;
         let local_linear_acceleration = Vector3::from_column_slice(&pinocchio_acceleration[..3]);
@@ -731,6 +923,28 @@ impl PinocchioContext {
             }
         }
         output
+    }
+
+    pub fn floating_rnea_with_loads(
+        &mut self,
+        configuration: &[f64],
+        velocity: &[f64],
+        acceleration: &[f64],
+        base: &Frame,
+        loads: &[PinocchioLoad],
+    ) -> Vec<f64> {
+        let pinocchio = self.rnea_with_loads_raw(configuration, velocity, acceleration, loads);
+        self.floating_generalized_order(&pinocchio, base)
+    }
+
+    pub fn floating_gravity_with_loads(
+        &mut self,
+        configuration: &[f64],
+        base: &Frame,
+        loads: &[PinocchioLoad],
+    ) -> Vec<f64> {
+        let zero = vec![0.0; self.velocity_size];
+        self.floating_rnea_with_loads(configuration, &zero, &zero, base, loads)
     }
 
     pub fn floating_coriolis_from_rnea(

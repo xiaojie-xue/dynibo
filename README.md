@@ -82,9 +82,10 @@ Dynibo is thoroughly unit-tested. Tests cover finite-difference kinematics,
 dynamics regressions, branched robots and external loads, inverse kinematics,
 invalid inputs, model-scoped handles, repeated calculation, and allocation-free execution.
 An independent Pinocchio oracle also compares complete FK, Jacobian, Jacobian
-time-derivative, mass matrix, velocity-product forces, gravity, and RNEA outputs over
-deterministic robot states. See the [test architecture](tests/TESTING.md) for
-the generated-URDF corpus, reproducibility, and exploration workflow.
+time-derivative, mass matrix, velocity-product forces, gravity, RNEA, and ABA
+outputs, including fixed- and floating-base external loads. The same oracle
+matrix runs over the reproducible generated-URDF corpus. See the
+[test architecture](tests/TESTING.md) for reproduction and exploration workflows.
 
 ## Dependencies
 

@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -46,6 +47,26 @@ struct PinocchioBenchContext {
 };
 
 using ConfigMap = Eigen::Map<const Eigen::VectorXd>;
+
+pinocchio::container::aligned_vector<pinocchio::Force> make_external_forces(
+    const PinocchioBenchContext& context, const std::size_t* frame_indices,
+    const double* loads, std::size_t load_count) {
+  pinocchio::container::aligned_vector<pinocchio::Force> forces(
+      context.model.njoints, pinocchio::Force::Zero());
+  for (std::size_t load_index = 0; load_index < load_count; ++load_index) {
+    const auto frame_index = static_cast<pinocchio::FrameIndex>(frame_indices[load_index]);
+    const auto* load = loads + 6 * load_index;
+    const Eigen::Map<const Eigen::Vector3d> load_torque(load);
+    const Eigen::Map<const Eigen::Vector3d> load_force(load + 3);
+    const pinocchio::Force frame_load(load_force, load_torque);
+    const auto& frame = context.model.frames[frame_index];
+    // Dynibo loads are link-local resisting wrenches added to the required
+    // generalized effort. Pinocchio fext is subtracted by RNEA, hence the
+    // negation before moving the wrench to the parent-joint frame.
+    forces[frame.parentJoint] += frame.placement.act(-frame_load);
+  }
+  return forces;
+}
 
 }  // namespace
 
@@ -173,6 +194,18 @@ std::size_t dynibo_pinocchio_joint_velocity_index(const void* raw_context,
   }
 }
 
+std::size_t dynibo_pinocchio_frame_index(const void* raw_context,
+                                         const char* frame_name) noexcept {
+  try {
+    const auto* context = static_cast<const PinocchioBenchContext*>(raw_context);
+    const auto frame = context->model.getFrameId(frame_name, pinocchio::BODY);
+    return frame < context->model.nframes ? frame
+                                         : std::numeric_limits<std::size_t>::max();
+  } catch (const std::exception&) {
+    return std::numeric_limits<std::size_t>::max();
+  }
+}
+
 double dynibo_pinocchio_noop(const void*, const double* q) noexcept { return q[0]; }
 
 double dynibo_pinocchio_forward_kinematics(void* raw_context, const double* q) noexcept {
@@ -287,6 +320,20 @@ void dynibo_pinocchio_aba_with_link_load_values(
   Eigen::Map<Eigen::VectorXd> acceleration_map(acceleration, context->model.nv);
   acceleration_map = pinocchio::aba(context->model, context->data, configuration,
                                     velocity, generalized_force, external_forces);
+}
+
+void dynibo_pinocchio_aba_with_loads_values(
+    void* raw_context, const double* q, const double* qd, const double* torque,
+    const std::size_t* frame_indices, const double* loads, std::size_t load_count,
+    double* acceleration) noexcept {
+  auto* context = static_cast<PinocchioBenchContext*>(raw_context);
+  const ConfigMap configuration(q, context->model.nq);
+  const ConfigMap velocity(qd, context->model.nv);
+  const ConfigMap generalized_force(torque, context->model.nv);
+  const auto forces = make_external_forces(*context, frame_indices, loads, load_count);
+  Eigen::Map<Eigen::VectorXd> acceleration_map(acceleration, context->model.nv);
+  acceleration_map = pinocchio::aba(context->model, context->data, configuration,
+                                    velocity, generalized_force, forces);
 }
 
 void dynibo_pinocchio_mass_matrix_values(void* raw_context, const double* q,
@@ -406,6 +453,20 @@ void dynibo_pinocchio_rnea_with_link_load_values(
   Eigen::Map<Eigen::VectorXd> torque_map(torque, context->model.nv);
   torque_map = pinocchio::rnea(context->model, context->data, configuration,
                               velocity, acceleration, external_forces);
+}
+
+void dynibo_pinocchio_rnea_with_loads_values(
+    void* raw_context, const double* q, const double* qd, const double* qdd,
+    const std::size_t* frame_indices, const double* loads, std::size_t load_count,
+    double* torque) noexcept {
+  auto* context = static_cast<PinocchioBenchContext*>(raw_context);
+  const ConfigMap configuration(q, context->model.nq);
+  const ConfigMap velocity(qd, context->model.nv);
+  const ConfigMap acceleration(qdd, context->model.nv);
+  const auto forces = make_external_forces(*context, frame_indices, loads, load_count);
+  Eigen::Map<Eigen::VectorXd> torque_map(torque, context->model.nv);
+  torque_map = pinocchio::rnea(context->model, context->data, configuration,
+                              velocity, acceleration, forces);
 }
 
 void dynibo_pinocchio_floating_rnea_values(

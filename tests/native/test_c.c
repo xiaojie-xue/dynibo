@@ -22,8 +22,37 @@ static void check(DyniboStatus status) {
     }
 }
 
+static int read_reference(
+    const char *path, const char *key, double *output, size_t count) {
+    FILE *file = fopen(path, "r");
+    if (file == NULL) return 0;
+    char line[2048];
+    while (fgets(line, sizeof(line), file) != NULL) {
+        if (line[0] == '#') continue;
+        char *token = strtok(line, "\t\r\n");
+        if (token == NULL || strcmp(token, key) != 0) continue;
+        for (size_t index = 0; index < count; ++index) {
+            token = strtok(NULL, "\t\r\n");
+            if (token == NULL) {
+                fclose(file);
+                return 0;
+            }
+            char *end = NULL;
+            output[index] = strtod(token, &end);
+            if (end == token || *end != '\0') {
+                fclose(file);
+                return 0;
+            }
+        }
+        fclose(file);
+        return strtok(NULL, "\t\r\n") == NULL;
+    }
+    fclose(file);
+    return 0;
+}
+
 int main(int argc, char **argv) {
-    CHECK(argc == 2);
+    CHECK(argc == 3);
     CHECK(strcmp(dynibo_version(), "0.3.0") == 0);
     CHECK(dynibo_robot_name(NULL) == NULL);
     CHECK(dynibo_robot_joint_count(NULL) == 0);
@@ -94,15 +123,23 @@ int main(int argc, char **argv) {
         CHECK(fabs(output[index]) < 1.0e-12);
     }
 
-    const double reference_q[4] = {0.2, 1.0, -0.7, 0.4};
-    const double reference_qd[4] = {-0.3, 0.5, -0.2, 0.8};
-    const double reference_qdd[4] = {0.7, -0.4, 0.1, 0.3};
-    const double expected_gravity[4] = {
-        1.7763568394002505e-15, 39.629058959145354,
-        17.60815765611755, 0.053134179784508524};
-    const double expected_dynamics[4] = {
-        1.7649236924309104, 38.319908179086525,
-        17.136450444507805, 0.05169960944426318};
+    double reference_q[4];
+    double reference_qd[4];
+    double reference_qdd[4];
+    double expected_gravity[4];
+    double expected_dynamics[4];
+    double expected_translation[3];
+    CHECK(read_reference(argv[2], "q", reference_q, 4));
+    CHECK(read_reference(argv[2], "qd", reference_qd, 4));
+    CHECK(read_reference(argv[2], "qdd", reference_qdd, 4));
+    CHECK(read_reference(argv[2], "fk_translation", expected_translation, 3));
+    CHECK(read_reference(argv[2], "gravity", expected_gravity, 4));
+    CHECK(read_reference(argv[2], "rnea", expected_dynamics, 4));
+    check(dynibo_forward_kinematics(
+        robot, workspace, reference_q, n, target, &pose));
+    for (size_t index = 0; index < 3; ++index) {
+        CHECK(fabs(pose.translation[index] - expected_translation[index]) < 2.0e-12);
+    }
     check(dynibo_gravity(
         robot, workspace, reference_q, n, NULL, 0, output, n));
     for (size_t index = 0; index < n; ++index) {
@@ -208,6 +245,89 @@ int main(int argc, char **argv) {
     CHECK(dynibo_mass_matrix(
         robot, workspace, overlapping_mass, n, overlapping_mass, n * n)
         == DYNIBO_STATUS_INVALID_ARGUMENT);
+
+    DyniboRobot *floating = NULL;
+    DyniboWorkspace *floating_workspace = NULL;
+    check(dynibo_robot_from_urdf_with_base(
+        argv[1], DYNIBO_BASE_FLOATING, &floating));
+    check(dynibo_workspace_create(floating, &floating_workspace));
+    size_t floating_target = 0;
+    check(dynibo_robot_link_id(floating, "test_link_4", &floating_target));
+    CHECK(dynibo_robot_generalized_count(floating) == 10);
+    double base_translation[3];
+    double base_rotation[4];
+    double base_velocity[6];
+    double base_acceleration[6];
+    CHECK(read_reference(argv[2], "floating_base_translation", base_translation, 3));
+    CHECK(read_reference(argv[2], "floating_base_rotation_xyzw", base_rotation, 4));
+    CHECK(read_reference(argv[2], "floating_base_velocity", base_velocity, 6));
+    CHECK(read_reference(argv[2], "floating_base_acceleration", base_acceleration, 6));
+    DyniboPose floating_base;
+    memcpy(floating_base.translation, base_translation, sizeof(base_translation));
+    memcpy(floating_base.rotation_xyzw, base_rotation, sizeof(base_rotation));
+    DyniboTwist floating_velocity;
+    DyniboTwist floating_acceleration;
+    memcpy(floating_velocity.angular, base_velocity, 3 * sizeof(double));
+    memcpy(floating_velocity.linear, base_velocity + 3, 3 * sizeof(double));
+    memcpy(floating_acceleration.angular, base_acceleration, 3 * sizeof(double));
+    memcpy(floating_acceleration.linear, base_acceleration + 3, 3 * sizeof(double));
+    check(dynibo_robot_set_floating_base_state(
+        floating, &floating_base, floating_velocity, floating_acceleration));
+    double floating_output[10];
+    double floating_reference[10];
+    check(dynibo_forward_kinematics(
+        floating, floating_workspace, reference_q, n, floating_target, &pose));
+    CHECK(read_reference(argv[2], "floating_fk_translation", expected_translation, 3));
+    for (size_t index = 0; index < 3; ++index) {
+        CHECK(fabs(pose.translation[index] - expected_translation[index]) < 2.0e-12);
+    }
+    check(dynibo_gravity(
+        floating, floating_workspace, reference_q, n, NULL, 0,
+        floating_output, 10));
+    CHECK(read_reference(argv[2], "floating_gravity", floating_reference, 10));
+    for (size_t index = 0; index < 10; ++index) {
+        CHECK(fabs(floating_output[index] - floating_reference[index]) < 2.0e-10);
+    }
+    check(dynibo_inverse_dynamics(
+        floating, floating_workspace, reference_q, reference_qd, reference_qdd, n,
+        NULL, 0, floating_output, 10));
+    CHECK(read_reference(argv[2], "floating_rnea", floating_reference, 10));
+    for (size_t index = 0; index < 10; ++index) {
+        CHECK(fabs(floating_output[index] - floating_reference[index]) < 2.0e-10);
+    }
+    check(dynibo_forward_dynamics(
+        floating, floating_workspace, reference_q, reference_qd, n,
+        floating_reference, 10, NULL, 0, floating_output, 10));
+    for (size_t index = 0; index < 6; ++index) {
+        CHECK(fabs(floating_output[index] - base_acceleration[index]) < 2.0e-9);
+    }
+    for (size_t index = 0; index < n; ++index) {
+        CHECK(fabs(floating_output[6 + index] - reference_qdd[index]) < 2.0e-9);
+    }
+    double floating_load_values[6];
+    CHECK(read_reference(argv[2], "floating_load", floating_load_values, 6));
+    DyniboLoad floating_load;
+    floating_load.link_id = floating_target;
+    memcpy(floating_load.torque, floating_load_values, 3 * sizeof(double));
+    memcpy(floating_load.force, floating_load_values + 3, 3 * sizeof(double));
+    check(dynibo_inverse_dynamics(
+        floating, floating_workspace, reference_q, reference_qd, reference_qdd, n,
+        &floating_load, 1, floating_output, 10));
+    CHECK(read_reference(argv[2], "floating_rnea_loaded", floating_reference, 10));
+    for (size_t index = 0; index < 10; ++index) {
+        CHECK(fabs(floating_output[index] - floating_reference[index]) < 2.0e-10);
+    }
+    check(dynibo_forward_dynamics(
+        floating, floating_workspace, reference_q, reference_qd, n,
+        floating_reference, 10, &floating_load, 1, floating_output, 10));
+    for (size_t index = 0; index < 6; ++index) {
+        CHECK(fabs(floating_output[index] - base_acceleration[index]) < 2.0e-9);
+    }
+    for (size_t index = 0; index < n; ++index) {
+        CHECK(fabs(floating_output[6 + index] - reference_qdd[index]) < 2.0e-9);
+    }
+    dynibo_workspace_destroy(floating_workspace);
+    dynibo_robot_destroy(floating);
 
     free(output);
     free(square);

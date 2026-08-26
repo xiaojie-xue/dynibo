@@ -20,6 +20,17 @@ PR 使用的生成模型语料包含 24 个可复现的伪随机 `u64` seed，�
 cargo test --workspace --all-targets --locked
 ```
 
+当 `pkg-config` 能找到 Pinocchio 时，`pinocchio-tests` feature 会增加两层独立 oracle。
+`pinocchio_oracle` 覆盖长期维护的串联、混合关节、分叉树和 free-flyer fixture，包括 RNEA、ABA
+的单 link 与多 link 外载荷；`generated_pinocchio` 则让同一套 24 个模型、每个八组状态分别对比
+FK、速度和加速度运动学、Jacobian 与其导数、质量矩阵、重力、速度乘积力、RNEA 和 ABA：
+
+```bash
+cargo test -p dynibo --locked --features pinocchio-tests --tests
+```
+
+生成模型 conformance 测试接受下文记录的复现与语料规模环境变量。
+
 复现一个生成模型：
 
 ```bash
@@ -57,4 +68,6 @@ Workspace 序列测试会逐步比较复用同一个 `Robot` 的每个操作与�
 成功计算交错执行，以验证错误恢复和 scratch buffer 清理。
 
 内存分配测试单独维护，因为它们使用进程全局 allocator。已安装的 C、C++、Python 包测试也
-保持黑盒测试，不复用 Rust 测试辅助代码。
+保持黑盒测试，不复用 Rust 测试辅助代码。它们共同读取带版本号的
+`tests/data/pinocchio_reference_v1.tsv`；启用 feature 的 Pinocchio oracle 会先验证这份提交到
+仓库中的参考数据，再由各语言包测试复用。

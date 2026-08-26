@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use dynibo::{
     BaseMode, BaseState, Frame, IndexedLoad, InverseKinematicsOptions, Robot, Twist, Wrench,
 };
-use nalgebra::{Rotation3, Translation3, UnitQuaternion, Vector3};
+use nalgebra::{Quaternion, Rotation3, Translation3, UnitQuaternion, Vector3};
 use pinocchio::PinocchioContext;
 
 fn fixture() -> PathBuf {
@@ -66,6 +66,122 @@ fn assert_close(actual: &[f64], expected: &[f64], absolute: f64, relative: f64, 
             "{context}: element {index}: actual={actual:.16e}, expected={expected:.16e}, tolerance={tolerance:.3e}"
         );
     }
+}
+
+fn binding_reference(key: &str) -> Vec<f64> {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/pinocchio_reference_v1.tsv");
+    let contents = std::fs::read_to_string(path).unwrap();
+    contents
+        .lines()
+        .find_map(|line| {
+            let mut fields = line.split('\t');
+            (fields.next() == Some(key))
+                .then(|| fields.map(|value| value.parse::<f64>().unwrap()).collect())
+        })
+        .unwrap_or_else(|| panic!("binding reference key {key} must exist"))
+}
+
+#[test]
+fn committed_binding_references_match_pinocchio() {
+    let path = serial_fixture();
+    let robot = Robot::from_urdf(&path).unwrap();
+    let mut pinocchio = PinocchioContext::new(&robot, &path, "test_link_4");
+    let q = binding_reference("q");
+    let qd = binding_reference("qd");
+    let qdd = binding_reference("qdd");
+    let (pin_q, pin_qd, pin_qdd) = pinocchio.state(&q, &qd, &qdd);
+    let (_, translation) = pinocchio.frame(&pin_q);
+    assert_close(
+        translation.as_slice(),
+        &binding_reference("fk_translation"),
+        2.0e-12,
+        1.0e-12,
+        "committed binding FK translation",
+    );
+    assert_close(
+        &pinocchio.gravity(&pin_q),
+        &binding_reference("gravity"),
+        2.0e-10,
+        1.0e-10,
+        "committed binding gravity",
+    );
+    assert_close(
+        &pinocchio.rnea(&pin_q, &pin_qd, &pin_qdd),
+        &binding_reference("rnea"),
+        2.0e-10,
+        1.0e-10,
+        "committed binding RNEA",
+    );
+
+    let floating_robot = Robot::from_urdf_with_base(&path, BaseMode::Floating).unwrap();
+    let mut floating = PinocchioContext::new_floating(&floating_robot, &path, "test_link_4");
+    let translation = binding_reference("floating_base_translation");
+    let rotation = binding_reference("floating_base_rotation_xyzw");
+    let base = Frame::from_parts(
+        Translation3::new(translation[0], translation[1], translation[2]),
+        UnitQuaternion::from_quaternion(Quaternion::new(
+            rotation[3],
+            rotation[0],
+            rotation[1],
+            rotation[2],
+        )),
+    );
+    let velocity = binding_reference("floating_base_velocity");
+    let velocity = Twist::new(
+        Vector3::from_column_slice(&velocity[..3]),
+        Vector3::from_column_slice(&velocity[3..]),
+    );
+    let acceleration = binding_reference("floating_base_acceleration");
+    let acceleration = Twist::new(
+        Vector3::from_column_slice(&acceleration[..3]),
+        Vector3::from_column_slice(&acceleration[3..]),
+    );
+    let (floating_q, floating_qd, floating_qdd) =
+        floating.floating_state(&q, &qd, &qdd, &base, velocity, acceleration);
+    let (_, floating_translation) = floating.frame(&floating_q);
+    assert_close(
+        floating_translation.as_slice(),
+        &binding_reference("floating_fk_translation"),
+        2.0e-12,
+        1.0e-12,
+        "committed floating binding FK translation",
+    );
+    assert_close(
+        &floating.floating_gravity(&floating_q, &base),
+        &binding_reference("floating_gravity"),
+        2.0e-10,
+        1.0e-10,
+        "committed floating binding gravity",
+    );
+    assert_close(
+        &floating.floating_rnea_with_loads(&floating_q, &floating_qd, &floating_qdd, &base, &[]),
+        &binding_reference("floating_rnea"),
+        2.0e-10,
+        1.0e-10,
+        "committed floating binding RNEA",
+    );
+    let load = binding_reference("floating_load");
+    let load = floating.load(
+        "test_link_4",
+        Wrench::new(
+            Vector3::from_column_slice(&load[..3]),
+            Vector3::from_column_slice(&load[3..]),
+        ),
+    );
+    assert_close(
+        &floating.floating_rnea_with_loads(
+            &floating_q,
+            &floating_qd,
+            &floating_qdd,
+            &base,
+            &[load],
+        ),
+        &binding_reference("floating_rnea_loaded"),
+        2.0e-10,
+        1.0e-10,
+        "committed loaded floating binding RNEA",
+    );
 }
 
 #[test]
@@ -807,6 +923,92 @@ fn branched_moving_external_loads_match_pinocchio() {
 }
 
 #[test]
+fn branched_aba_and_multi_link_external_loads_match_pinocchio() {
+    let path = tree_fixture();
+    let mut robot = Robot::from_urdf(&path).unwrap();
+    let mut pinocchio = PinocchioContext::new(&robot, &path, "right_tool");
+    let load_a = Wrench::new(
+        Vector3::new(-0.22, 0.35, 0.41),
+        Vector3::new(0.74, -0.63, 0.28),
+    );
+    let load_b = Wrench::new(
+        Vector3::new(0.17, -0.29, 0.13),
+        Vector3::new(-0.51, 0.38, 0.62),
+    );
+
+    for sample in 0..32 {
+        let (q, qd, _) = deterministic_tree_state(sample);
+        let zero = [0.0; 7];
+        let (pin_q, pin_qd, _) = pinocchio.state(&q, &qd, &zero);
+        let torque: [f64; 7] = std::array::from_fn(|joint| {
+            9.0 * ((sample + 1) as f64 * (joint + 2) as f64 * 0.379).sin()
+        });
+
+        let mut actual = [f64::NAN; 7];
+        robot
+            .forward_dynamics(&BaseState::fixed(), &q, &qd, &torque, &[], &mut actual)
+            .unwrap();
+        assert_close(
+            &actual,
+            &pinocchio.aba(&pin_q, &pin_qd, &torque),
+            3.0e-9,
+            2.0e-10,
+            &format!("tree ABA sample {sample}"),
+        );
+
+        let load_names: &[&str] = match sample % 4 {
+            0 => &["trunk"],
+            1 => &["left_lower"],
+            2 => &["left_tool", "right_tool"],
+            _ => &["trunk", "left_tool", "left_tool"],
+        };
+        let dynibo_loads: Vec<IndexedLoad> = load_names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| IndexedLoad {
+                link: robot.link_id(name).unwrap(),
+                wrench: if index.is_multiple_of(2) {
+                    load_a
+                } else {
+                    load_b
+                },
+            })
+            .collect();
+        let pinocchio_loads: Vec<_> = load_names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| {
+                pinocchio.load(
+                    name,
+                    if index.is_multiple_of(2) {
+                        load_a
+                    } else {
+                        load_b
+                    },
+                )
+            })
+            .collect();
+        robot
+            .forward_dynamics(
+                &BaseState::fixed(),
+                &q,
+                &qd,
+                &torque,
+                &dynibo_loads,
+                &mut actual,
+            )
+            .unwrap();
+        assert_close(
+            &actual,
+            &pinocchio.aba_with_loads(&pin_q, &pin_qd, &torque, &pinocchio_loads),
+            4.0e-9,
+            1.0e-9,
+            &format!("tree ABA loads={load_names:?}, sample {sample}"),
+        );
+    }
+}
+
+#[test]
 fn mixed_joint_ik_reaches_pinocchio_generated_targets() {
     let path = fixture();
     let mut robot = Robot::from_urdf(&path).unwrap();
@@ -1065,6 +1267,109 @@ fn floating_aba_matches_free_flyer_pinocchio() {
             1.0e-9,
             &format!("floating ABA sample {sample}"),
         );
+    }
+}
+
+#[test]
+fn floating_external_loads_match_free_flyer_pinocchio() {
+    let path = fixture();
+    let mut robot = Robot::from_urdf_with_base(&path, BaseMode::Floating).unwrap();
+    let mut pinocchio = PinocchioContext::new_floating(&robot, &path, "tool");
+
+    for link_name in ["link_a", "slider_link", "tool"] {
+        let wrench = Wrench::new(
+            Vector3::new(0.31, -0.27, 0.19),
+            Vector3::new(-0.8, 0.55, 0.42),
+        );
+        let dynibo_load = IndexedLoad {
+            link: robot.link_id(link_name).unwrap(),
+            wrench,
+        };
+        let pinocchio_load = pinocchio.load(link_name, wrench);
+
+        for sample in 0..16 {
+            let (q, qd, qdd) = deterministic_mixed_state(sample);
+            let phase = sample as f64 + 1.0;
+            let base = Frame::from_parts(
+                Translation3::new(0.2, -0.3, 0.4),
+                UnitQuaternion::from_euler_angles(
+                    0.3 * (phase * 0.23).sin(),
+                    -0.25 * (phase * 0.31).cos(),
+                    0.2 * (phase * 0.17).sin(),
+                ),
+            );
+            let base_velocity = Twist::new(
+                Vector3::new(0.21, -0.17, 0.13),
+                Vector3::new(-0.3, 0.2, 0.1),
+            );
+            let base_acceleration = Twist::new(
+                Vector3::new(-0.11, 0.14, 0.09),
+                Vector3::new(0.35, -0.22, 0.18),
+            );
+            let base_state = BaseState::new(base, base_velocity, base_acceleration).unwrap();
+            let (pin_q, pin_qd, pin_qdd) =
+                pinocchio.floating_state(&q, &qd, &qdd, &base, base_velocity, base_acceleration);
+
+            let mut actual_gravity = vec![f64::NAN; robot.generalized_count()];
+            let stationary_base = BaseState::new(base, Twist::zeros(), Twist::zeros()).unwrap();
+            robot
+                .gravity(&stationary_base, &q, &[dynibo_load], &mut actual_gravity)
+                .unwrap();
+            assert_close(
+                &actual_gravity,
+                &pinocchio.floating_gravity_with_loads(&pin_q, &base, &[pinocchio_load]),
+                4.0e-9,
+                1.0e-9,
+                &format!("floating gravity load on {link_name}, sample {sample}"),
+            );
+
+            let mut actual_rnea = vec![f64::NAN; robot.generalized_count()];
+            robot
+                .inverse_dynamics(&base_state, &q, &qd, &qdd, &[dynibo_load], &mut actual_rnea)
+                .unwrap();
+            assert_close(
+                &actual_rnea,
+                &pinocchio.floating_rnea_with_loads(
+                    &pin_q,
+                    &pin_qd,
+                    &pin_qdd,
+                    &base,
+                    &[pinocchio_load],
+                ),
+                4.0e-9,
+                1.0e-9,
+                &format!("floating RNEA load on {link_name}, sample {sample}"),
+            );
+
+            let generalized_forces: Vec<f64> = (0..robot.generalized_count())
+                .map(|index| 7.0 * (phase * (index + 2) as f64 * 0.337).sin())
+                .collect();
+            let mut actual_aba = vec![f64::NAN; robot.generalized_count()];
+            robot
+                .forward_dynamics(
+                    &base_state,
+                    &q,
+                    &qd,
+                    &generalized_forces,
+                    &[dynibo_load],
+                    &mut actual_aba,
+                )
+                .unwrap();
+            assert_close(
+                &actual_aba,
+                &pinocchio.floating_aba_with_loads(
+                    &pin_q,
+                    &pin_qd,
+                    &generalized_forces,
+                    &base,
+                    base_velocity,
+                    &[pinocchio_load],
+                ),
+                5.0e-9,
+                1.0e-9,
+                &format!("floating ABA load on {link_name}, sample {sample}"),
+            );
+        }
     }
 }
 

@@ -110,7 +110,7 @@ jobs:
         run: |
           python -m venv target/sdist-test
           target/sdist-test/bin/python -m pip install --no-deps dist/from-sdist/*.whl
-          target/sdist-test/bin/python tests/python/test_package.py tests/data/test_arm.urdf
+          target/sdist-test/bin/python tests/python/test_package.py tests/data/test_arm.urdf tests/data/pinocchio_reference_v1.tsv
       - uses: actions/upload-artifact@v7
         with:
           name: release-python-sdist

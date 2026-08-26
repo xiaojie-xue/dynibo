@@ -5,3 +5,4 @@ recursive-include bindings/c *.toml *.rs *.h *.hpp
 recursive-include bindings/python *.md *.py
 recursive-include tests/python *.py
 include tests/data/test_arm.urdf
+include tests/data/pinocchio_reference_v1.tsv

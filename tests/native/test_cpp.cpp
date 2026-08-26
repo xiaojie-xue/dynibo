@@ -1,7 +1,10 @@
 #include <dynibo/dynibo.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -14,8 +17,26 @@
         }                                                                       \
     } while (false)
 
+static std::vector<double> read_reference(
+    const char* path, const std::string& key, std::size_t count) {
+    std::ifstream input(path);
+    std::string line;
+    while (std::getline(input, line)) {
+        if (line.empty() || line.front() == '#') continue;
+        std::istringstream fields(line);
+        std::string field;
+        std::getline(fields, field, '\t');
+        if (field != key) continue;
+        std::vector<double> values;
+        while (std::getline(fields, field, '\t')) values.push_back(std::stod(field));
+        if (values.size() == count) return values;
+        return {};
+    }
+    return {};
+}
+
 int main(int argc, char** argv) {
-    CHECK(argc == 2);
+    CHECK(argc == 3);
     dynibo::Robot robot(argv[1]);
     dynibo::Robot moved(std::move(robot));
     dynibo::Robot assigned(argv[1]);
@@ -36,15 +57,19 @@ int main(int argc, char** argv) {
     CHECK(assigned.inverse_dynamics(q, q, q).size() == assigned.joint_count());
     CHECK(assigned.inverse_kinematics(q, target, pose) == q);
 
-    const std::vector<double> reference_q{0.2, 1.0, -0.7, 0.4};
-    const std::vector<double> reference_qd{-0.3, 0.5, -0.2, 0.8};
-    const std::vector<double> reference_qdd{0.7, -0.4, 0.1, 0.3};
-    const std::vector<double> expected_gravity{
-        1.7763568394002505e-15, 39.629058959145354,
-        17.60815765611755, 0.053134179784508524};
-    const std::vector<double> expected_dynamics{
-        1.7649236924309104, 38.319908179086525,
-        17.136450444507805, 0.05169960944426318};
+    const auto reference_q = read_reference(argv[2], "q", 4);
+    const auto reference_qd = read_reference(argv[2], "qd", 4);
+    const auto reference_qdd = read_reference(argv[2], "qdd", 4);
+    const auto expected_translation = read_reference(argv[2], "fk_translation", 3);
+    const auto expected_gravity = read_reference(argv[2], "gravity", 4);
+    const auto expected_dynamics = read_reference(argv[2], "rnea", 4);
+    CHECK(reference_q.size() == 4 && reference_qd.size() == 4);
+    CHECK(reference_qdd.size() == 4 && expected_translation.size() == 3);
+    CHECK(expected_gravity.size() == 4 && expected_dynamics.size() == 4);
+    const auto reference_pose = assigned.forward_kinematics(reference_q, target);
+    for (std::size_t index = 0; index < expected_translation.size(); ++index) {
+        CHECK(std::abs(reference_pose.translation[index] - expected_translation[index]) < 2.0e-12);
+    }
     const auto reference_gravity = assigned.gravity(reference_q);
     const auto reference_dynamics =
         assigned.inverse_dynamics(reference_q, reference_qd, reference_qdd);
@@ -101,6 +126,67 @@ int main(int argc, char** argv) {
     load.link_id = target;
     load.force[1] = 1.0;
     CHECK(assigned.gravity(q, {load}) != gravity);
+
+    dynibo::Robot floating(argv[1], DYNIBO_BASE_FLOATING);
+    const auto floating_target = floating.link_id("test_link_4");
+    const auto base_translation = read_reference(argv[2], "floating_base_translation", 3);
+    const auto base_rotation = read_reference(argv[2], "floating_base_rotation_xyzw", 4);
+    const auto base_velocity = read_reference(argv[2], "floating_base_velocity", 6);
+    const auto base_acceleration = read_reference(argv[2], "floating_base_acceleration", 6);
+    DyniboPose floating_base{};
+    std::copy(base_translation.begin(), base_translation.end(), floating_base.translation);
+    std::copy(base_rotation.begin(), base_rotation.end(), floating_base.rotation_xyzw);
+    DyniboTwist floating_velocity{};
+    DyniboTwist floating_acceleration{};
+    std::copy_n(base_velocity.begin(), 3, floating_velocity.angular);
+    std::copy_n(base_velocity.begin() + 3, 3, floating_velocity.linear);
+    std::copy_n(base_acceleration.begin(), 3, floating_acceleration.angular);
+    std::copy_n(base_acceleration.begin() + 3, 3, floating_acceleration.linear);
+    floating.set_floating_base_state(
+        floating_base, floating_velocity, floating_acceleration);
+    const auto floating_pose = floating.forward_kinematics(reference_q, floating_target);
+    const auto floating_translation =
+        read_reference(argv[2], "floating_fk_translation", 3);
+    for (std::size_t index = 0; index < 3; ++index) {
+        CHECK(std::abs(floating_pose.translation[index] - floating_translation[index]) < 2.0e-12);
+    }
+    const auto floating_gravity = floating.gravity(reference_q);
+    const auto expected_floating_gravity =
+        read_reference(argv[2], "floating_gravity", 10);
+    const auto floating_rnea =
+        floating.inverse_dynamics(reference_q, reference_qd, reference_qdd);
+    const auto expected_floating_rnea = read_reference(argv[2], "floating_rnea", 10);
+    for (std::size_t index = 0; index < 10; ++index) {
+        CHECK(std::abs(floating_gravity[index] - expected_floating_gravity[index]) < 2.0e-10);
+        CHECK(std::abs(floating_rnea[index] - expected_floating_rnea[index]) < 2.0e-10);
+    }
+    std::vector<double> expected_floating_acceleration(base_acceleration);
+    expected_floating_acceleration.insert(
+        expected_floating_acceleration.end(), reference_qdd.begin(), reference_qdd.end());
+    const auto floating_recovered =
+        floating.forward_dynamics(reference_q, reference_qd, floating_rnea);
+    for (std::size_t index = 0; index < 10; ++index) {
+        CHECK(std::abs(floating_recovered[index] - expected_floating_acceleration[index]) < 2.0e-9);
+    }
+    const auto floating_load_values = read_reference(argv[2], "floating_load", 6);
+    DyniboLoad floating_load{};
+    floating_load.link_id = floating_target;
+    std::copy_n(floating_load_values.begin(), 3, floating_load.torque);
+    std::copy_n(floating_load_values.begin() + 3, 3, floating_load.force);
+    const auto floating_loaded_rnea = floating.inverse_dynamics(
+        reference_q, reference_qd, reference_qdd, {floating_load});
+    const auto expected_floating_loaded_rnea =
+        read_reference(argv[2], "floating_rnea_loaded", 10);
+    for (std::size_t index = 0; index < 10; ++index) {
+        CHECK(std::abs(floating_loaded_rnea[index] -
+                       expected_floating_loaded_rnea[index]) < 2.0e-10);
+    }
+    const auto floating_loaded_recovered = floating.forward_dynamics(
+        reference_q, reference_qd, floating_loaded_rnea, {floating_load});
+    for (std::size_t index = 0; index < 10; ++index) {
+        CHECK(std::abs(floating_loaded_recovered[index] -
+                       expected_floating_acceleration[index]) < 2.0e-9);
+    }
 
     bool caught = false;
     try {
