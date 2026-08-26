@@ -83,7 +83,8 @@ dynamics regressions, branched robots and external loads, inverse kinematics,
 invalid inputs, model-scoped handles, repeated calculation, and allocation-free execution.
 An independent Pinocchio oracle also compares complete FK, Jacobian, Jacobian
 time-derivative, mass matrix, velocity-product forces, gravity, and RNEA outputs over
-deterministic robot states.
+deterministic robot states. See the [test architecture](tests/TESTING.md) for
+the generated-URDF corpus, reproducibility, and exploration workflow.
 
 ## Dependencies
 

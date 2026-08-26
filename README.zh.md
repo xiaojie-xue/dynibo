@@ -75,6 +75,7 @@ API 围绕少量核心类型构建：`Robot`、`LinkId`、`Frame`、`Twist` 和
 Dynibo 经过了深入的单元测试。测试覆盖有限差分运动学、动力学回归、树状机器人与外部
 载荷、逆运动学、非法输入、模型作用域 handle、重复计算，以及计算期零分配。独立的 Pinocchio
 oracle 还会在确定性机器人状态下完整对比 FK、Jacobian、Jacobian 时间导数、质量矩阵、速度乘积力、gravity 和 RNEA 输出。
+关于生成 URDF 语料、可复现性与探索流程，详见[测试架构](tests/TESTING.zh.md)。
 
 ## 依赖
 

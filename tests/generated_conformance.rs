@@ -7,7 +7,7 @@ use support::{
     dynamics::{dense_forward_dynamics, generalized_force_for_acceleration, inverse_dynamics_bias},
     fixtures::LoadSpec,
     matrix::{AlgorithmCase, MatrixCase, execute_algorithm},
-    model_gen::{ModelGenOptions, generate_model, selected_model_seeds},
+    model_gen::{generate_case, selected_model_cases},
     numeric::{DYNAMICS, STRICT, assert_slice_close},
     observation::assert_observation_finite,
     states::{deterministic_base_state, deterministic_joint_state, generalized_acceleration},
@@ -15,26 +15,24 @@ use support::{
 
 #[test]
 fn generated_model_matrix_preserves_dynamics_and_aba_identities() {
-    for seed in selected_model_seeds(16) {
-        let options = ModelGenOptions::from_seed(seed);
-        let generated = generate_model(seed, options);
+    for case in selected_model_cases(24) {
+        let seed = case.seed;
+        let options = case.options;
+        let generated = generate_case(&case);
         let mut robot = generated.robot();
-        let target_name = generated
-            .metadata
-            .branch_targets
-            .last()
-            .expect("generated model must expose a target")
-            .clone();
-        let load_spec = LoadSpec::new(
-            &target_name,
-            Wrench::new(
-                Vector3::new(0.23, -0.17, 0.11),
-                Vector3::new(-0.7, 0.4, -0.2),
-            ),
-        );
-        let load = load_spec.resolve(&robot);
 
         for sample in 0..8 {
+            let target_name = generated.metadata.branch_targets
+                [sample % generated.metadata.branch_targets.len()]
+            .clone();
+            let load_spec = LoadSpec::new(
+                &target_name,
+                Wrench::new(
+                    Vector3::new(0.23, -0.17, 0.11),
+                    Vector3::new(-0.7, 0.4, -0.2),
+                ),
+            );
+            let load = load_spec.resolve(&robot);
             let mut state = deterministic_joint_state(robot.joint_count(), sample);
             let base = match options.base_mode {
                 BaseMode::Fixed => BaseState::fixed(),
