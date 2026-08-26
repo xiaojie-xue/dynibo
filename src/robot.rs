@@ -410,6 +410,11 @@ mod tests {
             Err(Error::InvalidLinkId)
         ));
         assert_eq!(robot.root_link_id(), fork.root_link_id());
+        assert_eq!(robot.link_id_at(0).unwrap(), robot.root_link_id());
+        assert!(matches!(
+            robot.link_id_at(robot.link_count()),
+            Err(Error::InvalidLinkId)
+        ));
         assert_eq!(robot.joint_name(0).unwrap(), "test_joint_1");
         assert_eq!(robot.joint_type(0).unwrap(), JointType::Revolute);
         assert_eq!(robot.joint_lower_limit(0).unwrap(), -0.610865238198015);
