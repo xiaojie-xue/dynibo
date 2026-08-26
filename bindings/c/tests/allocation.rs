@@ -1,9 +1,9 @@
 use std::{
     alloc::{GlobalAlloc, Layout, System},
+    cell::Cell,
     ffi::CString,
     path::PathBuf,
     ptr,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 use dynibo_c::{
@@ -17,14 +17,34 @@ use dynibo_c::{
 
 struct CountingAllocator;
 
-static COUNTING: AtomicBool = AtomicBool::new(false);
-static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    static COUNTING: Cell<bool> = const { Cell::new(false) };
+    static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
+}
+
+fn record_allocation() {
+    COUNTING.with(|counting| {
+        if counting.get() {
+            ALLOCATIONS.with(|allocations| allocations.set(allocations.get() + 1));
+        }
+    });
+}
+
+fn reset_allocation_count() {
+    ALLOCATIONS.with(|allocations| allocations.set(0));
+}
+
+fn set_counting(enabled: bool) {
+    COUNTING.with(|counting| counting.set(enabled));
+}
+
+fn allocation_count() -> usize {
+    ALLOCATIONS.with(Cell::get)
+}
 
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if COUNTING.load(Ordering::Relaxed) {
-            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-        }
+        record_allocation();
         unsafe { System.alloc(layout) }
     }
 
@@ -33,16 +53,12 @@ unsafe impl GlobalAlloc for CountingAllocator {
     }
 
     unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        if COUNTING.load(Ordering::Relaxed) {
-            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-        }
+        record_allocation();
         unsafe { System.realloc(pointer, layout, new_size) }
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        if COUNTING.load(Ordering::Relaxed) {
-            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-        }
+        record_allocation();
         unsafe { System.alloc_zeroed(layout) }
     }
 }
@@ -85,8 +101,8 @@ fn fixed_base_abi_hot_paths_do_not_allocate() {
         let mut twist = DyniboTwist::default();
         let mut output = [0.0; 4];
 
-        ALLOCATIONS.store(0, Ordering::Relaxed);
-        COUNTING.store(true, Ordering::SeqCst);
+        reset_allocation_count();
+        set_counting(true);
         for _ in 0..10 {
             assert_eq!(
                 dynibo_forward_velocity_kinematics(
@@ -147,8 +163,8 @@ fn fixed_base_abi_hot_paths_do_not_allocate() {
                 DyniboStatus::Ok
             );
         }
-        COUNTING.store(false, Ordering::SeqCst);
-        assert_eq!(ALLOCATIONS.load(Ordering::Relaxed), 0);
+        set_counting(false);
+        assert_eq!(allocation_count(), 0);
 
         dynibo_workspace_destroy(workspace);
         dynibo_robot_destroy(robot);
@@ -223,8 +239,8 @@ fn floating_base_abi_forward_dynamics_does_not_allocate() {
             DyniboStatus::Ok
         );
 
-        ALLOCATIONS.store(0, Ordering::Relaxed);
-        COUNTING.store(true, Ordering::SeqCst);
+        reset_allocation_count();
+        set_counting(true);
         for _ in 0..10 {
             assert_eq!(
                 dynibo_forward_dynamics(
@@ -243,8 +259,8 @@ fn floating_base_abi_forward_dynamics_does_not_allocate() {
                 DyniboStatus::Ok
             );
         }
-        COUNTING.store(false, Ordering::SeqCst);
-        assert_eq!(ALLOCATIONS.load(Ordering::Relaxed), 0);
+        set_counting(false);
+        assert_eq!(allocation_count(), 0);
 
         dynibo_workspace_destroy(workspace);
         dynibo_robot_destroy(robot);
