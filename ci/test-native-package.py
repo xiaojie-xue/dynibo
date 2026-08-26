@@ -42,12 +42,14 @@ def main() -> None:
         raise SystemExit(f"expected exactly one dynibo-config.cmake, found: {configs}")
     prefix = configs[0].parents[3]
     urdf = (project / "tests" / "data" / "test_arm.urdf").resolve()
+    reference = (project / "tests" / "data" / "pinocchio_reference_v1.tsv").resolve()
 
     run([
         "cmake", "-S", str(project / "tests" / "native"),
         "-B", str(build),
         f"-DCMAKE_PREFIX_PATH={prefix}",
         f"-DDYNIBO_TEST_URDF={urdf}",
+        f"-DDYNIBO_TEST_REFERENCE={reference}",
         f"-DCMAKE_BUILD_TYPE={args.configuration}",
     ])
     run(["cmake", "--build", str(build), "--config", args.configuration, "--parallel"])

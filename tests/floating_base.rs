@@ -1,17 +1,18 @@
-use std::path::PathBuf;
+mod support;
 
 use approx::assert_relative_eq;
 use dynibo::{
     BaseMode, BaseState, Error, Frame, IndexedLoad, InverseKinematicsOptions, Robot, Twist, Wrench,
 };
 use nalgebra::{DMatrix, DVector, Translation3, UnitQuaternion, Vector3};
+use support::{
+    context::TestContext,
+    fixtures::{FLOATING_ARM, fixture_path},
+    numeric::{Tolerance, assert_slice_close as assert_supported_slice_close},
+};
 
 fn robot() -> Robot {
-    Robot::from_urdf_with_base(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/floating_arm.urdf"),
-        BaseMode::Floating,
-    )
-    .unwrap()
+    FLOATING_ARM.robot(BaseMode::Floating)
 }
 
 fn base_frame() -> Frame {
@@ -36,13 +37,12 @@ fn base_acceleration() -> Twist {
 }
 
 fn assert_slice_close(actual: &[f64], expected: &[f64], tolerance: f64) {
-    assert_eq!(actual.len(), expected.len());
-    for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
-        assert!(
-            (actual - expected).abs() <= tolerance,
-            "element {index}: actual={actual:.16e}, expected={expected:.16e}"
-        );
-    }
+    assert_supported_slice_close(
+        actual,
+        expected,
+        Tolerance::new(tolerance, 0.0),
+        &TestContext::new("floating-base", FLOATING_ARM.name).base_mode(BaseMode::Floating),
+    );
 }
 
 fn assert_acceleration_error<T>(result: dynibo::Result<T>) {
@@ -57,10 +57,7 @@ fn assert_acceleration_error<T>(result: dynibo::Result<T>) {
 
 #[test]
 fn base_mode_state_dimensions_and_ik_contract_are_explicit() {
-    let mut fixed = Robot::from_urdf(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/floating_arm.urdf"),
-    )
-    .unwrap();
+    let mut fixed = FLOATING_ARM.robot(BaseMode::Fixed);
     assert_eq!(fixed.base_mode(), BaseMode::Fixed);
     assert_eq!(fixed.generalized_count(), fixed.joint_count());
     let zero = BaseState::fixed();
@@ -168,7 +165,7 @@ fn base_mode_state_dimensions_and_ik_contract_are_explicit() {
 
 #[test]
 fn floating_base_requires_positive_root_mass_at_model_load() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/fixed_arm.urdf");
+    let path = fixture_path("fixed_arm.urdf");
     Robot::from_urdf(&path).expect("a massless root remains valid for a fixed base");
 
     let error = Robot::from_urdf_with_base(&path, BaseMode::Floating).unwrap_err();
@@ -181,10 +178,7 @@ fn floating_base_requires_positive_root_mass_at_model_load() {
 
 #[test]
 fn fixed_base_calculations_reject_nonzero_base_acceleration() {
-    let mut robot = Robot::from_urdf(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/floating_arm.urdf"),
-    )
-    .unwrap();
+    let mut robot = FLOATING_ARM.robot(BaseMode::Fixed);
     let target = robot.link_id("tool").unwrap();
     let invalid_base = BaseState::new(
         Frame::identity(),

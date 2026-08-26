@@ -1,0 +1,35 @@
+name: Randomized URDF exploration
+
+on:
+  schedule:
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  DYNIBO_TEST_RANDOMIZE: "1"
+  DYNIBO_TEST_CASES: "512"
+
+jobs:
+  generated-conformance:
+    name: Generated URDF dynamics corpus
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Explore an OS-seeded corpus
+        run: >-
+          cargo test -p dynibo --locked --release
+          --test generated_conformance -- --nocapture
+      - name: Upload failing generated models
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: generated-urdf-failures
+          path: target/test-failures
+          if-no-files-found: ignore

@@ -72,9 +72,10 @@ API 围绕少量核心类型构建：`Robot`、`LinkId`、`Frame`、`Twist` 和
 
 ### 可靠
 
-Dynibo 经过了深入的单元测试。测试覆盖有限差分运动学、动力学回归、树状机器人与外部
-载荷、逆运动学、非法输入、模型作用域 handle、重复计算，以及计算期零分配。独立的 Pinocchio
-oracle 还会在确定性机器人状态下完整对比 FK、Jacobian、Jacobian 时间导数、质量矩阵、速度乘积力、gravity 和 RNEA 输出。
+Dynibo 将随机生成的、可精确复现的 URDF 用例与长期维护的固定用例相结合，覆盖串联与树状
+机器人、固定基座与浮动基座、混合关节、外部载荷、非法输入及 workspace 重复使用。结果通过
+有限差分近似、算法间一致性关系和独立 Pinocchio oracle 校验；另有专项测试验证计算期零分配
+及安装后的 Rust、Python、C 和 C++ 包。详见[测试架构](tests/TESTING.zh.md)。
 
 ## 依赖
 

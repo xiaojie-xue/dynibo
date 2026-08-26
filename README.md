@@ -78,12 +78,13 @@ same Rust implementation.
 
 ### Reliable
 
-Dynibo is thoroughly unit-tested. Tests cover finite-difference kinematics,
-dynamics regressions, branched robots and external loads, inverse kinematics,
-invalid inputs, model-scoped handles, repeated calculation, and allocation-free execution.
-An independent Pinocchio oracle also compares complete FK, Jacobian, Jacobian
-time-derivative, mass matrix, velocity-product forces, gravity, and RNEA outputs over
-deterministic robot states.
+Dynibo combines maintained fixtures with a seed-reproducible generated-URDF
+corpus, covering serial and branched robots, fixed and floating bases, mixed
+joint types, external loads, invalid inputs, and repeated workspace use. Results
+are checked against finite-difference approximations, consistency relations
+between related algorithms, and outputs from an independent Pinocchio oracle.
+Separate tests verify allocation-free execution and the installed Rust, Python,
+C, and C++ packages. See the [test architecture](tests/TESTING.md) for details.
 
 ## Dependencies
 

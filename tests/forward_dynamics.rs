@@ -1,29 +1,18 @@
-use std::path::PathBuf;
+mod support;
 
-use approx::assert_relative_eq;
 use dynibo::{BaseMode, BaseState, Error, Frame, IndexedLoad, Robot, Twist, Wrench};
 use nalgebra::{Translation3, UnitQuaternion, Vector3};
-
-fn fixture(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/data")
-        .join(name)
-}
-
-fn assert_close(actual: &[f64], expected: &[f64], epsilon: f64) {
-    assert_eq!(actual.len(), expected.len());
-    for (&actual, &expected) in actual.iter().zip(expected) {
-        assert_relative_eq!(actual, expected, epsilon = epsilon, max_relative = epsilon);
-    }
-}
+use support::{
+    context::TestContext,
+    fixtures::{FLOATING_ARM, MIXED_ARM, TREE_ARM, fixture_path},
+    numeric::{Tolerance, assert_slice_close},
+    states::deterministic_joint_state,
+};
 
 #[test]
 fn fixed_forward_dynamics_inverts_inverse_dynamics_for_tree_and_mixed_joints() {
-    for (model, target_name) in [
-        ("test_tree_7.urdf", "right_tool"),
-        ("oracle_mixed.urdf", "tool"),
-    ] {
-        let mut robot = Robot::from_urdf(fixture(model)).unwrap();
+    for (fixture, target_name) in [(TREE_ARM, "right_tool"), (MIXED_ARM, "tool")] {
+        let mut robot = fixture.robot(BaseMode::Fixed);
         let joint_count = robot.joint_count();
         let load = IndexedLoad {
             link: robot.link_id(target_name).unwrap(),
@@ -31,16 +20,10 @@ fn fixed_forward_dynamics_inverts_inverse_dynamics_for_tree_and_mixed_joints() {
         };
 
         for sample in 0..24 {
-            let state = |phase: f64, amplitude: f64| -> Vec<f64> {
-                (0..joint_count)
-                    .map(|joint| {
-                        amplitude * ((sample + 1) as f64 * (joint + 2) as f64 * 0.37 + phase).sin()
-                    })
-                    .collect()
-            };
-            let q = state(0.1, 0.6);
-            let qd = state(0.7, 0.8);
-            let expected_qdd = state(1.1, 0.9);
+            let state = deterministic_joint_state(joint_count, sample);
+            let q = state.q;
+            let qd = state.qd;
+            let expected_qdd = state.qdd;
             let mut generalized_forces = vec![0.0; joint_count];
             robot
                 .inverse_dynamics(
@@ -64,15 +47,23 @@ fn fixed_forward_dynamics_inverts_inverse_dynamics_for_tree_and_mixed_joints() {
                     &mut actual_qdd,
                 )
                 .unwrap();
-            assert_close(&actual_qdd, &expected_qdd, 2.0e-10);
+            let context = TestContext::new("rnea-aba-round-trip", fixture.name)
+                .sample(sample)
+                .target(target_name)
+                .load_case("single");
+            assert_slice_close(
+                &actual_qdd,
+                &expected_qdd,
+                Tolerance::new(2.0e-10, 2.0e-10),
+                &context,
+            );
         }
     }
 }
 
 #[test]
 fn floating_forward_dynamics_inverts_moving_base_inverse_dynamics() {
-    let mut robot =
-        Robot::from_urdf_with_base(fixture("floating_arm.urdf"), BaseMode::Floating).unwrap();
+    let mut robot = FLOATING_ARM.robot(BaseMode::Floating);
     let load = IndexedLoad {
         link: robot.link_id("tool").unwrap(),
         wrench: Wrench::new(
@@ -138,13 +129,21 @@ fn floating_forward_dynamics_inverts_moving_base_inverse_dynamics() {
         qdd[0],
         qdd[1],
     ];
-    assert_close(&actual, &expected, 3.0e-10);
+    assert_slice_close(
+        &actual,
+        &expected,
+        Tolerance::new(3.0e-10, 3.0e-10),
+        &TestContext::new("floating-rnea-aba-round-trip", FLOATING_ARM.name)
+            .base_mode(BaseMode::Floating)
+            .target("tool")
+            .load_case("single"),
+    );
 }
 
 #[test]
 fn forward_dynamics_validates_dimensions_base_state_and_load_ids() {
-    let mut robot = Robot::from_urdf(fixture("floating_arm.urdf")).unwrap();
-    let other = Robot::from_urdf(fixture("floating_arm.urdf")).unwrap();
+    let mut robot = FLOATING_ARM.robot(BaseMode::Fixed);
+    let other = FLOATING_ARM.robot(BaseMode::Fixed);
     let foreign_load = IndexedLoad {
         link: other.link_id("tool").unwrap(),
         wrench: Wrench::zeros(),
@@ -203,7 +202,7 @@ fn forward_dynamics_validates_dimensions_base_state_and_load_ids() {
 
 #[test]
 fn forward_dynamics_reports_singular_joint_and_floating_base_inertia() {
-    let mut singular_joint = Robot::from_urdf(fixture("singular_arm.urdf")).unwrap();
+    let mut singular_joint = Robot::from_urdf(fixture_path("singular_arm.urdf")).unwrap();
     let mut joint_output = [0.0];
     assert!(matches!(
         singular_joint.forward_dynamics(
@@ -217,9 +216,11 @@ fn forward_dynamics_reports_singular_joint_and_floating_base_inertia() {
         Err(Error::ForwardDynamicsSingularJointInertia { joint_index: 0 })
     ));
 
-    let mut singular_base =
-        Robot::from_urdf_with_base(fixture("singular_floating_base.urdf"), BaseMode::Floating)
-            .unwrap();
+    let mut singular_base = Robot::from_urdf_with_base(
+        fixture_path("singular_floating_base.urdf"),
+        BaseMode::Floating,
+    )
+    .unwrap();
     let base = BaseState::new(Frame::identity(), Twist::zeros(), Twist::zeros()).unwrap();
     let mut base_output = [0.0; 6];
     let result = singular_base.forward_dynamics(&base, &[], &[], &[0.0; 6], &[], &mut base_output);

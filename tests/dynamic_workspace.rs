@@ -1,27 +1,25 @@
-use std::path::PathBuf;
+mod support;
 
 use approx::assert_relative_eq;
 use dynibo::{Error, Frame, IndexedLoad, InverseKinematicsOptions, Robot, Twist, Wrench};
 use nalgebra::{Matrix3, SMatrix, SVector, Translation3, UnitQuaternion, Vector3};
-
-fn urdf_path(file_name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/data")
-        .join(file_name)
-}
+use support::{
+    context::TestContext,
+    fixtures::{SERIAL_ARM, TREE_ARM, fixture_path},
+    numeric::{Tolerance, assert_slice_close as assert_supported_slice_close},
+};
 
 fn test_arm() -> Robot {
-    Robot::from_urdf(urdf_path("test_arm.urdf")).expect("test URDF must load")
+    SERIAL_ARM.robot(dynibo::BaseMode::Fixed)
 }
 
 fn tree_arm() -> Robot {
-    Robot::from_urdf(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_tree_7.urdf"))
-        .expect("tree URDF must load")
+    TREE_ARM.robot(dynibo::BaseMode::Fixed)
 }
 
 #[test]
 fn active_dof_mapping_excludes_fixed_joints() {
-    let robot = Robot::from_urdf(urdf_path("oracle_mixed.urdf")).unwrap();
+    let robot = Robot::from_urdf(fixture_path("oracle_mixed.urdf")).unwrap();
     assert_eq!(robot.joint_count(), 3);
     assert_eq!(robot.joint_name(0).unwrap(), "shoulder");
     assert_eq!(robot.joint_name(1).unwrap(), "slider");
@@ -124,10 +122,12 @@ fn supplied_base_frame_is_used_consistently_by_fixed_base_calculations() {
 }
 
 fn assert_slice_close(actual: &[f64], expected: &[f64]) {
-    assert_eq!(actual.len(), expected.len());
-    for (actual, expected) in actual.iter().zip(expected) {
-        assert_relative_eq!(actual, expected, epsilon = 2.0e-12);
-    }
+    assert_supported_slice_close(
+        actual,
+        expected,
+        Tolerance::new(2.0e-12, 0.0),
+        &TestContext::new("dynamic-workspace", SERIAL_ARM.name),
+    );
 }
 
 fn assert_wrong_length<T: std::fmt::Debug>(
@@ -761,7 +761,7 @@ fn inverse_kinematics_skips_fixed_joints_on_the_ancestor_path() {
     // `oracle_mixed` chains revolute -> fixed -> prismatic -> continuous, so the
     // solver's Jacobian sweeps must skip the fixed `rigid_mount` joint.
     let mut robot =
-        Robot::from_urdf(urdf_path("oracle_mixed.urdf")).expect("oracle URDF must load");
+        Robot::from_urdf(fixture_path("oracle_mixed.urdf")).expect("oracle URDF must load");
     let target = robot.link_id("tool").unwrap();
     let q = [0.3, 0.12, -0.4];
     let desired = robot

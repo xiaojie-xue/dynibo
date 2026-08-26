@@ -2094,6 +2094,228 @@ mod tests {
     }
 
     #[test]
+    fn forward_dynamics_abi_validates_pointers_lengths_models_loads_and_overlap() {
+        // SAFETY: valid calls use live handles and correctly sized buffers. Invalid
+        // pointers and lengths are rejected before the ABI constructs or dereferences
+        // the corresponding slices.
+        unsafe {
+            let (robot, workspace, _) = create_handles();
+            let (other_robot, other_workspace, _) = create_handles();
+            let q = [0.2, 1.0, -0.7, 0.4];
+            let qd = [-0.3, 0.5, -0.2, 0.8];
+            let forces = [1.7, 38.3, 17.1, 0.05];
+            let mut output = [0.0; 4];
+
+            let call_forward = |robot, workspace, q, qd, forces, output| {
+                dynibo_forward_dynamics(
+                    robot,
+                    workspace,
+                    q,
+                    qd,
+                    4,
+                    forces,
+                    4,
+                    ptr::null(),
+                    0,
+                    output,
+                    4,
+                )
+            };
+
+            assert_eq!(
+                call_forward(
+                    ptr::null(),
+                    workspace,
+                    q.as_ptr(),
+                    qd.as_ptr(),
+                    forces.as_ptr(),
+                    output.as_mut_ptr(),
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            assert_eq!(
+                call_forward(
+                    robot,
+                    ptr::null_mut(),
+                    q.as_ptr(),
+                    qd.as_ptr(),
+                    forces.as_ptr(),
+                    output.as_mut_ptr(),
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            for (input_name, q_ptr, qd_ptr, force_ptr) in [
+                ("q", ptr::null(), qd.as_ptr(), forces.as_ptr()),
+                ("qd", q.as_ptr(), ptr::null(), forces.as_ptr()),
+                ("generalized_forces", q.as_ptr(), qd.as_ptr(), ptr::null()),
+            ] {
+                assert_eq!(
+                    call_forward(
+                        robot,
+                        workspace,
+                        q_ptr,
+                        qd_ptr,
+                        force_ptr,
+                        output.as_mut_ptr(),
+                    ),
+                    DyniboStatus::InvalidArgument,
+                    "{input_name} null pointer must be rejected"
+                );
+            }
+            assert_eq!(
+                call_forward(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    qd.as_ptr(),
+                    forces.as_ptr(),
+                    ptr::null_mut(),
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            assert_eq!(
+                dynibo_forward_dynamics(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    qd.as_ptr(),
+                    3,
+                    forces.as_ptr(),
+                    4,
+                    ptr::null(),
+                    0,
+                    output.as_mut_ptr(),
+                    4,
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            assert_eq!(
+                dynibo_forward_dynamics(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    qd.as_ptr(),
+                    4,
+                    forces.as_ptr(),
+                    3,
+                    ptr::null(),
+                    0,
+                    output.as_mut_ptr(),
+                    4,
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            assert_eq!(
+                dynibo_forward_dynamics(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    qd.as_ptr(),
+                    4,
+                    forces.as_ptr(),
+                    4,
+                    ptr::null(),
+                    0,
+                    output.as_mut_ptr(),
+                    3,
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            assert_eq!(
+                call_forward(
+                    robot,
+                    other_workspace,
+                    q.as_ptr(),
+                    qd.as_ptr(),
+                    forces.as_ptr(),
+                    output.as_mut_ptr(),
+                ),
+                DyniboStatus::InvalidArgument
+            );
+
+            let invalid_load = DyniboLoad {
+                link_id: usize::MAX,
+                ..DyniboLoad::default()
+            };
+            assert_eq!(
+                dynibo_forward_dynamics(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    qd.as_ptr(),
+                    4,
+                    forces.as_ptr(),
+                    4,
+                    ptr::null(),
+                    1,
+                    output.as_mut_ptr(),
+                    4,
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            assert_eq!(
+                dynibo_forward_dynamics(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    qd.as_ptr(),
+                    4,
+                    forces.as_ptr(),
+                    4,
+                    &invalid_load,
+                    1,
+                    output.as_mut_ptr(),
+                    4,
+                ),
+                DyniboStatus::InvalidArgument
+            );
+
+            let mut overlap = [0.0; 4];
+            assert_eq!(
+                call_forward(
+                    robot,
+                    workspace,
+                    overlap.as_ptr(),
+                    qd.as_ptr(),
+                    forces.as_ptr(),
+                    overlap.as_mut_ptr(),
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            assert!(last_error().contains("q and output must not overlap"));
+            assert_eq!(
+                call_forward(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    overlap.as_ptr(),
+                    forces.as_ptr(),
+                    overlap.as_mut_ptr(),
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            assert!(last_error().contains("qd and output must not overlap"));
+            assert_eq!(
+                call_forward(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    qd.as_ptr(),
+                    overlap.as_ptr(),
+                    overlap.as_mut_ptr(),
+                ),
+                DyniboStatus::InvalidArgument
+            );
+            assert!(last_error().contains("generalized_forces and output must not overlap"));
+
+            dynibo_workspace_destroy(other_workspace);
+            dynibo_robot_destroy(other_robot);
+            dynibo_workspace_destroy(workspace);
+            dynibo_robot_destroy(robot);
+        }
+    }
+
+    #[test]
     fn abi_catches_panics_clears_errors_and_keeps_them_thread_local() {
         let status = call(|| panic!("intentional test panic"));
         assert_eq!(status, DyniboStatus::Panic);

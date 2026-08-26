@@ -1,17 +1,20 @@
-use std::path::PathBuf;
+mod support;
 
 use approx::assert_relative_eq;
 use dynibo::{BaseMode, BaseState, Frame, IndexedLoad, Robot, Twist, Wrench};
 use nalgebra::{DMatrix, Vector3};
+use support::{
+    context::TestContext,
+    fixtures::{MIXED_ARM, TREE_ARM},
+    numeric::{Tolerance, assert_slice_close as assert_supported_slice_close},
+};
 
 fn tree_arm() -> Robot {
-    Robot::from_urdf(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_tree_7.urdf"))
-        .expect("tree fixture must load")
+    TREE_ARM.robot(BaseMode::Fixed)
 }
 
 fn mixed_oracle_arm() -> Robot {
-    Robot::from_urdf(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/oracle_mixed.urdf"))
-        .expect("mixed oracle fixture must load")
+    MIXED_ARM.robot(BaseMode::Fixed)
 }
 
 fn deterministic_state(sample: usize, phase: f64, amplitude: f64) -> [f64; 7] {
@@ -22,10 +25,12 @@ fn deterministic_state(sample: usize, phase: f64, amplitude: f64) -> [f64; 7] {
 }
 
 fn assert_slice_close(actual: &[f64], expected: &[f64], epsilon: f64) {
-    assert_eq!(actual.len(), expected.len());
-    for (&actual, &expected) in actual.iter().zip(expected) {
-        assert_relative_eq!(actual, expected, epsilon = epsilon);
-    }
+    assert_supported_slice_close(
+        actual,
+        expected,
+        Tolerance::new(epsilon, 0.0),
+        &TestContext::new("property", "legacy-fixture"),
+    );
 }
 
 /// Extracts the mass matrix column-wise from Newton-Euler evaluations:
@@ -104,11 +109,7 @@ fn mass_matrix_matches_rnea_columns_and_keeps_structural_guarantees() {
 
 #[test]
 fn floating_mass_matrix_propagates_through_fixed_ancestors() {
-    let mut robot = Robot::from_urdf_with_base(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/oracle_mixed.urdf"),
-        BaseMode::Floating,
-    )
-    .unwrap();
+    let mut robot = MIXED_ARM.robot(BaseMode::Floating);
     let base = BaseState::new(Frame::identity(), Twist::zeros(), Twist::zeros()).unwrap();
     let q = [0.3, -0.2, 0.4];
     let generalized_count = robot.generalized_count();
