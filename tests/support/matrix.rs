@@ -1,4 +1,4 @@
-use dynibo::{BaseState, IndexedLoad, Robot};
+use dynibo::{BaseState, FloatingRobot, IndexedLoad, Robot};
 
 use super::{
     fixtures::LoadSpec,
@@ -17,6 +17,18 @@ pub struct MatrixCase {
 impl MatrixCase {
     pub fn resolved_loads(&self, robot: &Robot) -> Vec<IndexedLoad> {
         self.loads.iter().map(|load| load.resolve(robot)).collect()
+    }
+
+    pub fn resolved_floating_loads(&self, robot: &FloatingRobot) -> Vec<IndexedLoad> {
+        self.loads
+            .iter()
+            .map(|load| IndexedLoad {
+                link: robot
+                    .link_id(&load.link_name)
+                    .expect("load link must resolve"),
+                wrench: load.wrench,
+            })
+            .collect()
     }
 }
 
@@ -92,7 +104,7 @@ pub fn execute_algorithm_with_loads(
                 message: error.to_string(),
             })?;
             observe(
-                robot.forward_kinematics(&case.base, &state.q, target),
+                robot.forward_kinematics(&state.q, target),
                 Observation::Frame,
             )
         }
@@ -103,7 +115,6 @@ pub fn execute_algorithm_with_loads(
             })?;
             observe(
                 robot.forward_velocity_kinematics(
-                    &case.base,
                     &state.q,
                     &state.qd,
                     target,
@@ -118,9 +129,7 @@ pub fn execute_algorithm_with_loads(
                 message: error.to_string(),
             })?;
             observe(
-                robot.forward_acceleration_kinematics(
-                    &case.base, &state.q, &state.qd, &state.qdd, target,
-                ),
+                robot.forward_acceleration_kinematics(&state.q, &state.qd, &state.qdd, target),
                 Observation::Twist,
             )
         }
@@ -132,9 +141,9 @@ pub fn execute_algorithm_with_loads(
             let columns = robot.generalized_count();
             let mut output = vec![f64::NAN; 6 * columns];
             let result = if matches!(algorithm, AlgorithmCase::Jacobian { .. }) {
-                robot.jacobian(&case.base, &state.q, target, &mut output)
+                robot.jacobian(&state.q, target, &mut output)
             } else {
-                robot.jacobian_derivative(&case.base, &state.q, &state.qd, target, &mut output)
+                robot.jacobian_derivative(&state.q, &state.qd, target, &mut output)
             };
             observe(result, |()| Observation::Matrix {
                 rows: 6,
@@ -145,7 +154,7 @@ pub fn execute_algorithm_with_loads(
         AlgorithmCase::MassMatrix => {
             let n = robot.generalized_count();
             let mut output = vec![f64::NAN; n * n];
-            observe(robot.mass_matrix(&case.base, &state.q, &mut output), |()| {
+            observe(robot.mass_matrix(&state.q, &mut output), |()| {
                 Observation::Matrix {
                     rows: n,
                     columns: n,
@@ -159,12 +168,119 @@ pub fn execute_algorithm_with_loads(
         | AlgorithmCase::ForwardDynamics => {
             let mut output = vec![f64::NAN; robot.generalized_count()];
             let result = match algorithm {
-                AlgorithmCase::Gravity => robot.gravity(&case.base, &state.q, loads, &mut output),
+                AlgorithmCase::Gravity => robot.gravity(&state.q, loads, &mut output),
                 AlgorithmCase::VelocityProduct => {
-                    robot.velocity_product_forces(&case.base, &state.q, &state.qd, &mut output)
+                    robot.velocity_product_forces(&state.q, &state.qd, &mut output)
+                }
+                AlgorithmCase::InverseDynamics => {
+                    robot.inverse_dynamics(&state.q, &state.qd, &state.qdd, loads, &mut output)
+                }
+                AlgorithmCase::ForwardDynamics => {
+                    robot.forward_dynamics(&state.q, &state.qd, &state.tau, loads, &mut output)
+                }
+                _ => unreachable!(),
+            };
+            observe(result, |()| Observation::Vector(output))
+        }
+    }
+}
+
+pub fn execute_algorithm_floating(
+    robot: &mut FloatingRobot,
+    case: &MatrixCase,
+    algorithm: &AlgorithmCase,
+) -> ObservedResult {
+    let loads = case.resolved_floating_loads(robot);
+    execute_algorithm_floating_with_loads(robot, case, algorithm, &loads)
+}
+
+pub fn execute_algorithm_floating_with_loads(
+    robot: &mut FloatingRobot,
+    case: &MatrixCase,
+    algorithm: &AlgorithmCase,
+    loads: &[IndexedLoad],
+) -> ObservedResult {
+    let state = &case.state;
+    let base = &case.base;
+    match algorithm {
+        AlgorithmCase::ForwardKinematics { target } => {
+            let target = robot.link_id(target).map_err(|error| ObservedError {
+                category: error.category(),
+                message: error.to_string(),
+            })?;
+            observe(
+                robot.forward_kinematics(base, &state.q, target),
+                Observation::Frame,
+            )
+        }
+        AlgorithmCase::ForwardVelocity { target } => {
+            let target = robot.link_id(target).map_err(|error| ObservedError {
+                category: error.category(),
+                message: error.to_string(),
+            })?;
+            observe(
+                robot.forward_velocity_kinematics(
+                    base,
+                    &state.q,
+                    &state.qd,
+                    target,
+                    &dynibo::Frame::identity(),
+                ),
+                Observation::Twist,
+            )
+        }
+        AlgorithmCase::ForwardAcceleration { target } => {
+            let target = robot.link_id(target).map_err(|error| ObservedError {
+                category: error.category(),
+                message: error.to_string(),
+            })?;
+            observe(
+                robot
+                    .forward_acceleration_kinematics(base, &state.q, &state.qd, &state.qdd, target),
+                Observation::Twist,
+            )
+        }
+        AlgorithmCase::Jacobian { target } | AlgorithmCase::JacobianDerivative { target } => {
+            let target = robot.link_id(target).map_err(|error| ObservedError {
+                category: error.category(),
+                message: error.to_string(),
+            })?;
+            let columns = robot.generalized_count();
+            let mut output = vec![f64::NAN; 6 * columns];
+            let result = if matches!(algorithm, AlgorithmCase::Jacobian { .. }) {
+                robot.jacobian(base, &state.q, target, &mut output)
+            } else {
+                robot.jacobian_derivative(base, &state.q, &state.qd, target, &mut output)
+            };
+            observe(result, |()| Observation::Matrix {
+                rows: 6,
+                columns,
+                values: output,
+            })
+        }
+        AlgorithmCase::MassMatrix => {
+            let n = robot.generalized_count();
+            let mut output = vec![f64::NAN; n * n];
+            observe(robot.mass_matrix(base, &state.q, &mut output), |()| {
+                Observation::Matrix {
+                    rows: n,
+                    columns: n,
+                    values: output,
+                }
+            })
+        }
+        AlgorithmCase::Gravity
+        | AlgorithmCase::VelocityProduct
+        | AlgorithmCase::InverseDynamics
+        | AlgorithmCase::ForwardDynamics => {
+            let mut output = vec![f64::NAN; robot.generalized_count()];
+            let result = match algorithm {
+                AlgorithmCase::Gravity => robot.gravity(base, &state.q, loads, &mut output),
+                AlgorithmCase::VelocityProduct => {
+                    robot.velocity_product_forces(base, &state.q, &state.qd, &mut output)
                 }
                 AlgorithmCase::InverseDynamics => robot.inverse_dynamics(
-                    &case.base,
+                    base,
                     &state.q,
                     &state.qd,
                     &state.qdd,
@@ -172,7 +288,7 @@ pub fn execute_algorithm_with_loads(
                     &mut output,
                 ),
                 AlgorithmCase::ForwardDynamics => robot.forward_dynamics(
-                    &case.base,
+                    base,
                     &state.q,
                     &state.qd,
                     &state.tau,

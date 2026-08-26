@@ -1,8 +1,11 @@
 use nalgebra::{Matrix3, SMatrix, SVector, Vector3};
 
-use crate::{BaseMode, BaseState, Error, Frame, JointType, Result, Twist, Wrench};
+use crate::{BaseState, Error, Frame, JointType, Result, Twist, Wrench};
 
-use super::super::{FLOATING_BASE_DOF, IndexedLoad, Model, Robot, Workspace};
+use super::super::{
+    FLOATING_BASE_DOF, FloatingRobot, IndexedLoad, Model, Robot, RootMode, Workspace,
+    base_dof_count,
+};
 
 const GRAVITY: f64 = 9.80665;
 type Matrix6 = SMatrix<f64, 6, 6>;
@@ -11,11 +14,7 @@ type Vector6 = SVector<f64, 6>;
 impl Robot {
     /// Writes generalized accelerations computed with the articulated-body algorithm.
     ///
-    /// For a floating base, `generalized_forces` and `output` are ordered as
-    /// world-frame angular base components, world-frame linear base components,
-    /// then non-fixed URDF joints. A floating base's stored acceleration is
-    /// ignored because forward dynamics solves for it; a fixed base still
-    /// requires zero stored motion.
+    /// The fixed-base input and output contain only non-fixed URDF joints.
     ///
     /// External loads use the same resisting-wrench convention as
     /// [`Robot::inverse_dynamics`].
@@ -27,6 +26,31 @@ impl Robot {
     #[allow(clippy::too_many_arguments)]
     pub fn forward_dynamics(
         &mut self,
+        q: &[f64],
+        qd: &[f64],
+        generalized_forces: &[f64],
+        loads: &[IndexedLoad],
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.model.forward_dynamics(
+            RootMode::Fixed,
+            &self.world_from_root,
+            Twist::zeros(),
+            q,
+            qd,
+            generalized_forces,
+            loads,
+            &mut self.workspace,
+            output,
+        )
+    }
+}
+
+impl FloatingRobot {
+    /// Writes generalized accelerations computed with the articulated-body algorithm.
+    #[allow(clippy::too_many_arguments)]
+    pub fn forward_dynamics(
+        &mut self,
         base: &BaseState,
         q: &[f64],
         qd: &[f64],
@@ -35,7 +59,9 @@ impl Robot {
         output: &mut [f64],
     ) -> Result<()> {
         self.model.forward_dynamics(
-            base,
+            RootMode::Floating,
+            base.frame(),
+            base.velocity(),
             q,
             qd,
             generalized_forces,
@@ -50,7 +76,9 @@ impl Model {
     #[allow(clippy::too_many_arguments)]
     fn forward_dynamics(
         &self,
-        base: &BaseState,
+        base_mode: RootMode,
+        base_frame: &Frame,
+        base_velocity: Twist,
         q: &[f64],
         qd: &[f64],
         generalized_forces: &[f64],
@@ -58,17 +86,20 @@ impl Model {
         workspace: &mut Workspace,
         output: &mut [f64],
     ) -> Result<()> {
-        self.validate_base_state(base)?;
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
-        self.validate_output("forward dynamics generalized forces", generalized_forces)?;
-        self.validate_output("forward dynamics output", output)?;
+        self.validate_output(
+            base_mode,
+            "forward dynamics generalized forces",
+            generalized_forces,
+        )?;
+        self.validate_output(base_mode, "forward dynamics output", output)?;
 
         let root_load = self.prepare_indexed_loads(loads, &mut workspace.link_loads)?;
-        let root_rotation_inverse = base.frame().rotation.inverse();
+        let root_rotation_inverse = base_frame.rotation.inverse();
         let root_velocity = Twist::new(
-            root_rotation_inverse * base.velocity().angular,
-            root_rotation_inverse * base.velocity().linear,
+            root_rotation_inverse * base_velocity.angular,
+            root_rotation_inverse * base_velocity.linear,
         );
 
         let root_link = self.link_dynamics[0];
@@ -105,7 +136,7 @@ impl Model {
                 add_wrench(force_cross(velocity, momentum), workspace.link_loads[index]);
         }
 
-        let joint_offset = self.base_dof_count();
+        let joint_offset = base_dof_count(base_mode);
 
         // Second pass: eliminate active joint accelerations and propagate each
         // articulated subtree into its parent.
@@ -167,9 +198,9 @@ impl Model {
 
         output.fill(0.0);
         let gravity_local = root_rotation_inverse * Vector3::new(0.0, 0.0, GRAVITY);
-        let root_acceleration = match self.base_mode() {
-            BaseMode::Fixed => Twist::new(Vector3::zeros(), gravity_local),
-            BaseMode::Floating => {
+        let root_acceleration = match base_mode {
+            RootMode::Fixed => Twist::new(Vector3::zeros(), gravity_local),
+            RootMode::Floating => {
                 let world_base_force = Wrench::new(
                     Vector3::from_column_slice(&generalized_forces[..3]),
                     Vector3::from_column_slice(&generalized_forces[3..FLOATING_BASE_DOF]),
@@ -200,8 +231,8 @@ impl Model {
 
                 let physical_linear_local = acceleration.linear - gravity_local
                     + root_velocity.angular.cross(&root_velocity.linear);
-                let world_angular = base.frame().rotation * acceleration.angular;
-                let world_linear = base.frame().rotation * physical_linear_local;
+                let world_angular = base_frame.rotation * acceleration.angular;
+                let world_linear = base_frame.rotation * physical_linear_local;
                 output[..3].copy_from_slice(world_angular.as_slice());
                 output[3..FLOATING_BASE_DOF].copy_from_slice(world_linear.as_slice());
                 acceleration

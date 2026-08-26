@@ -63,9 +63,9 @@ case 索引，并可通过 `DYNIBO_TEST_SEED` 与 `DYNIBO_TEST_CASE_ID` 重放�
 `DYNIBO_TEST_SEED` 与 `DYNIBO_TEST_CASE_ID` 可复现这些模型。生成器带版本号，因此在同一个
 生成器版本内，一个 seed 始终对应同一个 URDF。
 
-Workspace 序列测试会逐步比较复用同一个 `Robot` 的每个操作与新建 `fork()` 上的相同操作。
-固定基与浮动基序列分开测试，因为 base mode 是模型属性。无效长度和 foreign-link 操作会与
-成功计算交错执行，以验证错误恢复和 scratch buffer 清理。
+Workspace 序列测试会逐步比较复用同一个 `Robot` 或 `FloatingRobot` 的每个操作与新建
+`fork()` 上的相同操作。两个类型化 runner 分别覆盖固定基与浮动基行为。无效长度和
+foreign-link 操作会与成功计算交错执行，以验证错误恢复和 scratch buffer 清理。
 
 内存分配测试单独维护，因为它们使用进程全局 allocator。已安装的 C、C++、Python 包测试也
 保持黑盒测试，不复用 Rust 测试辅助代码。它们共同读取带版本号的

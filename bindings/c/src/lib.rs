@@ -13,7 +13,7 @@ use std::{
 };
 
 use dynibo::{
-    BaseMode, BaseState, ErrorCategory, Frame, IndexedLoad, InverseKinematicsOptions, LinkId,
+    BaseState, ErrorCategory, FloatingRobot, Frame, IndexedLoad, InverseKinematicsOptions, LinkId,
     Robot, Twist, Wrench,
 };
 use nalgebra::{Quaternion, Translation3, UnitQuaternion, Vector3};
@@ -45,10 +45,16 @@ pub const DYNIBO_BASE_FIXED: DyniboBaseMode = 0;
 /// The root link has six generalized velocity coordinates.
 pub const DYNIBO_BASE_FLOATING: DyniboBaseMode = 1;
 
-fn base_mode_from_c(value: c_int) -> Result<BaseMode, (DyniboStatus, String)> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RobotMode {
+    Fixed,
+    Floating,
+}
+
+fn base_mode_from_c(value: c_int) -> Result<RobotMode, (DyniboStatus, String)> {
     match value {
-        DYNIBO_BASE_FIXED => Ok(BaseMode::Fixed),
-        DYNIBO_BASE_FLOATING => Ok(BaseMode::Floating),
+        DYNIBO_BASE_FIXED => Ok(RobotMode::Fixed),
+        DYNIBO_BASE_FLOATING => Ok(RobotMode::Floating),
         _ => Err(invalid(format!("invalid base mode {value}"))),
     }
 }
@@ -124,9 +130,254 @@ impl Default for DyniboIkOptions {
     }
 }
 
+enum RobotKind {
+    Fixed(Robot),
+    Floating(FloatingRobot),
+}
+
+impl RobotKind {
+    fn fixed(path: &str) -> dynibo::Result<Self> {
+        Ok(Self::Fixed(Robot::from_urdf(path)?))
+    }
+
+    fn floating(path: &str) -> dynibo::Result<Self> {
+        Ok(Self::Floating(FloatingRobot::from_urdf(path)?))
+    }
+
+    fn fork(&self) -> Self {
+        match self {
+            Self::Fixed(robot) => Self::Fixed(robot.fork()),
+            Self::Floating(robot) => Self::Floating(robot.fork()),
+        }
+    }
+
+    const fn base_mode(&self) -> RobotMode {
+        match self {
+            Self::Fixed(_) => RobotMode::Fixed,
+            Self::Floating(_) => RobotMode::Floating,
+        }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            Self::Fixed(r) => r.name(),
+            Self::Floating(r) => r.name(),
+        }
+    }
+    fn link_count(&self) -> usize {
+        match self {
+            Self::Fixed(r) => r.link_count(),
+            Self::Floating(r) => r.link_count(),
+        }
+    }
+    fn joint_count(&self) -> usize {
+        match self {
+            Self::Fixed(r) => r.joint_count(),
+            Self::Floating(r) => r.joint_count(),
+        }
+    }
+    fn generalized_count(&self) -> usize {
+        match self {
+            Self::Fixed(r) => r.generalized_count(),
+            Self::Floating(r) => r.generalized_count(),
+        }
+    }
+    fn root_link_id(&self) -> LinkId {
+        match self {
+            Self::Fixed(r) => r.root_link_id(),
+            Self::Floating(r) => r.root_link_id(),
+        }
+    }
+    fn link_id(&self, name: &str) -> dynibo::Result<LinkId> {
+        match self {
+            Self::Fixed(r) => r.link_id(name),
+            Self::Floating(r) => r.link_id(name),
+        }
+    }
+    fn link_id_at(&self, index: usize) -> dynibo::Result<LinkId> {
+        match self {
+            Self::Fixed(r) => r.link_id_at(index),
+            Self::Floating(r) => r.link_id_at(index),
+        }
+    }
+
+    fn forward_kinematics(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        target: LinkId,
+    ) -> dynibo::Result<Frame> {
+        match self {
+            Self::Fixed(robot) => {
+                robot.set_base_frame(*base.frame())?;
+                robot.forward_kinematics(q, target)
+            }
+            Self::Floating(robot) => robot.forward_kinematics(base, q, target),
+        }
+    }
+    fn jacobian(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        target: LinkId,
+        output: &mut [f64],
+    ) -> dynibo::Result<()> {
+        match self {
+            Self::Fixed(r) => {
+                r.set_base_frame(*base.frame())?;
+                r.jacobian(q, target, output)
+            }
+            Self::Floating(r) => r.jacobian(base, q, target, output),
+        }
+    }
+    fn jacobian_derivative(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        qd: &[f64],
+        target: LinkId,
+        output: &mut [f64],
+    ) -> dynibo::Result<()> {
+        match self {
+            Self::Fixed(r) => {
+                r.set_base_frame(*base.frame())?;
+                r.jacobian_derivative(q, qd, target, output)
+            }
+            Self::Floating(r) => r.jacobian_derivative(base, q, qd, target, output),
+        }
+    }
+    fn mass_matrix(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        output: &mut [f64],
+    ) -> dynibo::Result<()> {
+        match self {
+            Self::Fixed(r) => {
+                r.set_base_frame(*base.frame())?;
+                r.mass_matrix(q, output)
+            }
+            Self::Floating(r) => r.mass_matrix(base, q, output),
+        }
+    }
+    fn velocity_product_forces(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        qd: &[f64],
+        output: &mut [f64],
+    ) -> dynibo::Result<()> {
+        match self {
+            Self::Fixed(r) => {
+                r.set_base_frame(*base.frame())?;
+                r.velocity_product_forces(q, qd, output)
+            }
+            Self::Floating(r) => r.velocity_product_forces(base, q, qd, output),
+        }
+    }
+    fn forward_velocity_kinematics(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        qd: &[f64],
+        target: LinkId,
+        tool: &Frame,
+    ) -> dynibo::Result<Twist> {
+        match self {
+            Self::Fixed(r) => {
+                r.set_base_frame(*base.frame())?;
+                r.forward_velocity_kinematics(q, qd, target, tool)
+            }
+            Self::Floating(r) => r.forward_velocity_kinematics(base, q, qd, target, tool),
+        }
+    }
+    fn forward_acceleration_kinematics(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        qd: &[f64],
+        qdd: &[f64],
+        target: LinkId,
+    ) -> dynibo::Result<Twist> {
+        match self {
+            Self::Fixed(r) => {
+                r.set_base_frame(*base.frame())?;
+                r.forward_acceleration_kinematics(q, qd, qdd, target)
+            }
+            Self::Floating(r) => r.forward_acceleration_kinematics(base, q, qd, qdd, target),
+        }
+    }
+    fn gravity(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        loads: &[IndexedLoad],
+        output: &mut [f64],
+    ) -> dynibo::Result<()> {
+        match self {
+            Self::Fixed(r) => {
+                r.set_base_frame(*base.frame())?;
+                r.gravity(q, loads, output)
+            }
+            Self::Floating(r) => r.gravity(base, q, loads, output),
+        }
+    }
+    fn inverse_dynamics(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        qd: &[f64],
+        qdd: &[f64],
+        loads: &[IndexedLoad],
+        output: &mut [f64],
+    ) -> dynibo::Result<()> {
+        match self {
+            Self::Fixed(r) => {
+                r.set_base_frame(*base.frame())?;
+                r.inverse_dynamics(q, qd, qdd, loads, output)
+            }
+            Self::Floating(r) => r.inverse_dynamics(base, q, qd, qdd, loads, output),
+        }
+    }
+    fn forward_dynamics(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        qd: &[f64],
+        forces: &[f64],
+        loads: &[IndexedLoad],
+        output: &mut [f64],
+    ) -> dynibo::Result<()> {
+        match self {
+            Self::Fixed(r) => {
+                r.set_base_frame(*base.frame())?;
+                r.forward_dynamics(q, qd, forces, loads, output)
+            }
+            Self::Floating(r) => r.forward_dynamics(base, q, qd, forces, loads, output),
+        }
+    }
+    fn inverse_kinematics(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        target: LinkId,
+        desired: &Frame,
+        options: InverseKinematicsOptions,
+        output: &mut [f64],
+    ) -> dynibo::Result<()> {
+        match self {
+            Self::Fixed(r) => {
+                r.set_base_frame(*base.frame())?;
+                r.inverse_kinematics(q, target, desired, options, output)
+            }
+            Self::Floating(_) => Err(dynibo::Error::FloatingBaseIkUnsupported),
+        }
+    }
+}
+
 /// Opaque robot model.
 pub struct DyniboRobot {
-    inner: Robot,
+    inner: RobotKind,
     base: BaseState,
     link_ids: Vec<LinkId>,
     name: CString,
@@ -134,7 +385,7 @@ pub struct DyniboRobot {
 
 /// Opaque reusable calculation workspace.
 pub struct DyniboWorkspace {
-    inner: Robot,
+    inner: RobotKind,
     indexed_loads: Box<[IndexedLoad]>,
 }
 
@@ -387,7 +638,7 @@ pub unsafe extern "C" fn dynibo_robot_from_urdf(
         let path = unsafe { CStr::from_ptr(path) }
             .to_str()
             .map_err(|_| invalid("path must be valid UTF-8"))?;
-        let inner = Robot::from_urdf(path).map_err(core_error)?;
+        let inner = RobotKind::fixed(path).map_err(core_error)?;
         let link_ids = (0..inner.link_count())
             .map(|index| inner.link_id_at(index).expect("link index came from robot"))
             .collect();
@@ -395,7 +646,7 @@ pub unsafe extern "C" fn dynibo_robot_from_urdf(
             CString::new(inner.name()).map_err(|_| model_error("robot name contains NUL"))?;
         *output = Box::into_raw(Box::new(DyniboRobot {
             inner,
-            base: BaseState::fixed(),
+            base: BaseState::stationary(Frame::identity()).expect("identity frame is valid"),
             link_ids,
             name,
         }));
@@ -420,11 +671,15 @@ pub unsafe extern "C" fn dynibo_robot_from_urdf_with_base(
             .to_str()
             .map_err(|_| invalid("path must be valid UTF-8"))?;
         let base_mode = base_mode_from_c(base_mode)?;
-        let inner = Robot::from_urdf_with_base(path, base_mode).map_err(core_error)?;
+        let inner = match base_mode {
+            RobotMode::Fixed => RobotKind::fixed(path),
+            RobotMode::Floating => RobotKind::floating(path),
+        }
+        .map_err(core_error)?;
         let base = match base_mode {
-            BaseMode::Fixed => BaseState::fixed(),
-            BaseMode::Floating => BaseState::new(Frame::identity(), Twist::zeros(), Twist::zeros())
-                .expect("zero floating-base state is valid"),
+            RobotMode::Fixed | RobotMode::Floating => {
+                BaseState::stationary(Frame::identity()).expect("identity frame is valid")
+            }
         };
         let link_ids = (0..inner.link_count())
             .map(|index| inner.link_id_at(index).expect("link index came from robot"))
@@ -487,7 +742,7 @@ pub unsafe extern "C" fn dynibo_robot_set_floating_base_state(
     call(|| {
         let robot = unsafe { required_mut(robot, "robot") }?;
         let frame = frame_from_pose(unsafe { required_ref(frame, "frame") }?)?;
-        if robot.inner.base_mode() != BaseMode::Floating {
+        if robot.inner.base_mode() != RobotMode::Floating {
             return Err(core_error(dynibo::Error::InvalidBaseState {
                 field: "mode",
                 reason: "does not match robot base mode",
@@ -509,8 +764,8 @@ pub unsafe extern "C" fn dynibo_robot_set_base_frame(
         let robot = unsafe { required_mut(robot, "robot") }?;
         let frame = frame_from_pose(unsafe { required_ref(frame, "frame") }?)?;
         robot.base = match robot.inner.base_mode() {
-            BaseMode::Fixed => BaseState::fixed_at(frame).expect("C pose was already validated"),
-            BaseMode::Floating => {
+            RobotMode::Fixed => BaseState::stationary(frame).expect("C pose was already validated"),
+            RobotMode::Floating => {
                 BaseState::new(frame, robot.base.velocity(), robot.base.acceleration())
                     .expect("C pose and existing base motion were already validated")
             }

@@ -1,8 +1,10 @@
 mod support;
 
+use support::context::TestBaseMode as BaseMode;
+
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use dynibo::{BaseMode, BaseState, Twist, Wrench};
+use dynibo::{FloatingRobot, Twist, Wrench};
 use nalgebra::Vector3;
 use support::{
     context::TestContext,
@@ -90,19 +92,9 @@ fn generated_model_is_reproducible_and_loadable() {
     let first = generate_model(23, options);
     let second = generate_model(23, options);
     assert_eq!(first.urdf, second.urdf);
-    let robot = first.robot();
+    let robot = FloatingRobot::from_urdf(first.path()).unwrap();
     assert_eq!(robot.joint_count(), 8);
-    assert_eq!(robot.base_mode(), BaseMode::Floating);
     assert!(!first.metadata.branch_targets.is_empty());
-
-    let base = BaseState::fixed();
-    assert!(
-        base.frame()
-            .translation
-            .vector
-            .iter()
-            .all(|value| *value == 0.0)
-    );
 }
 
 #[test]

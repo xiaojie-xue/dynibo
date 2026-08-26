@@ -6,7 +6,13 @@ use std::{
 };
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use dynibo::{BaseMode, BaseState, Frame, LinkId, Robot, Twist};
+use dynibo::{BaseState, FloatingRobot, Frame, IndexedLoad, LinkId, Robot, Twist};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BenchmarkRootMode {
+    Fixed,
+    Floating,
+}
 
 unsafe extern "C" {
     fn dynibo_pinocchio_create_for_frame(
@@ -47,17 +53,17 @@ unsafe extern "C" {
 struct PinocchioContext(NonNull<std::ffi::c_void>);
 
 impl PinocchioContext {
-    fn new_for_frame(urdf_path: &Path, frame_name: &str, base_mode: BaseMode) -> Self {
+    fn new_for_frame(urdf_path: &Path, frame_name: &str, base_mode: BenchmarkRootMode) -> Self {
         let path = CString::new(urdf_path.to_string_lossy().as_bytes())
             .expect("URDF path must not contain a NUL byte");
         let frame_name = CString::new(frame_name).expect("frame name must not contain a NUL byte");
         // SAFETY: both arguments are valid, NUL-terminated strings for the duration of the call.
         let context = unsafe {
             match base_mode {
-                BaseMode::Fixed => {
+                BenchmarkRootMode::Fixed => {
                     dynibo_pinocchio_create_for_frame(path.as_ptr(), frame_name.as_ptr())
                 }
-                BaseMode::Floating => {
+                BenchmarkRootMode::Floating => {
                     dynibo_pinocchio_create_floating_for_frame(path.as_ptr(), frame_name.as_ptr())
                 }
             }
@@ -92,8 +98,141 @@ impl Drop for PinocchioContext {
     }
 }
 
+enum BenchmarkRobot {
+    Fixed(Robot),
+    Floating(FloatingRobot),
+}
+
+impl BenchmarkRobot {
+    fn from_urdf(path: &Path, mode: BenchmarkRootMode) -> dynibo::Result<Self> {
+        match mode {
+            BenchmarkRootMode::Fixed => Robot::from_urdf(path).map(Self::Fixed),
+            BenchmarkRootMode::Floating => FloatingRobot::from_urdf(path).map(Self::Floating),
+        }
+    }
+
+    fn link_id(&self, name: &str) -> dynibo::Result<LinkId> {
+        match self {
+            Self::Fixed(robot) => robot.link_id(name),
+            Self::Floating(robot) => robot.link_id(name),
+        }
+    }
+    fn joint_count(&self) -> usize {
+        match self {
+            Self::Fixed(robot) => robot.joint_count(),
+            Self::Floating(robot) => robot.joint_count(),
+        }
+    }
+    fn generalized_count(&self) -> usize {
+        match self {
+            Self::Fixed(robot) => robot.generalized_count(),
+            Self::Floating(robot) => robot.generalized_count(),
+        }
+    }
+    fn forward_kinematics(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        target: LinkId,
+    ) -> dynibo::Result<Frame> {
+        match self {
+            Self::Fixed(robot) => robot.forward_kinematics(q, target),
+            Self::Floating(robot) => robot.forward_kinematics(base, q, target),
+        }
+    }
+    fn jacobian(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        target: LinkId,
+        output: &mut [f64],
+    ) -> dynibo::Result<()> {
+        match self {
+            Self::Fixed(robot) => robot.jacobian(q, target, output),
+            Self::Floating(robot) => robot.jacobian(base, q, target, output),
+        }
+    }
+    fn forward_acceleration_kinematics(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        qd: &[f64],
+        qdd: &[f64],
+        target: LinkId,
+    ) -> dynibo::Result<Twist> {
+        match self {
+            Self::Fixed(robot) => robot.forward_acceleration_kinematics(q, qd, qdd, target),
+            Self::Floating(robot) => {
+                robot.forward_acceleration_kinematics(base, q, qd, qdd, target)
+            }
+        }
+    }
+    fn gravity(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        loads: &[IndexedLoad],
+        output: &mut [f64],
+    ) -> dynibo::Result<()> {
+        match self {
+            Self::Fixed(robot) => robot.gravity(q, loads, output),
+            Self::Floating(robot) => robot.gravity(base, q, loads, output),
+        }
+    }
+    fn inverse_dynamics(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        qd: &[f64],
+        qdd: &[f64],
+        loads: &[IndexedLoad],
+        output: &mut [f64],
+    ) -> dynibo::Result<()> {
+        match self {
+            Self::Fixed(robot) => robot.inverse_dynamics(q, qd, qdd, loads, output),
+            Self::Floating(robot) => robot.inverse_dynamics(base, q, qd, qdd, loads, output),
+        }
+    }
+    fn jacobian_derivative(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        qd: &[f64],
+        target: LinkId,
+        output: &mut [f64],
+    ) -> dynibo::Result<()> {
+        match self {
+            Self::Fixed(robot) => robot.jacobian_derivative(q, qd, target, output),
+            Self::Floating(robot) => robot.jacobian_derivative(base, q, qd, target, output),
+        }
+    }
+    fn mass_matrix(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        output: &mut [f64],
+    ) -> dynibo::Result<()> {
+        match self {
+            Self::Fixed(robot) => robot.mass_matrix(q, output),
+            Self::Floating(robot) => robot.mass_matrix(base, q, output),
+        }
+    }
+    fn velocity_product_forces(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        qd: &[f64],
+        output: &mut [f64],
+    ) -> dynibo::Result<()> {
+        match self {
+            Self::Fixed(robot) => robot.velocity_product_forces(q, qd, output),
+            Self::Floating(robot) => robot.velocity_product_forces(base, q, qd, output),
+        }
+    }
+}
+
 struct BenchmarkCase<const N: usize> {
-    robot: Robot,
+    robot: BenchmarkRobot,
     base: BaseState,
     pinocchio: PinocchioContext,
     target: LinkId,
@@ -106,20 +245,26 @@ struct BenchmarkCase<const N: usize> {
 }
 
 impl<const N: usize> BenchmarkCase<N> {
-    fn new(relative_urdf_path: impl AsRef<Path>, target_link: &str, base_mode: BaseMode) -> Self {
+    fn new(
+        relative_urdf_path: impl AsRef<Path>,
+        target_link: &str,
+        base_mode: BenchmarkRootMode,
+    ) -> Self {
         let urdf_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative_urdf_path.as_ref());
-        let robot = Robot::from_urdf_with_base(&urdf_path, base_mode)
+        let mut robot = BenchmarkRobot::from_urdf(&urdf_path, base_mode)
             .expect("Dynibo must load the benchmark URDF");
         let target = robot
             .link_id(target_link)
             .expect("target link must exist in the benchmark URDF");
         let pinocchio = PinocchioContext::new_for_frame(&urdf_path, target_link, base_mode);
         let base = match base_mode {
-            BaseMode::Fixed => BaseState::fixed(),
-            BaseMode::Floating => {
-                BaseState::new(Frame::identity(), Twist::zeros(), Twist::zeros()).unwrap()
+            BenchmarkRootMode::Fixed | BenchmarkRootMode::Floating => {
+                BaseState::stationary(Frame::identity()).unwrap()
             }
         };
+        if let BenchmarkRobot::Fixed(fixed) = &mut robot {
+            fixed.set_base_frame(*base.frame()).unwrap();
+        }
 
         assert_eq!(robot.joint_count(), N);
         assert_eq!(pinocchio.dof(), robot.generalized_count());
@@ -379,19 +524,22 @@ fn benchmark_pinocchio(c: &mut Criterion) {
     let mut fixed_serial = BenchmarkCase::<40>::new(
         "tests/data/test_arm_40.urdf",
         "test_link_40",
-        BaseMode::Fixed,
+        BenchmarkRootMode::Fixed,
     );
     let mut floating_serial = BenchmarkCase::<40>::new(
         "tests/data/test_arm_40.urdf",
         "test_link_40",
-        BaseMode::Floating,
+        BenchmarkRootMode::Floating,
     );
-    let mut fixed_tree =
-        BenchmarkCase::<7>::new("tests/data/test_tree_7.urdf", "right_tool", BaseMode::Fixed);
+    let mut fixed_tree = BenchmarkCase::<7>::new(
+        "tests/data/test_tree_7.urdf",
+        "right_tool",
+        BenchmarkRootMode::Fixed,
+    );
     let mut floating_tree = BenchmarkCase::<7>::new(
         "tests/data/test_tree_7.urdf",
         "right_tool",
-        BaseMode::Floating,
+        BenchmarkRootMode::Floating,
     );
 
     let mut overhead = c.benchmark_group("ffi_overhead");

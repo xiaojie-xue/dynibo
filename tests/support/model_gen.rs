@@ -6,7 +6,8 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use dynibo::{BaseMode, Robot};
+use super::context::TestBaseMode as BaseMode;
+use dynibo::Robot;
 
 /// Bump this whenever a deliberate incompatibility changes the seed-to-model mapping.
 pub const GENERATOR_VERSION: u32 = 2;
@@ -225,7 +226,12 @@ impl GeneratedModel {
     }
 
     pub fn robot(&self) -> Robot {
-        Robot::from_urdf_with_base(&self.path, self.metadata.base_mode).unwrap_or_else(|error| {
+        assert_eq!(
+            self.metadata.base_mode,
+            BaseMode::Fixed,
+            "use FloatingRobot for floating generated cases"
+        );
+        Robot::from_urdf(&self.path).unwrap_or_else(|error| {
             panic!(
                 "generated model must load: case={} seed={:#018x} path={} error={error}\n{}",
                 self.metadata.case_id,

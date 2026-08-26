@@ -2,7 +2,7 @@
 
 use std::{ffi::CString, ptr::NonNull};
 
-use dynibo::{Frame, Robot, Twist, Wrench};
+use dynibo::{FloatingRobot, Frame, Robot, Twist, Wrench};
 use nalgebra::{Matrix3, Vector3};
 
 unsafe extern "C" {
@@ -163,6 +163,31 @@ pub struct PinocchioContext {
     joint_mappings: Vec<JointMapping>,
 }
 
+trait RobotMetadata {
+    fn joint_count(&self) -> usize;
+    fn joint_name(&self, dof_index: usize) -> dynibo::Result<&str>;
+}
+
+impl RobotMetadata for Robot {
+    fn joint_count(&self) -> usize {
+        self.joint_count()
+    }
+
+    fn joint_name(&self, dof_index: usize) -> dynibo::Result<&str> {
+        self.joint_name(dof_index)
+    }
+}
+
+impl RobotMetadata for FloatingRobot {
+    fn joint_count(&self) -> usize {
+        self.joint_count()
+    }
+
+    fn joint_name(&self, dof_index: usize) -> dynibo::Result<&str> {
+        self.joint_name(dof_index)
+    }
+}
+
 impl PinocchioContext {
     pub fn new(robot: &Robot, path: &std::path::Path, frame_name: &str) -> Self {
         let path = CString::new(path.to_string_lossy().as_bytes()).unwrap();
@@ -174,7 +199,7 @@ impl PinocchioContext {
         Self::from_pointer(robot, pointer)
     }
 
-    pub fn new_floating(robot: &Robot, path: &std::path::Path, frame_name: &str) -> Self {
+    pub fn new_floating(robot: &FloatingRobot, path: &std::path::Path, frame_name: &str) -> Self {
         let path = CString::new(path.to_string_lossy().as_bytes()).unwrap();
         let frame_name = CString::new(frame_name).unwrap();
         // SAFETY: both C strings remain alive for the duration of the call.
@@ -185,7 +210,7 @@ impl PinocchioContext {
         Self::from_pointer(robot, pointer)
     }
 
-    pub fn from_pointer(robot: &Robot, pointer: NonNull<std::ffi::c_void>) -> Self {
+    fn from_pointer(robot: &impl RobotMetadata, pointer: NonNull<std::ffi::c_void>) -> Self {
         // SAFETY: `pointer` owns a live Pinocchio context.
         let configuration_size = unsafe { dynibo_pinocchio_configuration_size(pointer.as_ptr()) };
         // SAFETY: `pointer` owns a live Pinocchio context.

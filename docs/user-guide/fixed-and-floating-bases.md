@@ -1,14 +1,13 @@
 # Fixed and Floating Bases
 
-The base mode determines whether root motion contributes generalized degrees of
-freedom. It is selected when loading the model and cannot be changed afterward.
+The robot type determines whether root motion contributes generalized degrees
+of freedom.
 
 ## Fixed base
 
-A fixed-base robot has `G = J`. In Rust, `BaseState::fixed()` supplies the
-identity pose and zero motion; `BaseState::fixed_at(frame)` prescribes another
-world pose. "Fixed" means the pose is prescribed rather than solved as a
-generalized coordinate.
+A fixed-base [`Robot`] has `G = J`. It starts with an identity root pose; use
+[`Robot::set_base_frame`] to prescribe another world pose. "Fixed" means the
+pose is prescribed rather than solved as a generalized coordinate.
 
 ## Floating base
 
@@ -18,18 +17,16 @@ to calculations that depend on velocity or acceleration:
 
 The URDF root link must declare an inertial block with strictly positive mass.
 Models with a massless root remain valid in fixed-base mode, but are rejected
-when loaded with `BaseMode::Floating`. A positive root mass is a load-time
+when loaded as a [`FloatingRobot`]. A positive root mass is a load-time
 requirement; forward dynamics additionally checks the complete articulated
 inertia for rotational or joint-subtree singularities.
 
 === "Rust"
 
     ```rust
-    let robot = Robot::from_urdf_with_base(
-        "robot.urdf", BaseMode::Floating)?;
+    let mut robot = FloatingRobot::from_urdf("robot.urdf")?;
     let base = BaseState::new(frame, velocity, acceleration)?;
-    robot.inverse_dynamics(
-        &base, &q, &qd, &qdd, &loads, &mut workspace, &mut forces)?;
+    robot.inverse_dynamics(&base, &q, &qd, &qdd, &loads, &mut forces)?;
     ```
 
 === "Python"
@@ -67,7 +64,7 @@ Python and C-family adapters retain setter-based state for API compatibility.
 - Mass matrices and generalized forces gain six base rows or entries.
 - Forward dynamics returns six world-frame base acceleration entries before joint acceleration.
 - Forward dynamics uses the supplied pose and velocity but ignores the stored acceleration.
-- Inverse kinematics currently accepts fixed-base models only.
+- Inverse kinematics is available on `Robot`, not `FloatingRobot`.
 
 Rust base states are immutable calculation inputs, so one robot can be shared
 across calculations using different states and workspaces.

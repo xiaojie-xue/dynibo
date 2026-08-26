@@ -75,11 +75,11 @@ models with both `DYNIBO_TEST_SEED` and `DYNIBO_TEST_CASE_ID`. The generator is
 versioned, so a seed continues to identify the same URDF within one generator
 version.
 
-Workspace sequence tests compare every operation on a reused `Robot` against
-the same operation on a fresh `fork()`. Fixed- and floating-base sequences are
-separate because base mode is a model property. Invalid length and foreign-link
-operations are interleaved with successful calculations to verify recovery as
-well as scratch-buffer clearing.
+Workspace sequence tests compare every operation on a reused `Robot` or
+`FloatingRobot` against the same operation on a fresh `fork()`. The two typed
+runners cover fixed and floating behavior separately. Invalid length and
+foreign-link operations are interleaved with successful calculations to verify
+recovery as well as scratch-buffer clearing.
 
 Allocation tests remain separate because they own process-global allocators.
 Installed C, C++, and Python package tests also remain black-box tests rather

@@ -1,7 +1,7 @@
 # Rust Guide
 
 The Rust crate is dynibo's native interface. It exposes strongly typed link IDs,
-explicit workspaces, caller-owned output buffers, and detailed `Error` variants.
+instance-local workspaces, caller-owned output buffers, and detailed `Error` variants.
 
 ```bash
 cargo add dynibo
@@ -10,16 +10,14 @@ cargo add dynibo
 ## Typical setup
 
 ```rust
-use dynibo::{BaseState, Robot};
+use dynibo::Robot;
 
 fn main() -> dynibo::Result<()> {
-    let robot = Robot::from_urdf("robot.urdf")?;
-    let base = BaseState::fixed();
+    let mut robot = Robot::from_urdf("robot.urdf")?;
     let target = robot.link_id("tool")?;
-    let mut workspace = robot.workspace();
     let q = vec![0.0; robot.joint_count()];
 
-    let pose = robot.forward_kinematics(&base, &q, target, &mut workspace)?;
+    let pose = robot.forward_kinematics(&q, target)?;
     println!("{}", pose.translation.vector.transpose());
     Ok(())
 }

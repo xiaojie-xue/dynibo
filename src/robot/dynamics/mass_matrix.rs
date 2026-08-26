@@ -1,8 +1,8 @@
 use nalgebra::{Matrix3, Vector3};
 
-use crate::{BaseMode, BaseState, JointType, Result, Wrench};
+use crate::{BaseState, JointType, Result, Wrench};
 
-use super::super::{FLOATING_BASE_DOF, Model, Robot, Workspace};
+use super::super::{FLOATING_BASE_DOF, FloatingRobot, Model, Robot, Workspace};
 use super::{wrench_component, wrench_to_parent, write_wrench_to_column};
 
 impl Robot {
@@ -13,13 +13,37 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error for an invalid base state or input/output length.
+    /// Returns an error for an invalid input or output length.
+    pub fn mass_matrix(&mut self, q: &[f64], output: &mut [f64]) -> Result<()> {
+        self.model.fixed_mass_matrix(q, &mut self.workspace, output)
+    }
+}
+
+impl FloatingRobot {
+    /// Writes the `G x G` mass matrix in column-major order.
     pub fn mass_matrix(&mut self, base: &BaseState, q: &[f64], output: &mut [f64]) -> Result<()> {
-        self.model.mass_matrix(base, q, &mut self.workspace, output)
+        self.model
+            .floating_mass_matrix(base, q, &mut self.workspace, output)
     }
 }
 
 impl Model {
+    fn fixed_mass_matrix(
+        &self,
+        q: &[f64],
+        workspace: &mut Workspace,
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.validate_slice("q", q)?;
+        self.validate_slice_length(
+            "mass matrix output",
+            output.len(),
+            self.joint_count() * self.joint_count(),
+        )?;
+        self.mass_matrix_kernel(q, workspace, output);
+        Ok(())
+    }
+
     /// Writes the runtime-sized `G x G` mass matrix in column-major order.
     ///
     /// Rows and columns follow the generalized-vector ordering: for a floating
@@ -37,25 +61,20 @@ impl Model {
     ///
     /// Returns an error unless `output.len() == generalized_count().pow(2)`,
     /// or for an invalid input length.
-    fn mass_matrix(
+    fn floating_mass_matrix(
         &self,
         base: &BaseState,
         q: &[f64],
         workspace: &mut Workspace,
         output: &mut [f64],
     ) -> Result<()> {
-        self.validate_base_state(base)?;
         self.validate_slice("q", q)?;
         self.validate_slice_length(
             "mass matrix output",
             output.len(),
-            self.generalized_count() * self.generalized_count(),
+            (self.joint_count() + FLOATING_BASE_DOF) * (self.joint_count() + FLOATING_BASE_DOF),
         )?;
-        if self.base_mode() == BaseMode::Fixed {
-            self.mass_matrix_kernel(q, workspace, output);
-        } else {
-            self.floating_mass_matrix_kernel(base, q, workspace, output);
-        }
+        self.floating_mass_matrix_kernel(base, q, workspace, output);
         Ok(())
     }
 
@@ -141,7 +160,7 @@ impl Model {
         output: &mut [f64],
     ) {
         let model_joint_count = self.model_joint_count();
-        let generalized_count = self.generalized_count();
+        let generalized_count = self.joint_count() + FLOATING_BASE_DOF;
         output.fill(0.0);
 
         let root = self.link_dynamics[0];

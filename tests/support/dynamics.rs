@@ -1,24 +1,17 @@
-use dynibo::{BaseMode, BaseState, IndexedLoad, Robot, Twist};
-use nalgebra::{DMatrix, DVector, Vector3};
-
-use super::states::base_with_acceleration;
-
-pub fn stationary_acceleration_base(base: &BaseState) -> BaseState {
-    base_with_acceleration(base, Twist::zeros())
-}
+use dynibo::{BaseState, IndexedLoad, Robot};
+use nalgebra::{DMatrix, DVector};
 
 pub fn inverse_dynamics_bias(
     robot: &mut Robot,
-    base: &BaseState,
+    _base: &BaseState,
     q: &[f64],
     qd: &[f64],
     loads: &[IndexedLoad],
 ) -> Vec<f64> {
     let zero = vec![0.0; robot.joint_count()];
-    let base = stationary_acceleration_base(base);
     let mut bias = vec![f64::NAN; robot.generalized_count()];
     robot
-        .inverse_dynamics(&base, q, qd, &zero, loads, &mut bias)
+        .inverse_dynamics(q, qd, &zero, loads, &mut bias)
         .expect("bias inverse dynamics must succeed");
     bias
 }
@@ -36,7 +29,7 @@ pub fn dense_forward_dynamics(
     let bias = inverse_dynamics_bias(robot, base, q, qd, loads);
     let mut mass = vec![f64::NAN; n * n];
     robot
-        .mass_matrix(base, q, &mut mass)
+        .mass_matrix(q, &mut mass)
         .expect("mass matrix must succeed");
     let mass = DMatrix::from_column_slice(n, n, &mass);
     let rhs = DVector::from_iterator(
@@ -55,29 +48,17 @@ pub fn dense_forward_dynamics(
 
 pub fn generalized_force_for_acceleration(
     robot: &mut Robot,
-    base: &BaseState,
+    _base: &BaseState,
     q: &[f64],
     qd: &[f64],
     generalized_acceleration: &[f64],
     loads: &[IndexedLoad],
 ) -> Vec<f64> {
     assert_eq!(generalized_acceleration.len(), robot.generalized_count());
-    let (base, qdd) = match robot.base_mode() {
-        BaseMode::Fixed => (*base, generalized_acceleration),
-        BaseMode::Floating => {
-            let acceleration = Twist::new(
-                Vector3::from_column_slice(&generalized_acceleration[..3]),
-                Vector3::from_column_slice(&generalized_acceleration[3..6]),
-            );
-            (
-                base_with_acceleration(base, acceleration),
-                &generalized_acceleration[6..],
-            )
-        }
-    };
+    let qdd = generalized_acceleration;
     let mut forces = vec![f64::NAN; robot.generalized_count()];
     robot
-        .inverse_dynamics(&base, q, qd, qdd, loads, &mut forces)
+        .inverse_dynamics(q, qd, qdd, loads, &mut forces)
         .expect("inverse dynamics must produce generalized forces");
     forces
 }

@@ -1,12 +1,11 @@
 # 固定基座与浮动基座
 
-Base mode 决定根节点运动是否作为广义自由度参与计算。它在加载模型时确定，之后不能
-更改。
+机器人类型决定根节点运动是否作为广义自由度参与计算。
 
 ## 固定基
 
-固定基机器人满足 `G = J`。Rust 中，`BaseState::fixed()` 表示 identity 位姿和零运动，
-`BaseState::fixed_at(frame)` 可以指定其他世界位姿；“固定”表示该位姿是给定状态，
+固定基 `Robot` 满足 `G = J`。它默认使用 identity 根节点位姿；调用
+`Robot::set_base_frame(frame)` 可以指定其他世界位姿。“固定”表示该位姿是给定状态，
 而不是需要求解的广义坐标。
 
 ## 浮动基
@@ -15,17 +14,15 @@ Base mode 决定根节点运动是否作为广义自由度参与计算。它在�
 执行依赖速度或加速度的计算时，应传入完整基座状态：
 
 URDF root link 必须声明 inertial block，并具有严格为正的质量。无质量 root 的模型在
-固定基模式下仍然有效，但使用 `BaseMode::Floating` 加载时会被拒绝。正 root mass 是
+固定基模式下仍然有效，但使用 `FloatingRobot` 加载时会被拒绝。正 root mass 是
 加载期要求；正动力学还会检查完整 articulated inertia，以发现转动惯量或关节子树奇异。
 
 === "Rust"
 
     ```rust
-    let robot = Robot::from_urdf_with_base(
-        "robot.urdf", BaseMode::Floating)?;
+    let mut robot = FloatingRobot::from_urdf("robot.urdf")?;
     let base = BaseState::new(frame, velocity, acceleration)?;
-    robot.inverse_dynamics(
-        &base, &q, &qd, &qdd, &loads, &mut workspace, &mut forces)?;
+    robot.inverse_dynamics(&base, &q, &qd, &qdd, &loads, &mut forces)?;
     ```
 
 === "Python"
@@ -62,7 +59,7 @@ URDF root link 必须声明 inertial block，并具有严格为正的质量。�
 - 质量矩阵和广义力增加六个基座行或元素。
 - 正动力学在关节加速度之前返回六个世界坐标系基座加速度元素。
 - 正动力学使用传入的位姿和速度，但忽略保存的加速度。
-- 逆运动学目前只支持固定基模型。
+- 逆运动学只在 `Robot` 上可用，`FloatingRobot` 不提供该方法。
 
 Rust 的基座状态是不可变计算输入，因此一个 robot 可以配合不同的状态和 workspace
 并发计算。

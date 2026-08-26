@@ -99,15 +99,14 @@ cargo add dynibo
 加载 URDF 并计算目标 link 位姿：
 
 ```rust
-use dynibo::{BaseState, Robot};
+use dynibo::Robot;
 
 fn main() -> dynibo::Result<()> {
     let mut robot = Robot::from_urdf("robot.urdf")?;
-    let base = BaseState::fixed();
     let tool = robot.link_id("tool")?;
     let q = vec![0.0; robot.joint_count()];
 
-    let pose = robot.forward_kinematics(&base, &q, tool)?;
+    let pose = robot.forward_kinematics(&q, tool)?;
     println!("translation: {}", pose.translation.vector.transpose());
     Ok(())
 }

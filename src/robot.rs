@@ -9,7 +9,7 @@ use std::{
 use nalgebra::{Matrix3, Vector3};
 
 use crate::{
-    BaseMode, BaseState, Error, JointType, Result,
+    Error, Frame, JointType, Result,
     model::{Joint, JointKinematics, Link, LinkDynamics, Tree, load_urdf},
 };
 
@@ -25,6 +25,12 @@ const FLOATING_BASE_DOF: usize = 6;
 const UNOWNED_MODEL_ID: u64 = 0;
 static NEXT_MODEL_ID: AtomicU64 = AtomicU64::new(1);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RootMode {
+    Fixed,
+    Floating,
+}
+
 #[derive(Debug)]
 struct Model {
     model_id: u64,
@@ -38,18 +44,25 @@ struct Model {
     active_joint_indices: Box<[usize]>,
     joint_dof_indices: Box<[Option<usize>]>,
     parent_link_indices: Box<[usize]>,
-    base_mode: BaseMode,
 }
 
-/// A robot model with reusable, instance-local calculation storage.
+/// A fixed-base robot model with reusable, instance-local calculation storage.
 #[derive(Debug)]
 pub struct Robot {
+    model: Arc<Model>,
+    workspace: Workspace,
+    world_from_root: Frame,
+}
+
+/// A floating-base robot model with reusable, instance-local calculation storage.
+#[derive(Debug)]
+pub struct FloatingRobot {
     model: Arc<Model>,
     workspace: Workspace,
 }
 
 impl Model {
-    fn from_tree(tree: Tree, base_mode: BaseMode) -> Self {
+    fn from_tree(tree: Tree) -> Self {
         let model_id = NEXT_MODEL_ID.fetch_add(1, Ordering::Relaxed);
         assert_ne!(
             model_id, UNOWNED_MODEL_ID,
@@ -77,12 +90,7 @@ impl Model {
             active_joint_indices,
             joint_dof_indices: joint_dof_indices.into_boxed_slice(),
             parent_link_indices: tree.parent_link_indices.into_boxed_slice(),
-            base_mode,
         }
-    }
-
-    const fn base_mode(&self) -> BaseMode {
-        self.base_mode
     }
 
     fn link_count(&self) -> usize {
@@ -91,17 +99,6 @@ impl Model {
 
     fn joint_count(&self) -> usize {
         self.active_joint_indices.len()
-    }
-
-    const fn base_dof_count(&self) -> usize {
-        match self.base_mode {
-            BaseMode::Fixed => 0,
-            BaseMode::Floating => FLOATING_BASE_DOF,
-        }
-    }
-
-    fn generalized_count(&self) -> usize {
-        self.base_dof_count() + self.joint_count()
     }
 
     fn model_joint_count(&self) -> usize {
@@ -126,30 +123,17 @@ impl Model {
         self.joint_dof_indices[joint_index].map_or(0.0, |dof_index| values[dof_index])
     }
 
-    fn validate_base_state(&self, base: &BaseState) -> Result<()> {
-        if self.base_mode == BaseMode::Fixed {
-            if base.velocity() != crate::Twist::zeros() {
-                return Err(Error::InvalidBaseState {
-                    field: "velocity",
-                    reason: "must be zero for a fixed base",
-                });
-            }
-            if base.acceleration() != crate::Twist::zeros() {
-                return Err(Error::InvalidBaseState {
-                    field: "acceleration",
-                    reason: "must be zero for a fixed base",
-                });
-            }
-        }
-        Ok(())
-    }
-
     fn validate_slice(&self, name: &'static str, slice: &[f64]) -> Result<()> {
         self.validate_slice_length(name, slice.len(), self.joint_count())
     }
 
-    fn validate_output(&self, name: &'static str, output: &[f64]) -> Result<()> {
-        self.validate_slice_length(name, output.len(), self.generalized_count())
+    fn validate_output(
+        &self,
+        base_mode: RootMode,
+        name: &'static str,
+        output: &[f64],
+    ) -> Result<()> {
+        self.validate_slice_length(name, output.len(), generalized_count(self, base_mode))
     }
 
     fn validate_joint_output(&self, name: &'static str, output: &[f64]) -> Result<()> {
@@ -182,6 +166,35 @@ impl Model {
     }
 }
 
+const fn base_dof_count(base_mode: RootMode) -> usize {
+    match base_mode {
+        RootMode::Fixed => 0,
+        RootMode::Floating => FLOATING_BASE_DOF,
+    }
+}
+
+fn generalized_count(model: &Model, base_mode: RootMode) -> usize {
+    base_dof_count(base_mode) + model.joint_count()
+}
+
+fn load_model(path: impl AsRef<Path>) -> Result<Arc<Model>> {
+    Ok(Arc::new(Model::from_tree(load_urdf(path)?)))
+}
+
+fn validate_floating_model(model: &Model) -> Result<()> {
+    let root = model
+        .links
+        .first()
+        .expect("validated robot tree has one root link");
+    if root.mass() <= 0.0 {
+        return Err(Error::InvalidModel(format!(
+            "floating-base root link {} must have positive mass",
+            root.name()
+        )));
+    }
+    Ok(())
+}
+
 impl Robot {
     /// Loads and validates a tree robot model from a URDF file.
     ///
@@ -189,36 +202,25 @@ impl Robot {
     ///
     /// Returns an error if the file cannot be parsed or its graph is invalid.
     pub fn from_urdf(path: impl AsRef<Path>) -> Result<Self> {
-        Self::from_urdf_with_base(path, BaseMode::Fixed)
-    }
-
-    /// Loads a tree robot model and selects how its root link is connected to the world.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the file cannot be parsed, its graph is invalid, or
-    /// a floating-base model's root link does not have positive mass.
-    pub fn from_urdf_with_base(path: impl AsRef<Path>, base_mode: BaseMode) -> Result<Self> {
-        let tree = load_urdf(path)?;
-        Self::from_tree(tree, base_mode)
-    }
-
-    fn from_tree(tree: Tree, base_mode: BaseMode) -> Result<Self> {
-        if base_mode == BaseMode::Floating {
-            let root = tree
-                .links
-                .first()
-                .expect("validated robot tree has one root link");
-            if root.mass() <= 0.0 {
-                return Err(Error::InvalidModel(format!(
-                    "floating-base root link {} must have positive mass",
-                    root.name()
-                )));
-            }
-        }
-        let model = Arc::new(Model::from_tree(tree, base_mode));
+        let model = load_model(path)?;
         let workspace = Workspace::new(model.as_ref());
-        Ok(Self { model, workspace })
+        Ok(Self {
+            model,
+            workspace,
+            world_from_root: Frame::identity(),
+        })
+    }
+
+    /// Returns the fixed root-link pose in the world frame.
+    pub const fn base_frame(&self) -> &Frame {
+        &self.world_from_root
+    }
+
+    /// Replaces the fixed root-link pose in the world frame.
+    pub fn set_base_frame(&mut self, frame: Frame) -> Result<()> {
+        crate::base::validate_frame(&frame)?;
+        self.world_from_root = frame;
+        Ok(())
     }
 
     /// Creates another calculation instance sharing this robot's immutable model.
@@ -228,12 +230,11 @@ impl Robot {
     pub fn fork(&self) -> Self {
         let model = Arc::clone(&self.model);
         let workspace = Workspace::new(model.as_ref());
-        Self { model, workspace }
-    }
-
-    /// Returns whether the root link is fixed or floating.
-    pub fn base_mode(&self) -> BaseMode {
-        self.model.base_mode()
+        Self {
+            model,
+            workspace,
+            world_from_root: self.world_from_root,
+        }
     }
 
     /// Returns the robot name declared in the URDF.
@@ -285,7 +286,7 @@ impl Robot {
     /// Floating-base generalized vectors are ordered `[base angular, base
     /// linear, joints]`; fixed-base vectors contain only non-fixed joint entries.
     pub fn generalized_count(&self) -> usize {
-        self.model.generalized_count()
+        self.model.joint_count()
     }
 
     /// Returns the name of the joint at an active-DOF index.
@@ -375,6 +376,114 @@ impl Robot {
     }
 }
 
+impl FloatingRobot {
+    /// Loads a tree robot model with a six-degree-of-freedom floating root.
+    pub fn from_urdf(path: impl AsRef<Path>) -> Result<Self> {
+        let model = load_model(path)?;
+        validate_floating_model(model.as_ref())?;
+        let workspace = Workspace::new(model.as_ref());
+        Ok(Self { model, workspace })
+    }
+
+    /// Creates another calculation instance sharing this robot's immutable model.
+    pub fn fork(&self) -> Self {
+        let model = Arc::clone(&self.model);
+        let workspace = Workspace::new(model.as_ref());
+        Self { model, workspace }
+    }
+
+    /// Returns the robot name declared in the URDF.
+    pub fn name(&self) -> &str {
+        &self.model.name
+    }
+
+    /// Finds a model-scoped link identifier by URDF name.
+    pub fn link_id(&self, name: &str) -> Result<LinkId> {
+        self.model
+            .links
+            .iter()
+            .position(|link| link.name() == name)
+            .map(|index| LinkId::new(self.model.model_id, index))
+            .ok_or_else(|| Error::UnknownLink {
+                name: name.to_owned(),
+            })
+    }
+
+    /// Returns a model-scoped link identifier by enumeration index.
+    pub fn link_id_at(&self, index: usize) -> Result<LinkId> {
+        if index < self.model.link_count() {
+            Ok(LinkId::new(self.model.model_id, index))
+        } else {
+            Err(Error::InvalidLinkId)
+        }
+    }
+
+    /// Returns the number of links, including the root link.
+    pub fn link_count(&self) -> usize {
+        self.model.link_count()
+    }
+
+    /// Returns the number of non-fixed joints in the model.
+    pub fn joint_count(&self) -> usize {
+        self.model.joint_count()
+    }
+
+    /// Returns the runtime generalized-vector size.
+    pub fn generalized_count(&self) -> usize {
+        generalized_count(self.model.as_ref(), RootMode::Floating)
+    }
+
+    /// Returns the name of an active joint.
+    pub fn joint_name(&self, dof_index: usize) -> Result<&str> {
+        Ok(self.model.active_joint(dof_index)?.name())
+    }
+
+    /// Returns the motion type of an active joint.
+    pub fn joint_type(&self, dof_index: usize) -> Result<JointType> {
+        Ok(self.model.active_joint(dof_index)?.joint_type())
+    }
+
+    /// Returns the lower position limit of an active joint.
+    pub fn joint_lower_limit(&self, dof_index: usize) -> Result<f64> {
+        Ok(self.model.active_joint(dof_index)?.lower_limit())
+    }
+
+    /// Returns the upper position limit of an active joint.
+    pub fn joint_upper_limit(&self, dof_index: usize) -> Result<f64> {
+        Ok(self.model.active_joint(dof_index)?.upper_limit())
+    }
+
+    /// Returns the velocity limit of an active joint.
+    pub fn joint_velocity_limit(&self, dof_index: usize) -> Result<f64> {
+        Ok(self.model.active_joint(dof_index)?.velocity_limit())
+    }
+
+    /// Returns the root link identifier.
+    pub fn root_link_id(&self) -> LinkId {
+        LinkId::new(self.model.model_id, 0)
+    }
+
+    /// Returns the name of a model-scoped link.
+    pub fn link_name(&self, link: LinkId) -> Result<&str> {
+        Ok(self.model.link_by_id(link)?.name())
+    }
+
+    /// Returns a link's mass in kilograms.
+    pub fn link_mass(&self, link: LinkId) -> Result<f64> {
+        Ok(self.model.link_by_id(link)?.mass())
+    }
+
+    /// Returns a link's center of mass expressed in its link frame.
+    pub fn link_center_of_mass(&self, link: LinkId) -> Result<Vector3<f64>> {
+        Ok(*self.model.link_by_id(link)?.center_of_mass())
+    }
+
+    /// Returns a link's rotational inertia about its center of mass.
+    pub fn link_inertia(&self, link: LinkId) -> Result<Matrix3<f64>> {
+        Ok(*self.model.link_by_id(link)?.inertia())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -424,5 +533,24 @@ mod tests {
             robot.joint_name(robot.joint_count()),
             Err(Error::InvalidJointIndex { .. })
         ));
+    }
+
+    #[test]
+    fn fixed_base_frame_is_instance_local_and_validated() {
+        let mut robot = robot();
+        let original = *robot.base_frame();
+        let frame = Frame::translation(0.4, -0.2, 0.8);
+        robot.set_base_frame(frame).unwrap();
+        assert_eq!(*robot.base_frame(), frame);
+
+        let fork = robot.fork();
+        assert_eq!(*fork.base_frame(), frame);
+
+        assert!(matches!(
+            robot.set_base_frame(Frame::translation(f64::NAN, 0.0, 0.0)),
+            Err(Error::InvalidBaseState { field: "frame", .. })
+        ));
+        assert_eq!(*robot.base_frame(), frame);
+        assert_ne!(original, frame);
     }
 }

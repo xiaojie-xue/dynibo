@@ -2,7 +2,7 @@ use nalgebra::Vector3;
 
 use crate::{BaseState, Frame, JointType, Result};
 
-use super::super::{LinkId, Model, Robot, Workspace};
+use super::super::{FLOATING_BASE_DOF, FloatingRobot, LinkId, Model, Robot, Workspace};
 
 struct JacobianScratch<'a> {
     frames: &'a mut [Frame],
@@ -27,7 +27,42 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error for an invalid base state, input or output length, or link ID.
+    /// Returns an error for an invalid input or output length, or link ID.
+    pub fn jacobian(&mut self, q: &[f64], target: LinkId, output: &mut [f64]) -> Result<()> {
+        self.model.fixed_jacobian(
+            &self.world_from_root,
+            q,
+            target,
+            &mut self.workspace,
+            output,
+        )
+    }
+
+    /// Writes the time derivative of the geometric Jacobian in column-major order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid input or output length, or link ID.
+    pub fn jacobian_derivative(
+        &mut self,
+        q: &[f64],
+        qd: &[f64],
+        target: LinkId,
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.model.fixed_jacobian_derivative(
+            &self.world_from_root,
+            q,
+            qd,
+            target,
+            &mut self.workspace,
+            output,
+        )
+    }
+}
+
+impl FloatingRobot {
+    /// Writes a world-expressed `6 x G` geometric Jacobian in column-major order.
     pub fn jacobian(
         &mut self,
         base: &BaseState,
@@ -36,14 +71,10 @@ impl Robot {
         output: &mut [f64],
     ) -> Result<()> {
         self.model
-            .jacobian(base, q, target, &mut self.workspace, output)
+            .floating_jacobian(base, q, target, &mut self.workspace, output)
     }
 
     /// Writes the time derivative of the geometric Jacobian in column-major order.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for an invalid base state, input or output length, or link ID.
     pub fn jacobian_derivative(
         &mut self,
         base: &BaseState,
@@ -53,11 +84,75 @@ impl Robot {
         output: &mut [f64],
     ) -> Result<()> {
         self.model
-            .jacobian_derivative(base, q, qd, target, &mut self.workspace, output)
+            .floating_jacobian_derivative(base, q, qd, target, &mut self.workspace, output)
     }
 }
 
 impl Model {
+    fn fixed_jacobian(
+        &self,
+        base_frame: &Frame,
+        q: &[f64],
+        target: LinkId,
+        workspace: &mut Workspace,
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.validate_slice("q", q)?;
+        self.validate_slice_length("jacobian output", output.len(), 6 * self.joint_count())?;
+        let target_index = self.validate_link_id(target)?;
+        let local_target = self.forward_kinematics_and_jacobian_kernel(
+            q,
+            target_index,
+            JacobianScratch {
+                frames: &mut workspace.frames,
+                jacobian: &mut workspace.jacobian,
+                ancestor_path: &mut workspace.ancestor_path,
+            },
+            true,
+        )?;
+        self.write_fixed_jacobian(base_frame, &workspace.jacobian, &local_target, output);
+        Ok(())
+    }
+
+    fn fixed_jacobian_derivative(
+        &self,
+        base_frame: &Frame,
+        q: &[f64],
+        qd: &[f64],
+        target: LinkId,
+        workspace: &mut Workspace,
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.validate_slice("q", q)?;
+        self.validate_slice("qd", qd)?;
+        self.validate_slice_length(
+            "jacobian derivative output",
+            output.len(),
+            6 * self.joint_count(),
+        )?;
+        let target_index = self.validate_link_id(target)?;
+        let local_target = self.jacobian_derivative_kernel(
+            q,
+            qd,
+            target_index,
+            JacobianDerivativeScratch {
+                frames: &mut workspace.frames,
+                angular_velocities: &mut workspace.angular_velocities,
+                origin_velocities: &mut workspace.origin_velocities,
+                jacobian: &mut workspace.jacobian,
+                jacobian_derivative: &mut workspace.jacobian_derivative,
+                ancestor_path: &mut workspace.ancestor_path,
+            },
+        )?;
+        self.write_fixed_jacobian_derivative(
+            base_frame,
+            &workspace.jacobian,
+            &workspace.jacobian_derivative,
+            output,
+        );
+        let _ = local_target;
+        Ok(())
+    }
     /// Writes a runtime-sized `6 x G` geometric Jacobian in column-major order.
     ///
     /// Each column stores `[angular_x, angular_y, angular_z, linear_x,
@@ -77,7 +172,7 @@ impl Model {
     ///
     /// Returns an error unless `output.len() == 6 * generalized_count()`, or for an
     /// invalid input length or link ID.
-    fn jacobian(
+    fn floating_jacobian(
         &self,
         base: &BaseState,
         q: &[f64],
@@ -85,12 +180,11 @@ impl Model {
         workspace: &mut Workspace,
         output: &mut [f64],
     ) -> Result<()> {
-        self.validate_base_state(base)?;
         self.validate_slice("q", q)?;
         self.validate_slice_length(
             "jacobian output",
             output.len(),
-            6 * self.generalized_count(),
+            6 * (self.joint_count() + FLOATING_BASE_DOF),
         )?;
         let target_index = self.validate_link_id(target)?;
         let local_target = self.forward_kinematics_and_jacobian_kernel(
@@ -103,7 +197,7 @@ impl Model {
             },
             true,
         )?;
-        self.write_generalized_jacobian(base, &workspace.jacobian, &local_target, output);
+        self.write_floating_jacobian(base, &workspace.jacobian, &local_target, output);
         Ok(())
     }
 
@@ -127,7 +221,8 @@ impl Model {
     ///
     /// Returns an error unless `output.len() == 6 * generalized_count()`, or for an
     /// invalid input length or link ID.
-    fn jacobian_derivative(
+    #[allow(clippy::too_many_arguments)]
+    fn floating_jacobian_derivative(
         &self,
         base: &BaseState,
         q: &[f64],
@@ -136,13 +231,12 @@ impl Model {
         workspace: &mut Workspace,
         output: &mut [f64],
     ) -> Result<()> {
-        self.validate_base_state(base)?;
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
         self.validate_slice_length(
             "jacobian derivative output",
             output.len(),
-            6 * self.generalized_count(),
+            6 * (self.joint_count() + FLOATING_BASE_DOF),
         )?;
         let target_index = self.validate_link_id(target)?;
         let local_target = self.jacobian_derivative_kernel(
@@ -158,7 +252,7 @@ impl Model {
                 ancestor_path: &mut workspace.ancestor_path,
             },
         )?;
-        self.write_generalized_jacobian_derivative(
+        self.write_floating_jacobian_derivative(
             base,
             qd,
             &local_target,
@@ -231,7 +325,7 @@ impl Model {
         Ok(target_frame)
     }
 
-    fn write_generalized_jacobian(
+    fn write_floating_jacobian(
         &self,
         base: &BaseState,
         joint_jacobian: &[f64],
@@ -239,7 +333,7 @@ impl Model {
         output: &mut [f64],
     ) {
         output.fill(0.0);
-        let base_columns = self.base_dof_count();
+        let base_columns = FLOATING_BASE_DOF;
         let rotation = base.frame().rotation;
         if base_columns != 0 {
             let offset = rotation * local_target.translation.vector;
@@ -259,6 +353,25 @@ impl Model {
             let column = &mut output[6 * column_index..6 * column_index + 6];
             column[..3].copy_from_slice(angular.as_slice());
             column[3..].copy_from_slice(linear.as_slice());
+        }
+    }
+
+    fn write_fixed_jacobian(
+        &self,
+        base_frame: &Frame,
+        joint_jacobian: &[f64],
+        _local_target: &Frame,
+        output: &mut [f64],
+    ) {
+        output.fill(0.0);
+        let rotation = base_frame.rotation;
+        for dof_index in 0..self.joint_count() {
+            let source = &joint_jacobian[6 * dof_index..6 * dof_index + 6];
+            let column = &mut output[6 * dof_index..6 * dof_index + 6];
+            column[..3]
+                .copy_from_slice((rotation * Vector3::from_column_slice(&source[..3])).as_slice());
+            column[3..]
+                .copy_from_slice((rotation * Vector3::from_column_slice(&source[3..])).as_slice());
         }
     }
 
@@ -335,7 +448,8 @@ impl Model {
         self.jacobian_kernel(frames, target_index, path, jacobian, true)
     }
 
-    fn write_generalized_jacobian_derivative(
+    #[allow(clippy::too_many_arguments)]
+    fn write_floating_jacobian_derivative(
         &self,
         base: &BaseState,
         qd: &[f64],
@@ -345,7 +459,7 @@ impl Model {
         output: &mut [f64],
     ) {
         output.fill(0.0);
-        let base_columns = self.base_dof_count();
+        let base_columns = FLOATING_BASE_DOF;
         let rotation = base.frame().rotation;
         let base_omega = base.velocity().angular;
         let mut local_velocity = Vector3::zeros();
@@ -377,6 +491,29 @@ impl Model {
             column[3..].copy_from_slice(linear.as_slice());
         }
     }
+
+    fn write_fixed_jacobian_derivative(
+        &self,
+        base_frame: &Frame,
+        joint_jacobian: &[f64],
+        joint_derivative: &[f64],
+        output: &mut [f64],
+    ) {
+        output.fill(0.0);
+        let rotation = base_frame.rotation;
+        for dof_index in 0..self.joint_count() {
+            let source = &joint_jacobian[6 * dof_index..6 * dof_index + 6];
+            let derivative = &joint_derivative[6 * dof_index..6 * dof_index + 6];
+            let column = &mut output[6 * dof_index..6 * dof_index + 6];
+            let _ = source;
+            column[..3].copy_from_slice(
+                (rotation * Vector3::from_column_slice(&derivative[..3])).as_slice(),
+            );
+            column[3..].copy_from_slice(
+                (rotation * Vector3::from_column_slice(&derivative[3..])).as_slice(),
+            );
+        }
+    }
 }
 
 fn frame_for_target(frames: &[Frame], target_index: usize) -> Frame {
@@ -402,14 +539,13 @@ mod tests {
     #[test]
     fn jacobian_apis_propagate_corrupted_workspace_buffer_errors() {
         let mut robot = fixture();
-        let base = BaseState::fixed();
         let target = robot.link_id("test_link_4").unwrap();
         let q = [0.0; 4];
         let mut output = [0.0; 24];
 
         robot.workspace.frames.pop();
         assert!(matches!(
-            robot.jacobian(&base, &q, target, &mut output),
+            robot.jacobian(&q, target, &mut output),
             Err(Error::WrongSliceLength {
                 slice: "frame workspace",
                 ..
@@ -420,7 +556,7 @@ mod tests {
         let target = robot.link_id("test_link_4").unwrap();
         robot.workspace.jacobian.pop();
         assert!(matches!(
-            robot.jacobian_derivative(&base, &q, &q, target, &mut output,),
+            robot.jacobian_derivative(&q, &q, target, &mut output,),
             Err(Error::WrongSliceLength { .. })
         ));
     }
