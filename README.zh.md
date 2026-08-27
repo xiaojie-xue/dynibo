@@ -134,7 +134,14 @@ with Robot.from_urdf("robot.urdf") as robot:
 
 ### C/C++
 
-从源码构建并安装 CMake package。构建需要 Rust、Cargo 和 CMake 3.16 或更高版本：
+C 和 C++ 用户可以从
+[GitHub Releases](https://github.com/xiaojie-xue/dynibo/releases)
+下载适用于 Linux、macOS 或 Windows 的预编译包，也可以从源码构建并安装。
+预编译包包含动态库、C/C++ 头文件、pkg-config 元数据和 CMake package 配置。
+请选择与操作系统及 CPU 架构匹配的压缩包，并使用同一 Release 中的
+`SHA256SUMS` 校验下载文件。
+
+从源码构建需要 Rust、Cargo 和 CMake 3.16 或更高版本：
 
 ```bash
 cmake -S . -B build/c -DCMAKE_BUILD_TYPE=Release
@@ -142,15 +149,15 @@ cmake --build build/c --parallel
 cmake --install build/c --prefix /opt/dynibo
 ```
 
-在另一个 CMake 项目中使用安装后的 package：
+在另一个 CMake 项目中使用解压后的预编译包或源码安装结果：
 
 ```cmake
 find_package(dynibo CONFIG REQUIRED)
 target_link_libraries(my_robot PRIVATE dynibo::dynibo)
 ```
 
-如果 dynibo 安装在自定义目录中，请通过 `-DCMAKE_PREFIX_PATH=/opt/dynibo`
-（或实际选择的安装目录）配置消费端项目。
+通过 `-DCMAKE_PREFIX_PATH` 指向压缩包解压目录或实际安装目录。各平台的运行时
+动态库路径配置见[安装指南](docs/getting-started/installation.zh.md)。
 
 ## 示例
 

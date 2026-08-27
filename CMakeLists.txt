@@ -98,11 +98,18 @@ install(FILES
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/dynibo")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/dynibo.pc"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+install(FILES LICENSE
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/dynibo")
 
 set(CPACK_PACKAGE_NAME "dynibo")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_PACKAGE_VENDOR "dynibo contributors")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
     "Tree-structured robot kinematics and dynamics C/C++ package")
+set(DYNIBO_PACKAGE_PLATFORM
+    "${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}"
+    CACHE STRING "Platform suffix used in native package filenames")
+set(CPACK_PACKAGE_FILE_NAME
+    "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${DYNIBO_PACKAGE_PLATFORM}")
 set(CPACK_GENERATOR "TGZ")
 include(CPack)

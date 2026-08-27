@@ -143,8 +143,14 @@ print(pose.translation)
 
 ### C/C++
 
-Build and install the CMake package from source. This requires Rust with Cargo
-and CMake 3.16 or newer:
+C and C++ users can download a prebuilt package for Linux, macOS, or Windows
+from [GitHub Releases](https://github.com/xiaojie-xue/dynibo/releases), or build
+and install the package from source. Prebuilt packages contain the shared
+library, C and C++ headers, pkg-config metadata, and a CMake package
+configuration. Select the archive matching your operating system and CPU
+architecture and verify it against the release's `SHA256SUMS`.
+
+Building from source requires Rust with Cargo and CMake 3.16 or newer:
 
 ```bash
 cmake -S . -B build/c -DCMAKE_BUILD_TYPE=Release
@@ -152,15 +158,18 @@ cmake --build build/c --parallel
 cmake --install build/c --prefix /opt/dynibo
 ```
 
-Use the installed package from another CMake project:
+Use an extracted prebuilt package or a source installation from another CMake
+project:
 
 ```cmake
 find_package(dynibo CONFIG REQUIRED)
 target_link_libraries(my_robot PRIVATE dynibo::dynibo)
 ```
 
-If dynibo was installed to a custom prefix, configure the consumer with
-`-DCMAKE_PREFIX_PATH=/opt/dynibo` (or the prefix you selected).
+Configure the consumer with `-DCMAKE_PREFIX_PATH` pointing to the extracted
+archive directory or the installation prefix. See the
+[installation guide](docs/getting-started/installation.md) for platform-specific
+runtime library paths.
 
 ## Examples
 

@@ -60,6 +60,43 @@ jobs:
           path: target/package/dynibo-*.crate
           if-no-files-found: error
 
+  native-package:
+    name: Build and test C/C++ package (${{ matrix.os }})
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.release.tag_name }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - name: Configure native package
+        run: >-
+          cmake -S . -B build/native
+          -DCMAKE_BUILD_TYPE=Release
+          -DDYNIBO_PACKAGE_PLATFORM=${{ runner.os }}-${{ runner.arch }}
+      - name: Build native package
+        run: cmake --build build/native --config Release --parallel
+      - name: Create CPack archive
+        run: cmake --build build/native --config Release --target package
+      - name: Test installed C and C++ package
+        run: >-
+          python ci/test-native-package.py
+          --package-dir build/native
+          --configuration Release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-native-${{ runner.os }}-${{ runner.arch }}
+          path: build/native/dynibo-*.tar.gz
+          if-no-files-found: error
+
   python-wheel:
     name: Build and test Python wheel (${{ matrix.os }})
     needs: validate
@@ -119,7 +156,7 @@ jobs:
 
   publish-crate:
     name: Publish Rust crate to crates.io
-    needs: [rust-package, python-wheel, python-sdist]
+    needs: [rust-package, native-package, python-wheel, python-sdist]
     runs-on: ubuntu-latest
     environment: crates-io
     steps:
@@ -135,7 +172,7 @@ jobs:
 
   publish-pypi:
     name: Publish Python distributions to PyPI
-    needs: [rust-package, python-wheel, python-sdist]
+    needs: [rust-package, native-package, python-wheel, python-sdist]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -150,3 +187,25 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
+
+  publish-native-assets:
+    name: Attach C/C++ packages to GitHub Release
+    needs: [rust-package, native-package, python-wheel, python-sdist]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-native-*
+          path: release-assets
+          merge-multiple: true
+      - name: Generate checksums
+        working-directory: release-assets
+        run: sha256sum *.tar.gz > SHA256SUMS
+      - name: Upload release assets
+        run: gh release upload "$RELEASE_TAG" release-assets/* --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
