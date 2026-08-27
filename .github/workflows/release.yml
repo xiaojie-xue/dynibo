@@ -192,6 +192,7 @@ jobs:
   publish-github-release:
     name: Publish GitHub Release
     needs: prepare-github-release
+    environment: production-release
     runs-on: ubuntu-latest
     permissions:
       contents: write
