@@ -36,7 +36,7 @@ returns acceleration at the target-link origin. Fixed calculations use the
 frame stored on `Robot`; floating calculations use the `BaseState` supplied to
 that call.
 
-## Inverse kinematics
+## Inverse kinematics { #inverse-kinematics }
 
 Inverse kinematics solves one fixed-base target pose with damped least squares:
 

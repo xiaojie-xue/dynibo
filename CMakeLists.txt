@@ -28,8 +28,8 @@ option(DYNIBO_BUILD_EXAMPLES "Build C and C++ usage examples" OFF)
 set(DYNIBO_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
 file(MAKE_DIRECTORY "${DYNIBO_GENERATED_INCLUDE_DIR}/dynibo")
 configure_file(
-    bindings/c/include/dynibo/dynibo.h.in
-    "${DYNIBO_GENERATED_INCLUDE_DIR}/dynibo/dynibo.h"
+    bindings/c/include/dynibo/version.h.in
+    "${DYNIBO_GENERATED_INCLUDE_DIR}/dynibo/version.h"
     @ONLY)
 
 if(DYNIBO_CARGO_PROFILE STREQUAL "release")
@@ -69,7 +69,8 @@ add_custom_command(
     DEPENDS
         Cargo.toml Cargo.lock
         bindings/c/Cargo.toml bindings/c/src/lib.rs
-        bindings/c/include/dynibo/dynibo.h.in bindings/c/include/dynibo/dynibo.hpp
+        bindings/c/include/dynibo/dynibo.h bindings/c/include/dynibo/dynibo.hpp
+        bindings/c/include/dynibo/version.h.in
         src/lib.rs src/error.rs src/model.rs
         src/model/joint.rs src/model/link.rs src/model/tree.rs
         src/robot.rs src/robot/workspace.rs src/spatial.rs
@@ -116,7 +117,8 @@ if(WIN32)
             DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 endif()
 install(FILES
-        "${DYNIBO_GENERATED_INCLUDE_DIR}/dynibo/dynibo.h"
+        "${DYNIBO_GENERATED_INCLUDE_DIR}/dynibo/version.h"
+        bindings/c/include/dynibo/dynibo.h
         bindings/c/include/dynibo/dynibo.hpp
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/dynibo")
 install(FILES

@@ -31,7 +31,7 @@ $$
 速度。`forward_acceleration_kinematics` 返回目标 link 原点的加速度。固定基计算使用
 `Robot` 保存的 frame；浮动基计算使用该次调用显式传入的 `BaseState`。
 
-## 逆运动学
+## 逆运动学 { #inverse-kinematics }
 
 逆运动学使用阻尼最小二乘求解一个固定基目标位姿：
 
