@@ -1,7 +1,7 @@
 include Cargo.toml Cargo.lock LICENSE README.md build.rs
 recursive-include src *.rs
 recursive-include benches *.rs
-recursive-include bindings/c *.toml *.rs *.h *.hpp
+recursive-include bindings/c *.toml *.rs *.h *.hpp *.in
 recursive-include bindings/python *.md *.py
 recursive-include tests/python *.py
 include tests/data/test_arm.urdf

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dynibo"
-version = "0.4.0"
+dynamic = ["version"]
 description = "Python bindings for tree-structured robot kinematics and dynamics"
 readme = "bindings/python/README.md"
 requires-python = ">=3.9"

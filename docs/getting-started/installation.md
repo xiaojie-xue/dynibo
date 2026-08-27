@@ -39,9 +39,11 @@ For example, extract the Linux x86-64 package and point CMake at the extracted
 directory:
 
 ```bash
-tar -xzf dynibo-0.4.0-Linux-X64.tar.gz
+version=X.Y.Z
+archive="dynibo-${version}-Linux-X64"
+tar -xzf "${archive}.tar.gz"
 cmake -S . -B build \
-  -DCMAKE_PREFIX_PATH="$PWD/dynibo-0.4.0-Linux-X64"
+  -DCMAKE_PREFIX_PATH="$PWD/${archive}"
 cmake --build build
 ```
 

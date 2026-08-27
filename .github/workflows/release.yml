@@ -1,5 +1,5 @@
 # Maintainer release checklist:
-# 1. Synchronize all package versions and run ci/check-release-version.py.
+# 1. Update `[workspace.package] version` in Cargo.toml and refresh Cargo.lock.
 # 2. Run ci/test-all.sh, then commit and tag the release as vMAJOR.MINOR.PATCH.
 # 3. Push the tag. This workflow creates and publishes the GitHub Release.
 

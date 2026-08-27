@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check that a release tag matches every published package version."""
+"""Check that a release tag matches the canonical Cargo package version."""
 
 from __future__ import annotations
 
@@ -35,50 +35,10 @@ def main() -> None:
     versions = [
         capture(
             "Cargo.toml",
-            r'^\[package\].*?^version\s*=\s*"([^"]+)"',
-            "Rust crate",
-        ),
-        capture(
-            "bindings/c/Cargo.toml",
-            r'^\[package\].*?^version\s*=\s*"([^"]+)"',
-            "C ABI crate",
-        ),
-        capture(
-            "bindings/c/Cargo.toml",
-            r'^dynibo\s*=\s*\{[^\n]*version\s*=\s*"([^"]+)"',
-            "C ABI dependency",
-        ),
-        capture(
-            "pyproject.toml",
-            r'^\[project\].*?^version\s*=\s*"([^"]+)"',
-            "Python project",
-        ),
-        capture("setup.py", r'^\s*version\s*=\s*"([^"]+)"', "setuptools"),
-        capture(
-            "bindings/python/dynibo/__init__.py",
-            r'^__version__\s*=\s*"([^"]+)"',
-            "Python runtime",
-        ),
-        capture(
-            "CMakeLists.txt",
-            r'project\(dynibo\s+VERSION\s+([^\s\)]+)',
-            "CMake project",
-        ),
-        capture(
-            "bindings/c/src/lib.rs",
-            r'fn dynibo_version\(\).*?c"([^"]+)"',
-            "C ABI runtime",
-        ),
+            r'^\[workspace\.package\].*?^version\s*=\s*"([^"]+)"',
+            "Cargo workspace",
+        )
     ]
-
-    header = (ROOT / "bindings/c/include/dynibo/dynibo.h").read_text(encoding="utf-8")
-    header_parts = []
-    for part in ("MAJOR", "MINOR", "PATCH"):
-        match = re.search(rf"^#define DYNIBO_VERSION_{part}\s+([0-9]+)$", header, re.MULTILINE)
-        if match is None:
-            raise SystemExit(f"could not read C header {part.lower()} version")
-        header_parts.append(match.group(1))
-    versions.append(("C header", ".".join(header_parts)))
 
     mismatches = [(label, version) for label, version in versions if version != expected]
     for label, version in versions:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -14,6 +15,32 @@ from wheel.bdist_wheel import bdist_wheel
 
 
 ROOT = Path(__file__).resolve().parent
+
+
+def cargo_version() -> str:
+    output = subprocess.check_output(
+        [
+            "cargo",
+            "metadata",
+            "--no-deps",
+            "--format-version",
+            "1",
+            "--locked",
+            "--offline",
+        ],
+        cwd=ROOT,
+        text=True,
+    )
+    packages = [
+        package
+        for package in json.loads(output)["packages"]
+        if package["name"] == "dynibo"
+    ]
+    if len(packages) != 1:
+        raise RuntimeError(
+            f"expected one dynibo package in Cargo metadata, found {len(packages)}"
+        )
+    return str(packages[0]["version"])
 
 
 def native_library_name() -> str:
@@ -55,7 +82,7 @@ class PlatformWheel(bdist_wheel):
 
 setup(
     name="dynibo",
-    version="0.4.0",
+    version=cargo_version(),
     description="Python bindings for tree-structured robot kinematics and dynamics",
     author="Xiaojie Xue",
     long_description=(ROOT / "bindings/python/README.md").read_text(encoding="utf-8"),

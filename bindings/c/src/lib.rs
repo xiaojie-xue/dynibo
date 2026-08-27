@@ -374,7 +374,7 @@ pub extern "C" fn dynibo_last_error_message() -> *const c_char {
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn dynibo_version() -> *const c_char {
-    c"0.4.0".as_ptr()
+    concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr().cast()
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn dynibo_ik_options_default() -> DyniboIkOptions {
@@ -1182,7 +1182,10 @@ mod tests {
                 ..DyniboPose::default()
             };
 
-            assert_eq!(CStr::from_ptr(dynibo_version()).to_bytes(), b"0.4.0");
+            assert_eq!(
+                CStr::from_ptr(dynibo_version()).to_bytes(),
+                env!("CARGO_PKG_VERSION").as_bytes()
+            );
             assert!(
                 !CStr::from_ptr(dynibo_robot_name(robot))
                     .to_bytes()

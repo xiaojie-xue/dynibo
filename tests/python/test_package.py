@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import threading
 import unittest
+from importlib.metadata import version as distribution_version
 from pathlib import Path
 
 import dynibo
@@ -43,7 +44,7 @@ class PackageTests(unittest.TestCase):
         self.q = [0.0] * self.robot.joint_count
 
     def test_model_and_kinematics(self) -> None:
-        self.assertEqual(dynibo.__version__, "0.4.0")
+        self.assertEqual(dynibo.__version__, distribution_version("dynibo"))
         self.assertEqual(self.robot.name, "test_arm")
         self.assertEqual(self.robot.joint_count, 4)
         self.assertEqual(self.robot.link_count, 5)

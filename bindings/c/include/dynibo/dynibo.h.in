@@ -39,9 +39,9 @@
 extern "C" {
 #endif
 
-#define DYNIBO_VERSION_MAJOR 0
-#define DYNIBO_VERSION_MINOR 4
-#define DYNIBO_VERSION_PATCH 0
+#define DYNIBO_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define DYNIBO_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define DYNIBO_VERSION_PATCH @PROJECT_VERSION_PATCH@
 
 typedef struct DyniboRobot DyniboRobot;
 typedef struct DyniboWorkspace DyniboWorkspace;

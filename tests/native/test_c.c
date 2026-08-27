@@ -3,13 +3,19 @@
 #include <stdio.h>
 #include <string.h>
 
+#define STRINGIFY_VALUE_(x) #x
+#define STRINGIFY_VALUE(x) STRINGIFY_VALUE_(x)
+#define DYNIBO_HEADER_VERSION \
+    STRINGIFY_VALUE(DYNIBO_VERSION_MAJOR) "." \
+    STRINGIFY_VALUE(DYNIBO_VERSION_MINOR) "." \
+    STRINGIFY_VALUE(DYNIBO_VERSION_PATCH)
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "failed: %s (%s)\n", #x, dynibo_last_error_message()); return 1; } } while (0)
 #define OK(x) CHECK((x) == DYNIBO_STATUS_OK)
 #define INVALID(x) CHECK((x) == DYNIBO_STATUS_INVALID_ARGUMENT)
 
 int main(int argc, char **argv) {
     CHECK(argc >= 2);
-    CHECK(strcmp(dynibo_version(), "0.4.0") == 0);
+    CHECK(strcmp(dynibo_version(), DYNIBO_HEADER_VERSION) == 0);
     CHECK(dynibo_robot_name(NULL) == NULL);
     CHECK(dynibo_robot_joint_count(NULL) == 0);
     CHECK(dynibo_floating_robot_joint_count(NULL) == 0);
