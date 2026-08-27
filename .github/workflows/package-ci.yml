@@ -56,10 +56,12 @@ jobs:
           python ci/check-coverage.py coverage.json
           --min-lines 85 --min-branches 75
       - name: Generate Codecov report
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: >-
           cargo +nightly llvm-cov report --branch
           -p dynibo -p dynibo-c --codecov --output-path codecov.json
       - name: Upload coverage to Codecov
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: codecov/codecov-action@v6
         with:
           use_oidc: true
@@ -68,9 +70,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: rust-coverage
-          path: |
-            coverage.json
-            codecov.json
+          path: coverage.json
           if-no-files-found: error
 
   pinocchio-reference:
