@@ -4,23 +4,27 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
-package_args=(package -p dynibo --locked)
+test_root="$(mktemp -d "${TMPDIR:-/tmp}/dynibo-rust-package-test.XXXXXX")"
+trap 'rm -rf "${test_root}"' EXIT
+package_target="${test_root}/package-target"
+
+package_args=(package -p dynibo --locked --target-dir "${package_target}")
 if [[ "${DYNIBO_ALLOW_DIRTY:-0}" == "1" ]]; then
     package_args+=(--allow-dirty)
 fi
 cargo "${package_args[@]}"
 
-crate_file="$(find target/package -maxdepth 1 -type f -name 'dynibo-*.crate' -print -quit)"
+crate_file="$(find "${package_target}/package" -maxdepth 1 -type f -name 'dynibo-*.crate' -print -quit)"
 if [[ -z "${crate_file}" ]]; then
-    echo "cargo package did not produce target/package/dynibo-*.crate" >&2
+    echo "cargo package did not produce dynibo-*.crate" >&2
     exit 1
 fi
 
-test_root="$(mktemp -d "${TMPDIR:-/tmp}/dynibo-rust-package-test.XXXXXX")"
-trap 'rm -rf "${test_root}"' EXIT
-tar -xzf "${crate_file}" -C "${test_root}"
+extract_root="${test_root}/extracted"
+mkdir "${extract_root}"
+tar -xzf "${crate_file}" -C "${extract_root}"
 
-manifest="$(find "${test_root}" -mindepth 2 -maxdepth 2 -name Cargo.toml -print -quit)"
+manifest="$(find "${extract_root}" -mindepth 2 -maxdepth 2 -name Cargo.toml -print -quit)"
 if [[ -z "${manifest}" ]]; then
     echo "could not find Cargo.toml in the extracted crate" >&2
     exit 1
