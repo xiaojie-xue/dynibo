@@ -214,7 +214,6 @@ If Dynibo is useful in your work, please cite it as:
   author  = {Xue, Xiaojie},
   title   = {Dynibo: a Fast, Lightweight, and Reliable Robot Kinematics and Dynamics Library},
   year    = {2026},
-  version = {0.4.0},
   url     = {https://github.com/xiaojie-xue/dynibo}
 }
 ```

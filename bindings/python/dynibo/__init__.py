@@ -1,5 +1,7 @@
 """Python interface to the dynibo robot kinematics and dynamics library."""
 
+from importlib.metadata import version as distribution_version
+
 from ._native import (
     BaseState,
     DyniboError,
@@ -27,4 +29,4 @@ __all__ = [
     "SolverError",
     "Twist",
 ]
-__version__ = "0.4.0"
+__version__ = distribution_version("dynibo")

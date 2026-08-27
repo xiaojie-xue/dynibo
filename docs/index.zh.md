@@ -34,7 +34,7 @@ Workspace 复用和内存分配行为。核心数值结果还会与独立的 Pin
 |---|---|---|
 | 模型 | 加载 URDF、查询 link、配置固定基座或浮动基座 | [机器人模型与 URDF](user-guide/robot-model-and-urdf.md) |
 | 运动学 | 位姿、雅可比矩阵、雅可比时间导数、空间速度与加速度 | [运动学](user-guide/kinematics.md) |
-| 逆运动学 | 使用阻尼最小二乘法求解目标位姿 | [运动学](user-guide/kinematics.md#逆运动学) |
+| 逆运动学 | 使用阻尼最小二乘法求解目标位姿 | [运动学](user-guide/kinematics.md#inverse-kinematics) |
 | 动力学 | 质量矩阵、速度乘积力、重力项与逆动力学 | [动力学](user-guide/dynamics.md) |
 | 载荷 | 向 link 施加外部 wrench | [外部载荷](user-guide/external-loads.md) |
 

@@ -1,5 +1,5 @@
 # Maintainer release checklist:
-# 1. Synchronize all package versions and run ci/check-release-version.py.
+# 1. Update `[workspace.package] version` in Cargo.toml and refresh Cargo.lock.
 # 2. Run ci/test-all.sh, then commit and tag the release as vMAJOR.MINOR.PATCH.
 # 3. Push the tag. This workflow creates and publishes the GitHub Release.
 
@@ -53,7 +53,7 @@ jobs:
           persist-credentials: false
           ref: ${{ github.ref_name }}
       - uses: dtolnay/rust-toolchain@stable
-      - run: bash ci/test-rust-package.sh
+      - run: bash ci/test-rust-package.sh target/package
       - uses: actions/upload-artifact@v7
         with:
           name: release-rust-crate
@@ -192,6 +192,7 @@ jobs:
   publish-github-release:
     name: Publish GitHub Release
     needs: prepare-github-release
+    environment: production-release
     runs-on: ubuntu-latest
     permissions:
       contents: write

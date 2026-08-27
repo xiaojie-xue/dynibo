@@ -1,12 +1,36 @@
 cmake_minimum_required(VERSION 3.16)
-project(dynibo VERSION 0.4.0 LANGUAGES C CXX)
+
+find_program(CARGO_EXECUTABLE cargo REQUIRED)
+execute_process(
+    COMMAND "${CARGO_EXECUTABLE}" metadata --no-deps --format-version 1
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    RESULT_VARIABLE DYNIBO_CARGO_METADATA_RESULT
+    OUTPUT_VARIABLE DYNIBO_CARGO_METADATA
+    ERROR_VARIABLE DYNIBO_CARGO_METADATA_ERROR)
+if(NOT DYNIBO_CARGO_METADATA_RESULT EQUAL 0)
+    message(FATAL_ERROR "Could not read Cargo package version: ${DYNIBO_CARGO_METADATA_ERROR}")
+endif()
+string(REGEX MATCH
+    "\"name\"[ \t]*:[ \t]*\"dynibo\"[ \t]*,[ \t]*\"version\"[ \t]*:[ \t]*\"([0-9]+\\.[0-9]+\\.[0-9]+)\""
+    DYNIBO_CARGO_VERSION_MATCH "${DYNIBO_CARGO_METADATA}")
+if(NOT DYNIBO_CARGO_VERSION_MATCH)
+    message(FATAL_ERROR "Cargo metadata did not contain the dynibo package version")
+endif()
+set(DYNIBO_VERSION "${CMAKE_MATCH_1}")
+project(dynibo VERSION "${DYNIBO_VERSION}" LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-find_program(CARGO_EXECUTABLE cargo REQUIRED)
 set(DYNIBO_CARGO_PROFILE "release" CACHE STRING "Cargo profile used for the native library")
 option(DYNIBO_BUILD_EXAMPLES "Build C and C++ usage examples" OFF)
+
+set(DYNIBO_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
+file(MAKE_DIRECTORY "${DYNIBO_GENERATED_INCLUDE_DIR}/dynibo")
+configure_file(
+    bindings/c/include/dynibo/version.h.in
+    "${DYNIBO_GENERATED_INCLUDE_DIR}/dynibo/version.h"
+    @ONLY)
 
 if(DYNIBO_CARGO_PROFILE STREQUAL "release")
     set(DYNIBO_CARGO_PROFILE_FLAG --release)
@@ -46,6 +70,7 @@ add_custom_command(
         Cargo.toml Cargo.lock
         bindings/c/Cargo.toml bindings/c/src/lib.rs
         bindings/c/include/dynibo/dynibo.h bindings/c/include/dynibo/dynibo.hpp
+        bindings/c/include/dynibo/version.h.in
         src/lib.rs src/error.rs src/model.rs
         src/model/joint.rs src/model/link.rs src/model/tree.rs
         src/robot.rs src/robot/workspace.rs src/spatial.rs
@@ -56,7 +81,8 @@ add_custom_target(dynibo_c_build ALL DEPENDS "${DYNIBO_BUILT_LIBRARY}")
 add_library(dynibo_c SHARED IMPORTED GLOBAL)
 set_target_properties(dynibo_c PROPERTIES
     IMPORTED_LOCATION "${DYNIBO_BUILT_LIBRARY}"
-    INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/bindings/c/include")
+    INTERFACE_INCLUDE_DIRECTORIES
+        "${DYNIBO_GENERATED_INCLUDE_DIR};${CMAKE_CURRENT_SOURCE_DIR}/bindings/c/include")
 if(WIN32)
     set(DYNIBO_CARGO_IMPLIB
         "${CMAKE_CURRENT_SOURCE_DIR}/target/${DYNIBO_CARGO_TARGET_DIR}/${DYNIBO_IMPLIB_FILE}")
@@ -90,8 +116,11 @@ if(WIN32)
     install(FILES "${DYNIBO_CARGO_IMPLIB}"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 endif()
-install(DIRECTORY bindings/c/include/dynibo
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+install(FILES
+        "${DYNIBO_GENERATED_INCLUDE_DIR}/dynibo/version.h"
+        bindings/c/include/dynibo/dynibo.h
+        bindings/c/include/dynibo/dynibo.hpp
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/dynibo")
 install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/dynibo-config.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/dynibo-config-version.cmake"

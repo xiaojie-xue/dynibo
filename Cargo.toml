@@ -1,6 +1,6 @@
 [package]
 name = "dynibo"
-version = "0.4.0"
+version.workspace = true
 edition = "2024"
 description = "Tree-structured robot kinematics and dynamics with runtime-size workspace APIs"
 license = "MIT"
@@ -28,6 +28,9 @@ rustdoc-args = ["--html-in-header", "docs/rustdoc/katex-header.html"]
 [workspace]
 members = ["bindings/c"]
 resolver = "3"
+
+[workspace.package]
+version = "0.4.0"
 
 [features]
 default = []

@@ -28,6 +28,25 @@ through `pkg-config`.
 bash ci/test-all.sh
 ```
 
+## Preparing a release
+
+Before committing and tagging a release, update the canonical
+`[workspace.package] version` in `Cargo.toml`. C, CMake, Python, runtime, and
+test versions are derived automatically. Let Cargo refresh its generated lock
+file entries before running the locked test suite:
+
+```bash
+cargo metadata --no-deps --format-version 1 > /dev/null
+python3 ci/check-release-version.py vX.Y.Z
+bash ci/test-all.sh
+git commit -am "release: vX.Y.Z"
+git tag vX.Y.Z
+git push origin main vX.Y.Z
+```
+
+The release workflow repeats the tag/version consistency check before building
+or publishing any artifacts.
+
 ## Guidelines
 
 - Keep changes focused and add tests for new behavior or bug fixes.

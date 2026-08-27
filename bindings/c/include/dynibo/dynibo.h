@@ -24,6 +24,7 @@
  */
 
 #include <stddef.h>
+#include "version.h"
 
 #if defined(_WIN32) && defined(DYNIBO_SHARED)
 #  if defined(DYNIBO_BUILDING_LIBRARY)
@@ -38,10 +39,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#define DYNIBO_VERSION_MAJOR 0
-#define DYNIBO_VERSION_MINOR 4
-#define DYNIBO_VERSION_PATCH 0
 
 typedef struct DyniboRobot DyniboRobot;
 typedef struct DyniboWorkspace DyniboWorkspace;

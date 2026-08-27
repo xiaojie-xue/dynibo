@@ -36,9 +36,11 @@ C/C++ 头文件、pkg-config 元数据、CMake package 配置和项目许可证�
 例如，解压 Linux x86-64 包并让 CMake 使用解压目录：
 
 ```bash
-tar -xzf dynibo-0.4.0-Linux-X64.tar.gz
+version=X.Y.Z
+archive="dynibo-${version}-Linux-X64"
+tar -xzf "${archive}.tar.gz"
 cmake -S . -B build \
-  -DCMAKE_PREFIX_PATH="$PWD/dynibo-0.4.0-Linux-X64"
+  -DCMAKE_PREFIX_PATH="$PWD/${archive}"
 cmake --build build
 ```
 
