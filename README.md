@@ -134,11 +134,11 @@ The Python binding owns its reusable native calculation storage:
 ```python
 from dynibo import Robot
 
-with Robot.from_urdf("robot.urdf") as robot:
-    tool = robot.link_id("tool")
-    q = [0.0] * robot.joint_count
-    pose = robot.forward_kinematics(q, tool)
-    print(pose.translation)
+robot = Robot.from_urdf("robot.urdf")
+tool = robot.link_id("tool")
+q = [0.0] * robot.joint_count
+pose = robot.forward_kinematics(q, tool)
+print(pose.translation)
 ```
 
 ### C/C++
@@ -164,7 +164,7 @@ If dynibo was installed to a custom prefix, configure the consumer with
 
 ## Examples
 
-Complete Rust, Python, and C examples are available in the
+Complete Rust, Python, C++, and C examples are available in the
 [`examples/`](examples/) directory. Each example exercises all of the main
 kinematics and dynamics methods listed above.
 

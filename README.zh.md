@@ -154,7 +154,7 @@ target_link_libraries(my_robot PRIVATE dynibo::dynibo)
 
 ## 示例
 
-Rust、Python 和 C 的完整调用示例见 [`examples/`](examples/) 目录；每个示例均覆盖
+Rust、Python、C++ 和 C 的完整调用示例见 [`examples/`](examples/) 目录；每个示例均覆盖
 上文列出的全部主要运动学与动力学方法。
 
 ## 支持的模型

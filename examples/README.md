@@ -35,6 +35,18 @@ python examples/python/franka.py
 An alternative URDF and target link can be supplied with `URDF --target LINK`.
 The sample joint states expect seven non-fixed joints.
 
+## C++
+
+[`cpp/franka.cpp`](cpp/franka.cpp) uses the RAII C++ wrapper, whose `Robot`
+owns its reusable native workspace. Build it together with the library and run
+it from the repository root:
+
+```bash
+cmake -S . -B build/cpp -DDYNIBO_BUILD_EXAMPLES=ON
+cmake --build build/cpp --parallel
+./build/cpp/dynibo_cpp_example examples/data/franka_fer.urdf fer_link8
+```
+
 ## C
 
 [`c/franka.c`](c/franka.c) directly uses the stable C ABI. Build it together
