@@ -1,19 +1,20 @@
 # Maintainer release checklist:
 # 1. Synchronize all package versions and run ci/check-release-version.py.
 # 2. Run ci/test-all.sh, then commit and tag the release as vMAJOR.MINOR.PATCH.
-# 3. Publish a non-prerelease GitHub Release for that tag to trigger this workflow.
+# 3. Push the tag. This workflow creates and publishes the GitHub Release.
 
 name: Publish release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
 
 permissions:
   contents: read
 
 concurrency:
-  group: registry-release-${{ github.event.release.tag_name }}
+  group: registry-release-${{ github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -22,13 +23,12 @@ env:
 jobs:
   validate:
     name: Validate release
-    if: github.event.release.prerelease == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.ref_name }}
       - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
@@ -38,7 +38,7 @@ jobs:
       - name: Check tag and package versions
         run: python ci/check-release-version.py "$RELEASE_TAG"
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.ref_name }}
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --all-targets --locked
@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.ref_name }}
       - uses: dtolnay/rust-toolchain@stable
       - run: bash ci/test-rust-package.sh
       - uses: actions/upload-artifact@v7
@@ -72,7 +72,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.ref_name }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v6
         with:
@@ -109,7 +109,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.ref_name }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v6
         with:
@@ -132,7 +132,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.ref_name }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v6
         with:
@@ -154,16 +154,65 @@ jobs:
           path: dist/*.tar.gz
           if-no-files-found: error
 
+  prepare-github-release:
+    name: Create draft GitHub Release and attach C/C++ packages
+    needs: [rust-package, native-package, python-wheel, python-sdist]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-native-*
+          path: release-assets
+          merge-multiple: true
+      - name: Generate checksums
+        working-directory: release-assets
+        run: sha256sum *.tar.gz > SHA256SUMS
+      - name: Create draft release
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" \
+              --draft \
+              --generate-notes \
+              --title "$RELEASE_TAG" \
+              --verify-tag
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+      - name: Upload release assets
+        run: gh release upload "$RELEASE_TAG" release-assets/* --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+
+  publish-github-release:
+    name: Publish GitHub Release
+    needs: prepare-github-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish draft release
+        run: gh release edit "$RELEASE_TAG" --draft=false
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+
   publish-crate:
     name: Publish Rust crate to crates.io
-    needs: [rust-package, native-package, python-wheel, python-sdist]
+    needs: publish-github-release
     runs-on: ubuntu-latest
     environment: crates-io
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.ref_name }}
       - uses: dtolnay/rust-toolchain@stable
       - name: Publish dynibo
         run: cargo publish -p dynibo --locked
@@ -172,7 +221,7 @@ jobs:
 
   publish-pypi:
     name: Publish Python distributions to PyPI
-    needs: [rust-package, native-package, python-wheel, python-sdist]
+    needs: publish-github-release
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -187,25 +236,3 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
-
-  publish-native-assets:
-    name: Attach C/C++ packages to GitHub Release
-    needs: [rust-package, native-package, python-wheel, python-sdist]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: release-native-*
-          path: release-assets
-          merge-multiple: true
-      - name: Generate checksums
-        working-directory: release-assets
-        run: sha256sum *.tar.gz > SHA256SUMS
-      - name: Upload release assets
-        run: gh release upload "$RELEASE_TAG" release-assets/* --clobber
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
