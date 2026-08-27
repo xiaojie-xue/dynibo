@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ $# -gt 1 ]]; then
+    echo "usage: $0 [crate-output-directory]" >&2
+    exit 2
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
@@ -34,3 +39,10 @@ echo "Testing extracted crate: ${manifest}"
 cargo test --manifest-path "${manifest}" --locked --all-targets
 RUSTDOCFLAGS="--html-in-header docs/rustdoc/katex-header.html" \
     cargo doc --manifest-path "${manifest}" --locked --no-deps
+
+if [[ $# -eq 1 ]]; then
+    crate_output_dir="$1"
+    mkdir -p "${crate_output_dir}"
+    cp "${crate_file}" "${crate_output_dir}/"
+    echo "Exported crate to ${crate_output_dir}/$(basename "${crate_file}")"
+fi

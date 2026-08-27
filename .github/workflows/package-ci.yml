@@ -110,7 +110,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - name: Package and test the extracted crate
-        run: bash ci/test-rust-package.sh
+        run: bash ci/test-rust-package.sh target/package
       - name: Upload crate
         uses: actions/upload-artifact@v7
         with:

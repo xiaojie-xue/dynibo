@@ -53,7 +53,7 @@ jobs:
           persist-credentials: false
           ref: ${{ github.ref_name }}
       - uses: dtolnay/rust-toolchain@stable
-      - run: bash ci/test-rust-package.sh
+      - run: bash ci/test-rust-package.sh target/package
       - uses: actions/upload-artifact@v7
         with:
           name: release-rust-crate
