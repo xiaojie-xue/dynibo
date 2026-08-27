@@ -1,26 +1,42 @@
 use std::{
     alloc::{GlobalAlloc, Layout, System},
+    cell::Cell,
     hint::black_box,
     path::PathBuf,
-    sync::{
-        Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-    },
 };
 
 use dynibo::{FloatingRobot, Frame, InverseKinematicsOptions, Robot};
 
 struct CountingAllocator;
 
-static COUNTING: AtomicBool = AtomicBool::new(false);
-static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
-static TEST_LOCK: Mutex<()> = Mutex::new(());
+thread_local! {
+    static COUNTING: Cell<bool> = const { Cell::new(false) };
+    static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
+}
+
+fn record_allocation() {
+    COUNTING.with(|counting| {
+        if counting.get() {
+            ALLOCATIONS.with(|allocations| allocations.set(allocations.get() + 1));
+        }
+    });
+}
+
+fn reset_allocation_count() {
+    ALLOCATIONS.with(|allocations| allocations.set(0));
+}
+
+fn set_counting(enabled: bool) {
+    COUNTING.with(|counting| counting.set(enabled));
+}
+
+fn allocation_count() -> usize {
+    ALLOCATIONS.with(Cell::get)
+}
 
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if COUNTING.load(Ordering::Relaxed) {
-            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-        }
+        record_allocation();
         // SAFETY: Delegates the unchanged layout to the system allocator.
         unsafe { System.alloc(layout) }
     }
@@ -31,17 +47,13 @@ unsafe impl GlobalAlloc for CountingAllocator {
     }
 
     unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        if COUNTING.load(Ordering::Relaxed) {
-            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-        }
+        record_allocation();
         // SAFETY: Delegates the caller-supplied allocation to the system allocator.
         unsafe { System.realloc(pointer, layout, new_size) }
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        if COUNTING.load(Ordering::Relaxed) {
-            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-        }
+        record_allocation();
         // SAFETY: Delegates the unchanged layout to the system allocator.
         unsafe { System.alloc_zeroed(layout) }
     }
@@ -49,7 +61,6 @@ unsafe impl GlobalAlloc for CountingAllocator {
 
 #[test]
 fn floating_calculations_do_not_allocate_after_robot_creation() {
-    let _guard = TEST_LOCK.lock().unwrap();
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/floating_arm.urdf");
     let mut robot = FloatingRobot::from_urdf(path).unwrap();
     let target = robot.link_id("tool").unwrap();
@@ -68,8 +79,8 @@ fn floating_calculations_do_not_allocate_after_robot_creation() {
     let mut output = [0.0; 8];
     let mut forward_output = [0.0; 8];
 
-    ALLOCATIONS.store(0, Ordering::Relaxed);
-    COUNTING.store(true, Ordering::SeqCst);
+    reset_allocation_count();
+    set_counting(true);
     for _ in 0..10 {
         black_box(robot.forward_kinematics(&base, &q, target).unwrap());
         robot.jacobian(&base, &q, target, &mut jacobian).unwrap();
@@ -99,8 +110,8 @@ fn floating_calculations_do_not_allocate_after_robot_creation() {
             .unwrap();
         black_box((&jacobian, &derivative, &matrix, &output));
     }
-    COUNTING.store(false, Ordering::SeqCst);
-    assert_eq!(ALLOCATIONS.load(Ordering::Relaxed), 0);
+    set_counting(false);
+    assert_eq!(allocation_count(), 0);
 }
 
 #[global_allocator]
@@ -108,7 +119,6 @@ static ALLOCATOR: CountingAllocator = CountingAllocator;
 
 #[test]
 fn dynamic_calculations_do_not_allocate_after_robot_creation() {
-    let _guard = TEST_LOCK.lock().unwrap();
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_arm.urdf");
     let mut robot = Robot::from_urdf(path).unwrap();
     let target_id = robot.link_id("test_link_4").unwrap();
@@ -135,8 +145,8 @@ fn dynamic_calculations_do_not_allocate_after_robot_creation() {
         )
         .unwrap();
 
-    ALLOCATIONS.store(0, Ordering::Relaxed);
-    COUNTING.store(true, Ordering::SeqCst);
+    reset_allocation_count();
+    set_counting(true);
     for _ in 0..10 {
         black_box(robot.forward_kinematics(&q, target_id).unwrap());
         robot.jacobian(&q, target_id, &mut jacobian).unwrap();
@@ -175,7 +185,7 @@ fn dynamic_calculations_do_not_allocate_after_robot_creation() {
             .unwrap();
         black_box((&jacobian, &output));
     }
-    COUNTING.store(false, Ordering::SeqCst);
+    set_counting(false);
 
-    assert_eq!(ALLOCATIONS.load(Ordering::Relaxed), 0);
+    assert_eq!(allocation_count(), 0);
 }
