@@ -134,7 +134,10 @@ jobs:
         with:
           python-version: "3.14"
       - name: Configure native package
-        run: cmake -S . -B build/native -DCMAKE_BUILD_TYPE=Release
+        run: >-
+          cmake -S . -B build/native
+          -DCMAKE_BUILD_TYPE=Release
+          -DDYNIBO_PACKAGE_PLATFORM=${{ runner.os }}-${{ runner.arch }}
       - name: Build native package
         run: cmake --build build/native --config Release --parallel
       - name: Create CPack archive
