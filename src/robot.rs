@@ -536,6 +536,57 @@ mod tests {
     }
 
     #[test]
+    fn floating_identifiers_and_metadata_match_the_shared_model() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_arm.urdf");
+        let robot = FloatingRobot::from_urdf(path).unwrap();
+        let fork = robot.fork();
+
+        assert_eq!(robot.name(), "test_arm");
+        assert_eq!(robot.link_count(), 5);
+        assert_eq!(robot.joint_count(), 4);
+        assert_eq!(robot.generalized_count(), 10);
+        assert_eq!(robot.root_link_id(), fork.root_link_id());
+
+        let link = robot.link_id("test_link_4").unwrap();
+        assert_eq!(robot.link_id_at(4).unwrap(), link);
+        assert_eq!(robot.link_name(link).unwrap(), "test_link_4");
+        assert!(robot.link_mass(link).unwrap().is_finite());
+        assert!(
+            robot
+                .link_center_of_mass(link)
+                .unwrap()
+                .iter()
+                .all(|x| x.is_finite())
+        );
+        assert!(
+            robot
+                .link_inertia(link)
+                .unwrap()
+                .iter()
+                .all(|x| x.is_finite())
+        );
+
+        assert_eq!(robot.joint_name(0).unwrap(), "test_joint_1");
+        assert_eq!(robot.joint_type(0).unwrap(), JointType::Revolute);
+        assert_eq!(robot.joint_lower_limit(0).unwrap(), -0.610865238198015);
+        assert_eq!(robot.joint_upper_limit(0).unwrap(), 0.610865238198015);
+        assert_eq!(robot.joint_velocity_limit(0).unwrap(), 180.0);
+
+        assert!(matches!(
+            robot.link_id("missing"),
+            Err(Error::UnknownLink { .. })
+        ));
+        assert!(matches!(
+            robot.link_id_at(robot.link_count()),
+            Err(Error::InvalidLinkId)
+        ));
+        assert!(matches!(
+            robot.joint_name(robot.joint_count()),
+            Err(Error::InvalidJointIndex { .. })
+        ));
+    }
+
+    #[test]
     fn fixed_base_frame_is_instance_local_and_validated() {
         let mut robot = robot();
         let original = *robot.base_frame();
