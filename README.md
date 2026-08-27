@@ -7,7 +7,7 @@
 <p><strong>Fast &middot; Lightweight &middot; Reliable</strong></p>
 
 <p>
-  <a href="https://dynibo.readthedocs.io/">Documentation</a> &nbsp;&middot;&nbsp; 
+  <a href="https://dynibo.readthedocs.io/">Documentation</a> &nbsp;&middot;&nbsp;
   <strong>English</strong> | <a href="README.zh.md">简体中文</a>
 </p>
 
