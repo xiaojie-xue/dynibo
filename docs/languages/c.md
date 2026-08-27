@@ -54,7 +54,32 @@ outputs. Matrix storage and floating-base ordering are defined in
 [Joint and Generalized Coordinates](../user-guide/joint-and-generalized-coordinates.md).
 
 A workspace is mutable. Use a separate workspace for every simultaneous
-calculation and never mutate the robot's base state during a calculation.
+calculation. Fixed `DyniboRobot` stores its frame; `DyniboFloatingRobot` never
+stores base state and instead receives `DyniboBaseState` in every calculation.
+
+## Floating bases
+
+Floating robot and workspace handles are distinct C types:
+
+```c
+DyniboFloatingRobot *robot = NULL;
+DyniboFloatingWorkspace *workspace = NULL;
+check(dynibo_floating_robot_from_urdf("robot.urdf", &robot));
+check(dynibo_floating_workspace_create(robot, &workspace));
+
+DyniboBaseState base = {0};
+base.frame.rotation_xyzw[3] = 1.0;
+size_t target = 0;
+check(dynibo_floating_robot_link_id(robot, "tool", &target));
+check(dynibo_floating_forward_kinematics(
+    robot, workspace, &base, q, joint_count, target, &pose));
+
+dynibo_floating_workspace_destroy(workspace);
+dynibo_floating_robot_destroy(robot);
+```
+
+Floating `generalized_count` is `joint_count + 6`; generalized outputs begin
+with world-frame angular then linear base components.
 
 ## ABI and version checks
 

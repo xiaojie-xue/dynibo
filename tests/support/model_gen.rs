@@ -6,7 +6,8 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use dynibo::{BaseMode, Robot};
+use super::context::TestRootType as RootType;
+use dynibo::Robot;
 
 /// Bump this whenever a deliberate incompatibility changes the seed-to-model mapping.
 pub const GENERATOR_VERSION: u32 = 2;
@@ -93,7 +94,7 @@ pub struct ModelGenOptions {
     pub active_joints: usize,
     pub topology: TopologyKind,
     pub fixed_layout: FixedJointLayout,
-    pub base_mode: BaseMode,
+    pub base_mode: RootType,
     pub joint_mix: JointMix,
     pub axis_profile: AxisProfile,
     pub inertial_profile: InertialProfile,
@@ -103,8 +104,8 @@ impl ModelGenOptions {
     pub const fn label(self) -> &'static str {
         // The complete label is built by ModelCase, but a stable category is useful in failures.
         match self.base_mode {
-            BaseMode::Fixed => "fixed",
-            BaseMode::Floating => "floating",
+            RootType::Fixed => "fixed",
+            RootType::Floating => "floating",
         }
     }
 }
@@ -138,7 +139,7 @@ pub struct ModelSpec {
     pub generator_version: u32,
     pub seed: u64,
     pub name: String,
-    pub base_mode: BaseMode,
+    pub base_mode: RootType,
     pub links: Vec<LinkSpec>,
     pub joints: Vec<JointSpec>,
     pub targets: Vec<String>,
@@ -206,7 +207,7 @@ pub struct ModelMetadata {
     pub joint_count: usize,
     pub link_names: Vec<String>,
     pub branch_targets: Vec<String>,
-    pub base_mode: BaseMode,
+    pub base_mode: RootType,
     pub case_id: String,
 }
 
@@ -225,7 +226,12 @@ impl GeneratedModel {
     }
 
     pub fn robot(&self) -> Robot {
-        Robot::from_urdf_with_base(&self.path, self.metadata.base_mode).unwrap_or_else(|error| {
+        assert_eq!(
+            self.metadata.base_mode,
+            RootType::Fixed,
+            "use FloatingRobot for floating generated cases"
+        );
+        Robot::from_urdf(&self.path).unwrap_or_else(|error| {
             panic!(
                 "generated model must load: case={} seed={:#018x} path={} error={error}\n{}",
                 self.metadata.case_id,
@@ -658,7 +664,7 @@ pub fn validate_spec(spec: &ModelSpec) -> Result<(), String> {
         return Err("joint names must be unique".to_owned());
     }
     let root = &spec.links[0];
-    if spec.base_mode == BaseMode::Floating && root.inertial.is_none() {
+    if spec.base_mode == RootType::Floating && root.inertial.is_none() {
         return Err("a floating base requires root inertia".to_owned());
     }
     for link in &spec.links {
@@ -943,7 +949,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             1,
             TopologyKind::Serial,
             FixedJointLayout::None,
-            BaseMode::Fixed,
+            RootType::Fixed,
             JointMix::RevoluteOnly,
             AxisProfile::Cardinal,
             InertialProfile::Identity,
@@ -952,7 +958,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             2,
             TopologyKind::Serial,
             FixedJointLayout::ToolFrames,
-            BaseMode::Floating,
+            RootType::Floating,
             JointMix::AllSupported,
             AxisProfile::NearCardinal,
             InertialProfile::OffsetRotated,
@@ -961,7 +967,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             3,
             TopologyKind::SingleBranch,
             FixedJointLayout::Interleaved,
-            BaseMode::Fixed,
+            RootType::Fixed,
             JointMix::AllSupported,
             AxisProfile::General,
             InertialProfile::Rotated,
@@ -970,7 +976,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             4,
             TopologyKind::SingleBranch,
             FixedJointLayout::Consecutive,
-            BaseMode::Floating,
+            RootType::Floating,
             JointMix::Rotational,
             AxisProfile::Cardinal,
             InertialProfile::Offset,
@@ -979,7 +985,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             5,
             TopologyKind::Balanced,
             FixedJointLayout::None,
-            BaseMode::Fixed,
+            RootType::Fixed,
             JointMix::PrismaticOnly,
             AxisProfile::NearCardinal,
             InertialProfile::Rotated,
@@ -988,7 +994,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             6,
             TopologyKind::Balanced,
             FixedJointLayout::ToolFrames,
-            BaseMode::Floating,
+            RootType::Floating,
             JointMix::AllSupported,
             AxisProfile::General,
             InertialProfile::OffsetRotated,
@@ -997,7 +1003,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             7,
             TopologyKind::Wide,
             FixedJointLayout::Interleaved,
-            BaseMode::Fixed,
+            RootType::Fixed,
             JointMix::AllSupported,
             AxisProfile::Cardinal,
             InertialProfile::Offset,
@@ -1006,7 +1012,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             8,
             TopologyKind::Wide,
             FixedJointLayout::Consecutive,
-            BaseMode::Floating,
+            RootType::Floating,
             JointMix::Rotational,
             AxisProfile::NearCardinal,
             InertialProfile::Identity,
@@ -1015,7 +1021,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             9,
             TopologyKind::Unbalanced,
             FixedJointLayout::None,
-            BaseMode::Fixed,
+            RootType::Fixed,
             JointMix::AllSupported,
             AxisProfile::General,
             InertialProfile::OffsetRotated,
@@ -1024,7 +1030,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             10,
             TopologyKind::Unbalanced,
             FixedJointLayout::ToolFrames,
-            BaseMode::Floating,
+            RootType::Floating,
             JointMix::PrismaticOnly,
             AxisProfile::Cardinal,
             InertialProfile::Rotated,
@@ -1033,7 +1039,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             11,
             TopologyKind::Serial,
             FixedJointLayout::Interleaved,
-            BaseMode::Fixed,
+            RootType::Fixed,
             JointMix::Rotational,
             AxisProfile::NearCardinal,
             InertialProfile::Offset,
@@ -1042,7 +1048,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             12,
             TopologyKind::Serial,
             FixedJointLayout::Consecutive,
-            BaseMode::Floating,
+            RootType::Floating,
             JointMix::AllSupported,
             AxisProfile::General,
             InertialProfile::Identity,
@@ -1051,7 +1057,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             4,
             TopologyKind::Balanced,
             FixedJointLayout::ToolFrames,
-            BaseMode::Fixed,
+            RootType::Fixed,
             JointMix::RevoluteOnly,
             AxisProfile::Cardinal,
             InertialProfile::Rotated,
@@ -1060,7 +1066,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             8,
             TopologyKind::Wide,
             FixedJointLayout::None,
-            BaseMode::Floating,
+            RootType::Floating,
             JointMix::AllSupported,
             AxisProfile::NearCardinal,
             InertialProfile::Offset,
@@ -1069,7 +1075,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             12,
             TopologyKind::Unbalanced,
             FixedJointLayout::Interleaved,
-            BaseMode::Fixed,
+            RootType::Fixed,
             JointMix::PrismaticOnly,
             AxisProfile::General,
             InertialProfile::Identity,
@@ -1078,7 +1084,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             2,
             TopologyKind::SingleBranch,
             FixedJointLayout::Consecutive,
-            BaseMode::Floating,
+            RootType::Floating,
             JointMix::Rotational,
             AxisProfile::Cardinal,
             InertialProfile::OffsetRotated,
@@ -1087,7 +1093,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             5,
             TopologyKind::Serial,
             FixedJointLayout::ToolFrames,
-            BaseMode::Fixed,
+            RootType::Fixed,
             JointMix::AllSupported,
             AxisProfile::NearCardinal,
             InertialProfile::Rotated,
@@ -1096,7 +1102,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             6,
             TopologyKind::Balanced,
             FixedJointLayout::Interleaved,
-            BaseMode::Floating,
+            RootType::Floating,
             JointMix::RevoluteOnly,
             AxisProfile::General,
             InertialProfile::Offset,
@@ -1105,7 +1111,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             7,
             TopologyKind::Wide,
             FixedJointLayout::Consecutive,
-            BaseMode::Fixed,
+            RootType::Fixed,
             JointMix::AllSupported,
             AxisProfile::Cardinal,
             InertialProfile::Identity,
@@ -1114,7 +1120,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             9,
             TopologyKind::Unbalanced,
             FixedJointLayout::None,
-            BaseMode::Floating,
+            RootType::Floating,
             JointMix::PrismaticOnly,
             AxisProfile::NearCardinal,
             InertialProfile::OffsetRotated,
@@ -1123,7 +1129,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             10,
             TopologyKind::SingleBranch,
             FixedJointLayout::ToolFrames,
-            BaseMode::Fixed,
+            RootType::Fixed,
             JointMix::Rotational,
             AxisProfile::General,
             InertialProfile::Rotated,
@@ -1132,7 +1138,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             11,
             TopologyKind::Serial,
             FixedJointLayout::Interleaved,
-            BaseMode::Floating,
+            RootType::Floating,
             JointMix::AllSupported,
             AxisProfile::Cardinal,
             InertialProfile::Offset,
@@ -1141,7 +1147,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             12,
             TopologyKind::Balanced,
             FixedJointLayout::Consecutive,
-            BaseMode::Fixed,
+            RootType::Fixed,
             JointMix::RevoluteOnly,
             AxisProfile::NearCardinal,
             InertialProfile::Identity,
@@ -1150,7 +1156,7 @@ fn corpus_options(index: u64) -> ModelGenOptions {
             8,
             TopologyKind::Wide,
             FixedJointLayout::None,
-            BaseMode::Floating,
+            RootType::Floating,
             JointMix::AllSupported,
             AxisProfile::General,
             InertialProfile::OffsetRotated,
@@ -1163,7 +1169,7 @@ const fn options(
     active_joints: usize,
     topology: TopologyKind,
     fixed_layout: FixedJointLayout,
-    base_mode: BaseMode,
+    base_mode: RootType,
     joint_mix: JointMix,
     axis_profile: AxisProfile,
     inertial_profile: InertialProfile,

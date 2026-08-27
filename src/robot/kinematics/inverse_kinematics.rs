@@ -1,6 +1,6 @@
 use nalgebra::{SMatrix, SVector};
 
-use crate::{BaseMode, BaseState, Error, Frame, Result};
+use crate::{Error, Frame, Result};
 
 use super::super::{LinkId, Model, Robot, Workspace};
 
@@ -44,12 +44,11 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error for invalid inputs, a floating base, numerical failure,
-    /// joint-limit violation, or failure to converge.
+    /// Returns an error for invalid inputs, numerical failure, joint-limit
+    /// violation, or failure to converge.
     #[allow(clippy::too_many_arguments)]
     pub fn inverse_kinematics(
         &mut self,
-        base: &BaseState,
         initial_q: &[f64],
         target: LinkId,
         desired: &Frame,
@@ -57,7 +56,7 @@ impl Robot {
         output: &mut [f64],
     ) -> Result<()> {
         self.model.inverse_kinematics(
-            base,
+            &self.world_from_root,
             initial_q,
             target,
             desired,
@@ -87,7 +86,7 @@ impl Model {
     #[allow(clippy::too_many_arguments)]
     fn inverse_kinematics(
         &self,
-        base: &BaseState,
+        base_frame: &Frame,
         initial_q: &[f64],
         target: LinkId,
         desired: &Frame,
@@ -95,14 +94,10 @@ impl Model {
         workspace: &mut Workspace,
         output: &mut [f64],
     ) -> Result<()> {
-        self.validate_base_state(base)?;
-        if self.base_mode() == BaseMode::Floating {
-            return Err(Error::FloatingBaseIkUnsupported);
-        }
         self.validate_slice("initial_q", initial_q)?;
         self.validate_joint_output("inverse kinematics output", output)?;
         let target_index = self.validate_link_id(target)?;
-        let local_desired = base.frame().inverse() * *desired;
+        let local_desired = base_frame.inverse() * *desired;
         self.inverse_kinematics_kernel(
             initial_q,
             target_index,

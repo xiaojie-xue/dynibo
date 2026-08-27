@@ -31,8 +31,8 @@ $$
 
 ## 逆动力学
 
-`inverse_dynamics` 使用递归 Newton--Euler 算法，包含关节状态、保存的基座运动、
-重力和可选外部载荷。基座静止且无载荷时满足上面的动力学方程。
+`inverse_dynamics` 使用递归 Newton--Euler 算法，包含关节状态、显式传入的浮动基
+运动、重力和可选外部载荷。基座静止且无载荷时满足上面的动力学方程。
 
 ## 正动力学
 
@@ -43,7 +43,7 @@ $$
 $$
 
 对于浮动基，输入力和输出加速度首先包含世界坐标系下的基座角分量、线分量。计算会使用
-传入的基座位姿和速度；浮动基保存的加速度会被忽略，因为它是计算结果的一部分。joint 或
+传入的 `BaseState` 位姿和速度；其加速度会被忽略，因为它是计算结果的一部分。joint 或
 浮动基 articulated inertia 奇异时返回 solver error，而不是产生非有限加速度。
 
 ## 调用方式
@@ -51,14 +51,11 @@ $$
 === "Rust"
 
     ```rust
-    let base = BaseState::fixed();
-    robot.mass_matrix(&base, &q, &mut workspace, &mut mass)?;
-    robot.velocity_product_forces(&base, &q, &qd, &mut workspace, &mut velocity)?;
-    robot.gravity(&base, &q, &loads, &mut workspace, &mut gravity)?;
-    robot.inverse_dynamics(
-        &base, &q, &qd, &qdd, &loads, &mut workspace, &mut forces)?;
-    robot.forward_dynamics(
-        &base, &q, &qd, &forces, &loads, &mut accelerations)?;
+    robot.mass_matrix(&q, &mut mass)?;
+    robot.velocity_product_forces(&q, &qd, &mut velocity)?;
+    robot.gravity(&q, &loads, &mut gravity)?;
+    robot.inverse_dynamics(&q, &qd, &qdd, &loads, &mut forces)?;
+    robot.forward_dynamics(&q, &qd, &forces, &loads, &mut accelerations)?;
     ```
 
 === "Python"

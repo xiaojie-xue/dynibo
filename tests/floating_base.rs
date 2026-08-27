@@ -1,8 +1,11 @@
 mod support;
 
+use support::context::TestRootType as RootType;
+
 use approx::assert_relative_eq;
 use dynibo::{
-    BaseMode, BaseState, Error, Frame, IndexedLoad, InverseKinematicsOptions, Robot, Twist, Wrench,
+    BaseState, Error, FloatingRobot, Frame, IndexedLoad, InverseKinematicsOptions, Robot, Twist,
+    Wrench,
 };
 use nalgebra::{DMatrix, DVector, Translation3, UnitQuaternion, Vector3};
 use support::{
@@ -11,8 +14,8 @@ use support::{
     numeric::{Tolerance, assert_slice_close as assert_supported_slice_close},
 };
 
-fn robot() -> Robot {
-    FLOATING_ARM.robot(BaseMode::Floating)
+fn robot() -> FloatingRobot {
+    FloatingRobot::from_urdf(FLOATING_ARM.path()).unwrap()
 }
 
 fn base_frame() -> Frame {
@@ -41,32 +44,16 @@ fn assert_slice_close(actual: &[f64], expected: &[f64], tolerance: f64) {
         actual,
         expected,
         Tolerance::new(tolerance, 0.0),
-        &TestContext::new("floating-base", FLOATING_ARM.name).base_mode(BaseMode::Floating),
+        &TestContext::new("floating-base", FLOATING_ARM.name).base_mode(RootType::Floating),
     );
-}
-
-fn assert_acceleration_error<T>(result: dynibo::Result<T>) {
-    assert!(matches!(
-        result,
-        Err(Error::InvalidBaseState {
-            field: "acceleration",
-            ..
-        })
-    ));
 }
 
 #[test]
 fn base_mode_state_dimensions_and_ik_contract_are_explicit() {
-    let mut fixed = FLOATING_ARM.robot(BaseMode::Fixed);
-    assert_eq!(fixed.base_mode(), BaseMode::Fixed);
+    let mut fixed = Robot::from_urdf(FLOATING_ARM.path()).unwrap();
     assert_eq!(fixed.generalized_count(), fixed.joint_count());
-    let zero = BaseState::fixed();
-    assert_eq!(BaseState::default(), zero);
-    assert_eq!(zero.frame(), &Frame::identity());
-    assert_eq!(zero.velocity(), Twist::zeros());
-    assert_eq!(zero.acceleration(), Twist::zeros());
     assert!(matches!(
-        BaseState::fixed_at(Frame::translation(f64::NAN, 0.0, 0.0)),
+        BaseState::stationary(Frame::translation(f64::NAN, 0.0, 0.0)),
         Err(Error::InvalidBaseState { field: "frame", .. })
     ));
     assert!(matches!(
@@ -77,29 +64,13 @@ fn base_mode_state_dimensions_and_ik_contract_are_explicit() {
         ),
         Err(Error::InvalidBaseState { field: "frame", .. })
     ));
-    let fixed_state = BaseState::fixed_at(base_frame()).unwrap();
     let fixed_target = fixed.link_id("tool").unwrap();
     let known_q = [0.2, 0.1];
-    let moving_state = BaseState::new(
-        Frame::identity(),
-        Twist::new(Vector3::x(), Vector3::zeros()),
-        Twist::zeros(),
-    )
-    .unwrap();
-    assert!(matches!(
-        fixed.forward_kinematics(&moving_state, &known_q, fixed_target,),
-        Err(Error::InvalidBaseState {
-            field: "velocity",
-            ..
-        })
-    ));
-    let desired = fixed
-        .forward_kinematics(&fixed_state, &known_q, fixed_target)
-        .unwrap();
+    fixed.set_base_frame(base_frame()).unwrap();
+    let desired = fixed.forward_kinematics(&known_q, fixed_target).unwrap();
     let mut solved = [0.0; 2];
     fixed
         .inverse_kinematics(
-            &fixed_state,
             &[0.0; 2],
             fixed_target,
             &desired,
@@ -149,18 +120,6 @@ fn base_mode_state_dimensions_and_ik_contract_are_explicit() {
             actual: 47,
         })
     ));
-    let mut output = [0.0; 2];
-    assert!(matches!(
-        floating.inverse_kinematics(
-            &floating_state,
-            &[0.0; 2],
-            target,
-            &Frame::identity(),
-            InverseKinematicsOptions::default(),
-            &mut output,
-        ),
-        Err(Error::FloatingBaseIkUnsupported)
-    ));
 }
 
 #[test]
@@ -168,63 +127,11 @@ fn floating_base_requires_positive_root_mass_at_model_load() {
     let path = fixture_path("fixed_arm.urdf");
     Robot::from_urdf(&path).expect("a massless root remains valid for a fixed base");
 
-    let error = Robot::from_urdf_with_base(&path, BaseMode::Floating).unwrap_err();
+    let error = FloatingRobot::from_urdf(&path).unwrap_err();
     assert!(matches!(
         error,
         Error::InvalidModel(ref message)
             if message == "floating-base root link base must have positive mass"
-    ));
-}
-
-#[test]
-fn fixed_base_calculations_reject_nonzero_base_acceleration() {
-    let mut robot = FLOATING_ARM.robot(BaseMode::Fixed);
-    let target = robot.link_id("tool").unwrap();
-    let invalid_base = BaseState::new(
-        Frame::identity(),
-        Twist::zeros(),
-        Twist::new(Vector3::x(), Vector3::zeros()),
-    )
-    .unwrap();
-    let q = [0.0; 2];
-    let mut vector = [0.0; 2];
-    let mut matrix = [0.0; 4];
-    let mut jacobian = [0.0; 12];
-
-    assert_acceleration_error(robot.forward_kinematics(&invalid_base, &q, target));
-    assert_acceleration_error(robot.forward_velocity_kinematics(
-        &invalid_base,
-        &q,
-        &q,
-        target,
-        &Frame::identity(),
-    ));
-    assert_acceleration_error(robot.forward_acceleration_kinematics(
-        &invalid_base,
-        &q,
-        &q,
-        &q,
-        target,
-    ));
-    assert_acceleration_error(robot.jacobian(&invalid_base, &q, target, &mut jacobian));
-    assert_acceleration_error(robot.jacobian_derivative(
-        &invalid_base,
-        &q,
-        &q,
-        target,
-        &mut jacobian,
-    ));
-    assert_acceleration_error(robot.mass_matrix(&invalid_base, &q, &mut matrix));
-    assert_acceleration_error(robot.velocity_product_forces(&invalid_base, &q, &q, &mut vector));
-    assert_acceleration_error(robot.gravity(&invalid_base, &q, &[], &mut vector));
-    assert_acceleration_error(robot.inverse_dynamics(&invalid_base, &q, &q, &q, &[], &mut vector));
-    assert_acceleration_error(robot.inverse_kinematics(
-        &invalid_base,
-        &q,
-        target,
-        &Frame::identity(),
-        InverseKinematicsOptions::default(),
-        &mut vector,
     ));
 }
 

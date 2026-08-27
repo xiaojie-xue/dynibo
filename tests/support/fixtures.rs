@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use dynibo::{BaseMode, IndexedLoad, Robot, Wrench};
+use super::context::TestRootType as RootType;
+use dynibo::{IndexedLoad, Robot, Wrench};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Fixture {
@@ -16,8 +17,13 @@ impl Fixture {
             .join(self.urdf)
     }
 
-    pub fn robot(self, base_mode: BaseMode) -> Robot {
-        Robot::from_urdf_with_base(self.path(), base_mode)
+    pub fn robot(self, base_mode: RootType) -> Robot {
+        assert_eq!(
+            base_mode,
+            RootType::Fixed,
+            "use FloatingRobot for floating fixtures"
+        );
+        Robot::from_urdf(self.path())
             .unwrap_or_else(|error| panic!("fixture {} must load: {error}", self.name))
     }
 }

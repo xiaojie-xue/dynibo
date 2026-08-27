@@ -12,14 +12,14 @@ different numerical API.
 | Concept | Rust | Python | C++ | C |
 |---|---|---|---|---|
 | Load fixed-base model | `Robot::from_urdf` | `Robot.from_urdf` | `dynibo::Robot(path)` | `dynibo_robot_from_urdf` |
-| Load with base mode | `Robot::from_urdf_with_base` | `Robot.from_urdf_with_base` | `dynibo::Robot(path, mode)` | `dynibo_robot_from_urdf_with_base` |
-| Resolve link | `robot.link_id` | `robot.link_id` | `robot.link_id` | `dynibo_robot_link_id` |
-| Forward kinematics | `robot.forward_kinematics` | `robot.forward_kinematics` | `robot.forward_kinematics` | `dynibo_forward_kinematics` |
-| Jacobian | `robot.jacobian` | `robot.jacobian` | `robot.jacobian` | `dynibo_jacobian` |
-| Mass matrix | `robot.mass_matrix` | `robot.mass_matrix` | `robot.mass_matrix` | `dynibo_mass_matrix` |
-| Inverse dynamics | `robot.inverse_dynamics` | `robot.inverse_dynamics` | `robot.inverse_dynamics` | `dynibo_inverse_dynamics` |
-| Forward dynamics | `robot.forward_dynamics` | `robot.forward_dynamics` | `robot.forward_dynamics` | `dynibo_forward_dynamics` |
-| Workspace | Explicit argument | Owned by `Robot` | Owned by `Robot` | Explicit handle |
+| Load floating-base model | `FloatingRobot::from_urdf` | `FloatingRobot.from_urdf` | `dynibo::FloatingRobot(path)` | `dynibo_floating_robot_from_urdf` |
+| Resolve fixed/floating link | `robot.link_id` | `robot.link_id` | `robot.link_id` | `dynibo_robot_link_id` / `dynibo_floating_robot_link_id` |
+| Fixed forward kinematics | `Robot::forward_kinematics` | `Robot.forward_kinematics` | `Robot.forward_kinematics` | `dynibo_forward_kinematics` |
+| Floating forward kinematics | `FloatingRobot::forward_kinematics(base, …)` | `FloatingRobot.forward_kinematics(base, …)` | `FloatingRobot.forward_kinematics(base, …)` | `dynibo_floating_forward_kinematics` |
+| Fixed/floating Jacobian | `Robot` / `FloatingRobot` methods | `Robot` / `FloatingRobot` methods | `Robot` / `FloatingRobot` methods | `dynibo_jacobian` / `dynibo_floating_jacobian` |
+| Fixed mass/dynamics | `Robot` methods | `Robot` methods | `Robot` methods | `dynibo_mass_matrix`, `dynibo_inverse_dynamics`, `dynibo_forward_dynamics` |
+| Floating mass/dynamics | `FloatingRobot` methods with `base` | `FloatingRobot` methods with `base` | `FloatingRobot` methods with `base` | `dynibo_floating_mass_matrix`, `dynibo_floating_inverse_dynamics`, `dynibo_floating_forward_dynamics` |
+| Fixed/floating workspace | Owned by typed robot | Owned by typed robot | Owned by typed robot | `DyniboWorkspace` / `DyniboFloatingWorkspace` |
 | Matrix output | Caller buffer | Flat tuple | Flat `std::vector` | Caller buffer |
 | Errors | `Result<T>` | Exceptions | `dynibo::Error` | `DyniboStatus` |
 

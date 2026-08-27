@@ -7,12 +7,15 @@ use std::{
 };
 
 use dynibo_c::{
-    DYNIBO_BASE_FLOATING, DyniboLoad, DyniboPose, DyniboRobot, DyniboStatus, DyniboTwist,
-    DyniboWorkspace, dynibo_forward_dynamics, dynibo_forward_velocity_kinematics, dynibo_gravity,
-    dynibo_inverse_dynamics, dynibo_robot_destroy, dynibo_robot_from_urdf,
-    dynibo_robot_from_urdf_with_base, dynibo_robot_generalized_count, dynibo_robot_joint_count,
-    dynibo_robot_link_id, dynibo_robot_set_floating_base_state, dynibo_workspace_create,
-    dynibo_workspace_destroy,
+    DyniboBaseState, DyniboFloatingRobot, DyniboFloatingWorkspace, DyniboLoad, DyniboPose,
+    DyniboRobot, DyniboStatus, DyniboTwist, DyniboWorkspace, dynibo_floating_forward_dynamics,
+    dynibo_floating_inverse_dynamics, dynibo_floating_robot_destroy,
+    dynibo_floating_robot_from_urdf, dynibo_floating_robot_generalized_count,
+    dynibo_floating_robot_joint_count, dynibo_floating_robot_link_id,
+    dynibo_floating_workspace_create, dynibo_floating_workspace_destroy, dynibo_forward_dynamics,
+    dynibo_forward_velocity_kinematics, dynibo_gravity, dynibo_inverse_dynamics,
+    dynibo_robot_destroy, dynibo_robot_from_urdf, dynibo_robot_joint_count, dynibo_robot_link_id,
+    dynibo_workspace_create, dynibo_workspace_destroy,
 };
 
 struct CountingAllocator;
@@ -177,15 +180,15 @@ fn floating_base_abi_forward_dynamics_does_not_allocate() {
         .join("../..")
         .join("tests/data/floating_arm.urdf");
     let path = CString::new(path.to_string_lossy().as_bytes()).unwrap();
-    let mut robot: *mut DyniboRobot = ptr::null_mut();
-    let mut workspace: *mut DyniboWorkspace = ptr::null_mut();
+    let mut robot: *mut DyniboFloatingRobot = ptr::null_mut();
+    let mut workspace: *mut DyniboFloatingWorkspace = ptr::null_mut();
     unsafe {
         assert_eq!(
-            dynibo_robot_from_urdf_with_base(path.as_ptr(), DYNIBO_BASE_FLOATING, &mut robot,),
+            dynibo_floating_robot_from_urdf(path.as_ptr(), &mut robot),
             DyniboStatus::Ok
         );
         assert_eq!(
-            dynibo_workspace_create(robot, &mut workspace),
+            dynibo_floating_workspace_create(robot, &mut workspace),
             DyniboStatus::Ok
         );
         let frame = DyniboPose {
@@ -200,17 +203,18 @@ fn floating_base_abi_forward_dynamics_does_not_allocate() {
             angular: [-0.11, 0.14, 0.09],
             linear: [0.35, -0.22, 0.18],
         };
-        assert_eq!(
-            dynibo_robot_set_floating_base_state(robot, &frame, velocity, acceleration),
-            DyniboStatus::Ok
-        );
+        let base = DyniboBaseState {
+            frame,
+            velocity,
+            acceleration,
+        };
         let mut target = 0;
         assert_eq!(
-            dynibo_robot_link_id(robot, c"tool".as_ptr(), &mut target),
+            dynibo_floating_robot_link_id(robot, c"tool".as_ptr(), &mut target),
             DyniboStatus::Ok
         );
-        let n = dynibo_robot_joint_count(robot);
-        let generalized_count = dynibo_robot_generalized_count(robot);
+        let n = dynibo_floating_robot_joint_count(robot);
+        let generalized_count = dynibo_floating_robot_generalized_count(robot);
         assert_eq!((n, generalized_count), (2, 8));
         let q = [0.31, -0.27];
         let qd = [-0.24, 0.35];
@@ -224,9 +228,10 @@ fn floating_base_abi_forward_dynamics_does_not_allocate() {
         let mut recovered = [0.0; 8];
 
         assert_eq!(
-            dynibo_inverse_dynamics(
+            dynibo_floating_inverse_dynamics(
                 robot,
                 workspace,
+                &base,
                 q.as_ptr(),
                 qd.as_ptr(),
                 qdd.as_ptr(),
@@ -243,9 +248,10 @@ fn floating_base_abi_forward_dynamics_does_not_allocate() {
         set_counting(true);
         for _ in 0..10 {
             assert_eq!(
-                dynibo_forward_dynamics(
+                dynibo_floating_forward_dynamics(
                     robot,
                     workspace,
+                    &base,
                     q.as_ptr(),
                     qd.as_ptr(),
                     n,
@@ -262,7 +268,7 @@ fn floating_base_abi_forward_dynamics_does_not_allocate() {
         set_counting(false);
         assert_eq!(allocation_count(), 0);
 
-        dynibo_workspace_destroy(workspace);
-        dynibo_robot_destroy(robot);
+        dynibo_floating_workspace_destroy(workspace);
+        dynibo_floating_robot_destroy(robot);
     }
 }

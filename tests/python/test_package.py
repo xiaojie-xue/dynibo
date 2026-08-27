@@ -43,7 +43,7 @@ class PackageTests(unittest.TestCase):
         self.q = [0.0] * self.robot.joint_count
 
     def test_model_and_kinematics(self) -> None:
-        self.assertEqual(dynibo.__version__, "0.3.0")
+        self.assertEqual(dynibo.__version__, "0.4.0")
         self.assertEqual(self.robot.name, "test_arm")
         self.assertEqual(self.robot.joint_count, 4)
         self.assertEqual(self.robot.link_count, 5)
@@ -117,9 +117,7 @@ class PackageTests(unittest.TestCase):
             self.assertAlmostEqual(contracted, expected[row], delta=1.0e-10)
 
     def test_floating_base_shapes_state_and_ik_contract(self) -> None:
-        with dynibo.Robot.from_urdf_with_base(
-            URDF, dynibo.BaseMode.FLOATING
-        ) as robot:
+        with dynibo.FloatingRobot.from_urdf(URDF) as robot:
             target = robot.link_id("test_link_4")
             q = reference("q")
             qd = reference("qd")
@@ -128,7 +126,7 @@ class PackageTests(unittest.TestCase):
             base_rotation = reference("floating_base_rotation_xyzw")
             base_velocity = reference("floating_base_velocity")
             base_acceleration = reference("floating_base_acceleration")
-            robot.set_floating_base_state(
+            base = dynibo.BaseState(
                 dynibo.Pose(
                     translation=base_translation,
                     rotation_xyzw=base_rotation,
@@ -139,21 +137,21 @@ class PackageTests(unittest.TestCase):
                 ),
             )
             self.assertEqual(robot.generalized_count, robot.joint_count + 6)
-            self.assertEqual(len(robot.jacobian(q, target)), 6 * robot.generalized_count)
-            self.assertEqual(len(robot.mass_matrix(q)), robot.generalized_count**2)
-            pose = robot.forward_kinematics(q, target)
+            self.assertEqual(len(robot.jacobian(base, q, target)), 6 * robot.generalized_count)
+            self.assertEqual(len(robot.mass_matrix(base, q)), robot.generalized_count**2)
+            pose = robot.forward_kinematics(base, q, target)
             for actual, expected_value in zip(
                 pose.translation, reference("floating_fk_translation")
             ):
                 self.assertAlmostEqual(actual, expected_value, delta=2.0e-12)
             for actual, expected_value in zip(
-                robot.gravity(q), reference("floating_gravity")
+                robot.gravity(base, q), reference("floating_gravity")
             ):
                 self.assertAlmostEqual(actual, expected_value, delta=2.0e-10)
-            forces = robot.inverse_dynamics(q, qd, qdd)
+            forces = robot.inverse_dynamics(base, q, qd, qdd)
             for actual, expected_value in zip(forces, reference("floating_rnea")):
                 self.assertAlmostEqual(actual, expected_value, delta=2.0e-10)
-            recovered = robot.forward_dynamics(q, qd, forces)
+            recovered = robot.forward_dynamics(base, q, qd, forces)
             expected_acceleration = base_acceleration + qdd
             for actual, expected_value in zip(recovered, expected_acceleration):
                 self.assertAlmostEqual(actual, expected_value, delta=2.0e-9)
@@ -163,20 +161,19 @@ class PackageTests(unittest.TestCase):
                 torque=load_values[:3],
                 force=load_values[3:],
             )
-            loaded_forces = robot.inverse_dynamics(q, qd, qdd, loads=[load])
+            loaded_forces = robot.inverse_dynamics(base, q, qd, qdd, loads=[load])
             for actual, expected_value in zip(
                 loaded_forces, reference("floating_rnea_loaded")
             ):
                 self.assertAlmostEqual(actual, expected_value, delta=2.0e-10)
             loaded_recovered = robot.forward_dynamics(
-                q, qd, loaded_forces, loads=[load]
+                base, q, qd, loaded_forces, loads=[load]
             )
             for actual, expected_value in zip(
                 loaded_recovered, expected_acceleration
             ):
                 self.assertAlmostEqual(actual, expected_value, delta=2.0e-9)
-            with self.assertRaisesRegex(ValueError, "does not support a floating base"):
-                robot.inverse_kinematics(q, target, robot.forward_kinematics(q, target))
+            self.assertFalse(hasattr(robot, "inverse_kinematics"))
 
     def test_errors_cross_the_package_boundary(self) -> None:
         with self.assertRaisesRegex(ValueError, "does not exist"):
@@ -281,13 +278,12 @@ class PackageTests(unittest.TestCase):
             self.robot.set_base_frame(dynibo.Pose(translation=(0.0, 0.0)))
         with self.assertRaisesRegex(ValueError, "load force must contain exactly 3"):
             self.robot.gravity(self.q, loads=[dynibo.Load(self.target, force=(1.0, 2.0))])
-        with self.assertRaisesRegex(TypeError, "base_mode must be"):
-            dynibo.Robot.from_urdf_with_base(URDF, 2)
+        self.assertFalse(hasattr(dynibo, "Base" + "Mode"))
 
         with dynibo.Robot.from_urdf(URDF) as managed:
             self.assertEqual(managed.name, "test_arm")
         managed.close()
-        with self.assertRaisesRegex(ValueError, "robot must not be null"):
+        with self.assertRaisesRegex(RuntimeError, "robot is closed"):
             managed.forward_kinematics(self.q, self.target)
 
     def test_shared_robot_serializes_native_workspace_access(self) -> None:

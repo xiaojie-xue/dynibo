@@ -16,7 +16,7 @@ target_link_libraries(my_robot PRIVATE dynibo::dynibo)
 
 ```cpp
 try {
-    dynibo::Robot robot("robot.urdf", DYNIBO_BASE_FLOATING);
+    dynibo::FloatingRobot robot("robot.urdf");
     // 使用 robot……
 } catch (const dynibo::Error& error) {
     std::cerr << error.what() << '\n';
@@ -37,7 +37,7 @@ try {
 | 空间运动 | `DyniboTwist` |
 | 外部载荷 | `DyniboLoad` |
 | IK 配置 | `DyniboIkOptions` |
-| 基座模式 | `DyniboBaseMode` |
+| 浮动状态 | 每次计算传入 `dynibo::BaseState` |
 
 矩阵操作返回 column-major 顺序的一维 `std::vector<double>`，详见
 [参考系与空间向量](../user-guide/frames-and-spatial-vectors.md)。

@@ -99,15 +99,14 @@ cargo add dynibo
 加载 URDF 并计算目标 link 位姿：
 
 ```rust
-use dynibo::{BaseState, Robot};
+use dynibo::Robot;
 
 fn main() -> dynibo::Result<()> {
     let mut robot = Robot::from_urdf("robot.urdf")?;
-    let base = BaseState::fixed();
     let tool = robot.link_id("tool")?;
     let q = vec![0.0; robot.joint_count()];
 
-    let pose = robot.forward_kinematics(&base, &q, tool)?;
+    let pose = robot.forward_kinematics(&q, tool)?;
     println!("translation: {}", pose.translation.vector.transpose());
     Ok(())
 }
@@ -155,7 +154,7 @@ target_link_libraries(my_robot PRIVATE dynibo::dynibo)
 
 ## 示例
 
-Rust、Python 和 C 的完整调用示例见 [`examples/`](examples/) 目录；每个示例均覆盖
+Rust、Python、C++ 和 C 的完整调用示例见 [`examples/`](examples/) 目录；每个示例均覆盖
 上文列出的全部主要运动学与动力学方法。
 
 ## 支持的模型
@@ -192,7 +191,7 @@ Dynibo 目前仍处于早期阶段，欢迎参与构建和完善。开发环境�
   author  = {Xue, Xiaojie},
   title   = {Dynibo: a Fast, Lightweight, and Reliable Robot Kinematics and Dynamics Library},
   year    = {2026},
-  version = {0.3.0},
+  version = {0.4.0},
   url     = {https://github.com/xiaojie-xue/dynibo}
 }
 ```

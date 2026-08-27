@@ -29,4 +29,23 @@ except DyniboError as error:
 每个 `Robot` 持有一个原生 workspace，同一实例上的调用会被串行化。需要并行计算时，
 请使用相互独立的 robot 实例。
 
+## 浮动基
+
+`FloatingRobot` 拥有独立 workspace，且不保存可变的基座状态。每次计算都将
+`BaseState` 作为第一个参数传入：
+
+```python
+from dynibo import BaseState, FloatingRobot, Pose
+
+with FloatingRobot.from_urdf("robot.urdf") as robot:
+    target = robot.link_id("tool")
+    q = [0.0] * robot.joint_count
+    base = BaseState(frame=Pose(translation=(0.1, 0.0, 0.0)))
+    pose = robot.forward_kinematics(base, q, target)
+    mass = robot.mass_matrix(base, q)
+```
+
+浮动基满足 `generalized_count == joint_count + 6`；广义输出先是世界坐标系下的
+角分量，再是线分量。只有固定 `Robot` 提供 `set_base_frame()`。
+
 [打开 Python API 参考](../reference/python.md){ .md-button }

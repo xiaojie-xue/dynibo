@@ -32,8 +32,9 @@ Jacobians begin with six base-motion columns.
 
 `forward_velocity_kinematics` accepts a tool pose relative to the target link
 and returns velocity at that tool point. `forward_acceleration_kinematics`
-returns acceleration at the target-link origin. Both include the base state
-stored on the robot.
+returns acceleration at the target-link origin. Fixed calculations use the
+frame stored on `Robot`; floating calculations use the `BaseState` supplied to
+that call.
 
 ## Inverse kinematics
 
@@ -52,15 +53,13 @@ floating-base inverse kinematics is not currently supported.
 === "Rust"
 
     ```rust
-    let base = BaseState::fixed();
-    let pose = robot.forward_kinematics(&base, &q, target, &mut workspace)?;
-    robot.jacobian(&base, &q, target, &mut workspace, &mut jacobian)?;
+    let pose = robot.forward_kinematics(&q, target)?;
+    robot.jacobian(&q, target, &mut jacobian)?;
     let velocity = robot.forward_velocity_kinematics(
-        &base, &q, &qd, target, &Frame::identity(), &mut workspace)?;
+        &q, &qd, target, &Frame::identity())?;
     let mut solution = vec![0.0; robot.joint_count()];
     robot.inverse_kinematics(
-        &base, &initial_q, target, &desired, options,
-        &mut workspace, &mut solution)?;
+        &initial_q, target, &desired, options, &mut solution)?;
     ```
 
 === "Python"

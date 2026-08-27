@@ -18,7 +18,7 @@ Failures are reported as `dynibo::Error`:
 
 ```cpp
 try {
-    dynibo::Robot robot("robot.urdf", DYNIBO_BASE_FLOATING);
+    dynibo::FloatingRobot robot("robot.urdf");
     // Use robot...
 } catch (const dynibo::Error& error) {
     std::cerr << error.what() << '\n';
@@ -39,7 +39,7 @@ The wrapper intentionally reuses ABI-compatible C value types:
 | Spatial motion | `DyniboTwist` |
 | External load | `DyniboLoad` |
 | IK settings | `DyniboIkOptions` |
-| Base mode | `DyniboBaseMode` |
+| Floating state | `dynibo::BaseState` calculation argument |
 
 Matrix operations return flat `std::vector<double>` values in column-major
 order. See [Frames and Spatial Vectors](../user-guide/frames-and-spatial-vectors.md).

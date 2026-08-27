@@ -108,15 +108,14 @@ cargo add dynibo
 Load a URDF and compute a target-link pose:
 
 ```rust
-use dynibo::{BaseState, Robot};
+use dynibo::Robot;
 
 fn main() -> dynibo::Result<()> {
     let mut robot = Robot::from_urdf("robot.urdf")?;
-    let base = BaseState::fixed();
     let tool = robot.link_id("tool")?;
     let q = vec![0.0; robot.joint_count()];
 
-    let pose = robot.forward_kinematics(&base, &q, tool)?;
+    let pose = robot.forward_kinematics(&q, tool)?;
     println!("translation: {}", pose.translation.vector.transpose());
     Ok(())
 }
@@ -135,11 +134,11 @@ The Python binding owns its reusable native calculation storage:
 ```python
 from dynibo import Robot
 
-with Robot.from_urdf("robot.urdf") as robot:
-    tool = robot.link_id("tool")
-    q = [0.0] * robot.joint_count
-    pose = robot.forward_kinematics(q, tool)
-    print(pose.translation)
+robot = Robot.from_urdf("robot.urdf")
+tool = robot.link_id("tool")
+q = [0.0] * robot.joint_count
+pose = robot.forward_kinematics(q, tool)
+print(pose.translation)
 ```
 
 ### C/C++
@@ -165,7 +164,7 @@ If dynibo was installed to a custom prefix, configure the consumer with
 
 ## Examples
 
-Complete Rust, Python, and C examples are available in the
+Complete Rust, Python, C++, and C examples are available in the
 [`examples/`](examples/) directory. Each example exercises all of the main
 kinematics and dynamics methods listed above.
 
@@ -206,7 +205,7 @@ If Dynibo is useful in your work, please cite it as:
   author  = {Xue, Xiaojie},
   title   = {Dynibo: a Fast, Lightweight, and Reliable Robot Kinematics and Dynamics Library},
   year    = {2026},
-  version = {0.3.0},
+  version = {0.4.0},
   url     = {https://github.com/xiaojie-xue/dynibo}
 }
 ```

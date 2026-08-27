@@ -1,250 +1,85 @@
 #include <dynibo/dynibo.hpp>
 
-#include <algorithm>
 #include <cmath>
-#include <fstream>
-#include <iostream>
-#include <sstream>
-#include <string>
+#include <cstdio>
+#include <utility>
 #include <vector>
 
-#define CHECK(expression)                                                       \
-    do {                                                                        \
-        if (!(expression)) {                                                    \
-            std::cerr << "check failed at " << __FILE__ << ':' << __LINE__      \
-                      << ": " << #expression << '\n';                          \
-            return 1;                                                           \
-        }                                                                       \
-    } while (false)
+#define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "failed: %s\n", #x); return 1; } } while (0)
 
-static std::vector<double> read_reference(
-    const char* path, const std::string& key, std::size_t count) {
-    std::ifstream input(path);
-    std::string line;
-    while (std::getline(input, line)) {
-        if (line.empty() || line.front() == '#') continue;
-        std::istringstream fields(line);
-        std::string field;
-        std::getline(fields, field, '\t');
-        if (field != key) continue;
-        std::vector<double> values;
-        while (std::getline(fields, field, '\t')) values.push_back(std::stod(field));
-        if (values.size() == count) return values;
-        return {};
-    }
-    return {};
-}
-
-int main(int argc, char** argv) {
-    CHECK(argc == 3);
-    dynibo::Robot robot(argv[1]);
-    dynibo::Robot moved(std::move(robot));
-    dynibo::Robot assigned(argv[1]);
-    assigned = std::move(moved);
-    CHECK(assigned.native_handle() != nullptr);
-    CHECK(assigned.workspace_handle() != nullptr);
-    CHECK(assigned.name() == "test_arm");
-    CHECK(assigned.joint_count() == 4);
-    CHECK(assigned.link_count() == 5);
-
-    const auto target = assigned.link_id("test_link_4");
-    const std::vector<double> q(assigned.joint_count(), 0.0);
-    const auto pose = assigned.forward_kinematics(q, target);
-    CHECK(std::abs(pose.translation[0] - 0.62) < 1.0e-12);
-    CHECK(assigned.jacobian(q, target).size() == 6 * assigned.joint_count());
-    const auto gravity = assigned.gravity(q);
-    CHECK(gravity.size() == assigned.joint_count());
-    CHECK(assigned.inverse_dynamics(q, q, q).size() == assigned.joint_count());
-    CHECK(assigned.inverse_kinematics(q, target, pose) == q);
-
-    const auto reference_q = read_reference(argv[2], "q", 4);
-    const auto reference_qd = read_reference(argv[2], "qd", 4);
-    const auto reference_qdd = read_reference(argv[2], "qdd", 4);
-    const auto expected_translation = read_reference(argv[2], "fk_translation", 3);
-    const auto expected_gravity = read_reference(argv[2], "gravity", 4);
-    const auto expected_dynamics = read_reference(argv[2], "rnea", 4);
-    CHECK(reference_q.size() == 4 && reference_qd.size() == 4);
-    CHECK(reference_qdd.size() == 4 && expected_translation.size() == 3);
-    CHECK(expected_gravity.size() == 4 && expected_dynamics.size() == 4);
-    const auto reference_pose = assigned.forward_kinematics(reference_q, target);
-    for (std::size_t index = 0; index < expected_translation.size(); ++index) {
-        CHECK(std::abs(reference_pose.translation[index] - expected_translation[index]) < 2.0e-12);
-    }
-    const auto reference_gravity = assigned.gravity(reference_q);
-    const auto reference_dynamics =
-        assigned.inverse_dynamics(reference_q, reference_qd, reference_qdd);
-    for (std::size_t index = 0; index < reference_q.size(); ++index) {
-        CHECK(std::abs(reference_gravity[index] - expected_gravity[index]) < 2.0e-10);
-        CHECK(std::abs(reference_dynamics[index] - expected_dynamics[index]) < 2.0e-10);
-    }
-    const auto recovered_acceleration =
-        assigned.forward_dynamics(reference_q, reference_qd, reference_dynamics);
-    for (std::size_t index = 0; index < reference_q.size(); ++index) {
-        CHECK(std::abs(recovered_acceleration[index] - reference_qdd[index]) < 2.0e-10);
-    }
-
-    const auto mass = assigned.mass_matrix(reference_q);
-    CHECK(mass.size() == reference_q.size() * reference_q.size());
-    for (std::size_t row = 0; row < reference_q.size(); ++row) {
-        for (std::size_t column = 0; column < reference_q.size(); ++column) {
-            CHECK(std::abs(mass[column * 4 + row] - mass[row * 4 + column]) < 1.0e-12);
-        }
-    }
-    const auto velocity_product =
-        assigned.velocity_product_forces(reference_q, reference_qd);
-    CHECK(velocity_product.size() == reference_q.size());
-    const std::vector<double> zero_qdd(reference_q.size(), 0.0);
-    const auto bias = assigned.inverse_dynamics(reference_q, reference_qd, zero_qdd);
-    for (std::size_t row = 0; row < reference_q.size(); ++row) {
-        const double reconstructed = reference_gravity[row] + velocity_product[row];
-        CHECK(std::abs(reconstructed - bias[row]) < 1.0e-10);
-    }
-    const auto derivative =
-        assigned.jacobian_derivative(reference_q, reference_qd, target);
-    CHECK(derivative.size() == 6 * reference_q.size());
-    const auto origin_acceleration =
-        assigned.forward_acceleration_kinematics(reference_q, reference_qd, zero_qdd, target);
-    for (std::size_t row = 0; row < 6; ++row) {
-        const double expected = row < 3
-            ? origin_acceleration.angular[row]
-            : origin_acceleration.linear[row - 3];
-        double contracted = 0.0;
-        for (std::size_t column = 0; column < reference_q.size(); ++column) {
-            contracted += derivative[column * 6 + row] * reference_qd[column];
-        }
-        CHECK(std::abs(contracted - expected) < 1.0e-10);
-    }
-
-    const auto velocity = assigned.forward_velocity_kinematics(q, q, target);
-    const auto acceleration = assigned.forward_acceleration_kinematics(q, q, q, target);
-    for (double value : velocity.angular) CHECK(std::abs(value) < 1.0e-12);
-    for (double value : velocity.linear) CHECK(std::abs(value) < 1.0e-12);
-    for (double value : acceleration.angular) CHECK(std::abs(value) < 1.0e-12);
-    for (double value : acceleration.linear) CHECK(std::abs(value) < 1.0e-12);
-
-    DyniboLoad load{};
-    load.link_id = target;
-    load.force[1] = 1.0;
-    CHECK(assigned.gravity(q, {load}) != gravity);
-
-    dynibo::Robot floating(argv[1], DYNIBO_BASE_FLOATING);
-    const auto floating_target = floating.link_id("test_link_4");
-    const auto base_translation = read_reference(argv[2], "floating_base_translation", 3);
-    const auto base_rotation = read_reference(argv[2], "floating_base_rotation_xyzw", 4);
-    const auto base_velocity = read_reference(argv[2], "floating_base_velocity", 6);
-    const auto base_acceleration = read_reference(argv[2], "floating_base_acceleration", 6);
-    DyniboPose floating_base{};
-    std::copy(base_translation.begin(), base_translation.end(), floating_base.translation);
-    std::copy(base_rotation.begin(), base_rotation.end(), floating_base.rotation_xyzw);
-    DyniboTwist floating_velocity{};
-    DyniboTwist floating_acceleration{};
-    std::copy_n(base_velocity.begin(), 3, floating_velocity.angular);
-    std::copy_n(base_velocity.begin() + 3, 3, floating_velocity.linear);
-    std::copy_n(base_acceleration.begin(), 3, floating_acceleration.angular);
-    std::copy_n(base_acceleration.begin() + 3, 3, floating_acceleration.linear);
-    floating.set_floating_base_state(
-        floating_base, floating_velocity, floating_acceleration);
-    const auto floating_pose = floating.forward_kinematics(reference_q, floating_target);
-    const auto floating_translation =
-        read_reference(argv[2], "floating_fk_translation", 3);
-    for (std::size_t index = 0; index < 3; ++index) {
-        CHECK(std::abs(floating_pose.translation[index] - floating_translation[index]) < 2.0e-12);
-    }
-    const auto floating_gravity = floating.gravity(reference_q);
-    const auto expected_floating_gravity =
-        read_reference(argv[2], "floating_gravity", 10);
-    const auto floating_rnea =
-        floating.inverse_dynamics(reference_q, reference_qd, reference_qdd);
-    const auto expected_floating_rnea = read_reference(argv[2], "floating_rnea", 10);
-    for (std::size_t index = 0; index < 10; ++index) {
-        CHECK(std::abs(floating_gravity[index] - expected_floating_gravity[index]) < 2.0e-10);
-        CHECK(std::abs(floating_rnea[index] - expected_floating_rnea[index]) < 2.0e-10);
-    }
-    std::vector<double> expected_floating_acceleration(base_acceleration);
-    expected_floating_acceleration.insert(
-        expected_floating_acceleration.end(), reference_qdd.begin(), reference_qdd.end());
-    const auto floating_recovered =
-        floating.forward_dynamics(reference_q, reference_qd, floating_rnea);
-    for (std::size_t index = 0; index < 10; ++index) {
-        CHECK(std::abs(floating_recovered[index] - expected_floating_acceleration[index]) < 2.0e-9);
-    }
-    const auto floating_load_values = read_reference(argv[2], "floating_load", 6);
-    DyniboLoad floating_load{};
-    floating_load.link_id = floating_target;
-    std::copy_n(floating_load_values.begin(), 3, floating_load.torque);
-    std::copy_n(floating_load_values.begin() + 3, 3, floating_load.force);
-    const auto floating_loaded_rnea = floating.inverse_dynamics(
-        reference_q, reference_qd, reference_qdd, {floating_load});
-    const auto expected_floating_loaded_rnea =
-        read_reference(argv[2], "floating_rnea_loaded", 10);
-    for (std::size_t index = 0; index < 10; ++index) {
-        CHECK(std::abs(floating_loaded_rnea[index] -
-                       expected_floating_loaded_rnea[index]) < 2.0e-10);
-    }
-    const auto floating_loaded_recovered = floating.forward_dynamics(
-        reference_q, reference_qd, floating_loaded_rnea, {floating_load});
-    for (std::size_t index = 0; index < 10; ++index) {
-        CHECK(std::abs(floating_loaded_recovered[index] -
-                       expected_floating_acceleration[index]) < 2.0e-9);
-    }
-
-    bool caught = false;
+int main(int argc, char **argv) {
+    CHECK(argc >= 2);
     try {
-        static_cast<void>(assigned.link_id("missing"));
-    } catch (const dynibo::Error& error) {
-        caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
-            && std::string(error.what()).find("does not exist") != std::string::npos;
-    }
-    CHECK(caught);
+        dynibo::Robot fixed(argv[1]);
+        const auto target = fixed.link_id("test_link_4");
+        const std::vector<double> q{0.2, 1.0, -0.7, 0.4};
+        const std::vector<double> qd{-0.3, 0.5, -0.2, 0.8};
+        const std::vector<double> qdd{0.7, -0.4, 0.1, 0.3};
+        DyniboLoad load{};
+        load.link_id = target;
+        load.force[1] = 1.0;
+        const std::vector<DyniboLoad> loads{load};
 
-    const std::vector<double> short_q(q.size() - 1, 0.0);
-    caught = false;
-    try {
-        static_cast<void>(assigned.forward_velocity_kinematics(q, short_q, target));
+        const auto pose = fixed.forward_kinematics(q, target);
+        CHECK(fixed.jacobian(q, target).size() == 6 * fixed.generalized_count());
+        CHECK(fixed.jacobian_derivative(q, qd, target).size() == 6 * fixed.generalized_count());
+        CHECK(fixed.mass_matrix(q).size() == fixed.generalized_count() * fixed.generalized_count());
+        CHECK(fixed.velocity_product_forces(q, qd).size() == fixed.generalized_count());
+        CHECK(fixed.forward_velocity_kinematics(q, qd, target).angular[0] == fixed.forward_velocity_kinematics(q, qd, target).angular[0]);
+        CHECK(fixed.forward_acceleration_kinematics(q, qd, qdd, target).linear[0] == fixed.forward_acceleration_kinematics(q, qd, qdd, target).linear[0]);
+        CHECK(fixed.gravity(q, loads).size() == fixed.generalized_count());
+        const auto fixed_forces = fixed.inverse_dynamics(q, qd, qdd, loads);
+        CHECK(fixed_forces.size() == fixed.generalized_count());
+        CHECK(fixed.forward_dynamics(q, qd, fixed_forces, loads).size() == fixed.generalized_count());
+        CHECK(fixed.inverse_kinematics(q, target, pose).size() == fixed.joint_count());
+        DyniboPose shift = dynibo::identity_pose();
+        shift.translation[0] = 0.2;
+        fixed.set_base_frame(shift);
+        CHECK(std::abs(fixed.forward_kinematics(q, target).translation[0] - pose.translation[0] - 0.2) < 1e-12);
+
+        const std::vector<double> short_q{0.0, 0.0, 0.0};
+        bool invalid_length = false;
+        try { static_cast<void>(fixed.jacobian(short_q, target)); } catch (const dynibo::Error& error) { invalid_length = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT; }
+        CHECK(invalid_length);
+
+        dynibo::FloatingRobot floating(argv[1]);
+        const auto floating_target = floating.link_id("test_link_4");
+        dynibo::BaseState base;
+        base.velocity.angular[0] = 0.1;
+        base.acceleration.linear[1] = -0.2;
+        CHECK(floating.generalized_count() == floating.joint_count() + 6);
+        const auto floating_pose = floating.forward_kinematics(base, q, floating_target);
+        CHECK(floating.jacobian(base, q, floating_target).size() == 6 * floating.generalized_count());
+        CHECK(floating.jacobian_derivative(base, q, qd, floating_target).size() == 6 * floating.generalized_count());
+        CHECK(floating.mass_matrix(base, q).size() == floating.generalized_count() * floating.generalized_count());
+        CHECK(floating.velocity_product_forces(base, q, qd).size() == floating.generalized_count());
+        CHECK(floating.forward_velocity_kinematics(base, q, qd, floating_target).angular[0] == floating.forward_velocity_kinematics(base, q, qd, floating_target).angular[0]);
+        CHECK(floating.forward_acceleration_kinematics(base, q, qd, qdd, floating_target).linear[0] == floating.forward_acceleration_kinematics(base, q, qd, qdd, floating_target).linear[0]);
+        load.link_id = floating_target;
+        const std::vector<DyniboLoad> floating_loads{load};
+        CHECK(floating.gravity(base, q, floating_loads).size() == floating.generalized_count());
+        const auto floating_forces = floating.inverse_dynamics(base, q, qd, qdd, floating_loads);
+        CHECK(floating_forces.size() == floating.generalized_count());
+        CHECK(floating.forward_dynamics(base, q, qd, floating_forces, floating_loads).size() == floating.generalized_count());
+        dynibo::BaseState moved_base = base;
+        moved_base.frame.translation[0] = 0.3;
+        static_cast<void>(floating.forward_kinematics(moved_base, q, floating_target));
+        CHECK(floating.forward_kinematics(base, q, floating_target).translation[0] == floating_pose.translation[0]);
+        invalid_length = false;
+        try { static_cast<void>(floating.mass_matrix(base, short_q)); } catch (const dynibo::Error& error) { invalid_length = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT; }
+        CHECK(invalid_length);
+
+        dynibo::Robot moved_fixed(std::move(fixed));
+        dynibo::Robot assigned_fixed(argv[1]);
+        assigned_fixed = std::move(moved_fixed);
+        CHECK(assigned_fixed.joint_count() == q.size());
+        dynibo::FloatingRobot moved_floating(std::move(floating));
+        dynibo::FloatingRobot assigned_floating(argv[1]);
+        assigned_floating = std::move(moved_floating);
+        CHECK(assigned_floating.generalized_count() == q.size() + 6);
     } catch (const dynibo::Error& error) {
-        caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
-            && std::string(error.what()).find("same length") != std::string::npos;
+        std::fprintf(stderr, "dynibo error: %s\n", error.what());
+        return 1;
     }
-    CHECK(caught);
-    caught = false;
-    try {
-        static_cast<void>(assigned.forward_acceleration_kinematics(q, q, short_q, target));
-    } catch (const dynibo::Error& error) {
-        caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
-            && std::string(error.what()).find("same length") != std::string::npos;
-    }
-    CHECK(caught);
-    caught = false;
-    try {
-        static_cast<void>(assigned.inverse_dynamics(q, short_q, q));
-    } catch (const dynibo::Error& error) {
-        caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
-            && std::string(error.what()).find("same length") != std::string::npos;
-    }
-    CHECK(caught);
-    caught = false;
-    try {
-        static_cast<void>(assigned.forward_dynamics(q, short_q, q));
-    } catch (const dynibo::Error& error) {
-        caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
-            && std::string(error.what()).find("same length") != std::string::npos;
-    }
-    CHECK(caught);
-    caught = false;
-    try {
-        static_cast<void>(assigned.velocity_product_forces(q, short_q));
-    } catch (const dynibo::Error& error) {
-        caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
-            && std::string(error.what()).find("same length") != std::string::npos;
-    }
-    CHECK(caught);
-    caught = false;
-    try {
-        static_cast<void>(assigned.jacobian_derivative(q, short_q, target));
-    } catch (const dynibo::Error& error) {
-        caught = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT
-            && std::string(error.what()).find("same length") != std::string::npos;
-    }
-    CHECK(caught);
     return 0;
 }

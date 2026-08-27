@@ -8,20 +8,18 @@ buffers once in a model-scoped workspace and reuses them.
 
 | Interface | Workspace ownership | Calculation outputs |
 |---|---|---|
-| Rust | Created with `robot.workspace()` and passed explicitly | Caller supplies matrix and force buffers |
-| Python | One native workspace owned by each `Robot` | Python tuples/value objects are returned |
-| C++ | One native workspace owned by each `dynibo::Robot` | `std::vector` or value objects are returned |
-| C | Explicit `DyniboWorkspace*` | Caller supplies buffers and structs |
+| Rust | One workspace owned by each `Robot` or `FloatingRobot` | Caller supplies matrix and force buffers |
+| Python | One native workspace owned by each `Robot` or `FloatingRobot` | Python tuples/value objects are returned |
+| C++ | One native workspace owned by each `dynibo::Robot` or `dynibo::FloatingRobot` | `std::vector` or value objects are returned |
+| C | Explicit `DyniboWorkspace*` or `DyniboFloatingWorkspace*` | Caller supplies buffers and structs |
 
 Rust and C give direct control over output allocation:
 
 === "Rust"
 
     ```rust
-    let base = BaseState::fixed();
-    let mut workspace = robot.workspace();
     let mut jacobian = vec![0.0; 6 * robot.generalized_count()];
-    robot.jacobian(&base, &q, target, &mut workspace, &mut jacobian)?;
+    robot.jacobian(&q, target, &mut jacobian)?;
     ```
 
 === "C"
@@ -39,13 +37,12 @@ containers for results such as matrices.
 
 ## Model scope
 
-A workspace belongs to the model that created it, including Rust clones of that
-model. Passing a workspace from an unrelated model is an error even if both
-models have the same number of joints.
+Each `Robot` or `FloatingRobot` instance owns a workspace scoped to its immutable model. `fork()`
+creates fresh calculation storage while sharing that model.
 
 ## Parallel calculations
 
-A workspace is mutable and may participate in only one calculation at a time.
-Use a separate workspace per concurrent Rust or C call. Python serializes calls
-on one `Robot`; use separate robot instances for parallel work. C++ performs no
-internal locking, so use a separate `Robot` per worker.
+Each Rust `Robot` or `FloatingRobot` is mutable and may participate in only one
+calculation at a time. Use `fork()` to create an instance per concurrent calculation. Python
+serializes calls on one `Robot` or `FloatingRobot`; use separate robot instances for parallel work.
+C++ performs no internal locking, so use a separate `Robot` or `FloatingRobot` per worker.

@@ -52,5 +52,6 @@ robot。
 
 ## 模型状态与计算状态
 
-拓扑和惯性参数来自 URDF；关节位置、速度和加速度在每次计算时传入。基座位姿和运动
-保存在 robot 上，因为它们统一作用于所有计算，详见[固定基座与浮动基座](fixed-and-floating-bases.md)。
+拓扑和惯性参数来自 URDF；关节位置、速度和加速度在每次计算时传入。固定 `Robot`
+保存 base frame；浮动基的位姿、速度和加速度则作为 `BaseState` 在每次
+`FloatingRobot` 计算时传入，详见[固定基座与浮动基座](fixed-and-floating-bases.md)。

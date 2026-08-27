@@ -1,5 +1,7 @@
 mod support;
 
+use support::context::TestRootType as RootType;
+
 use approx::assert_relative_eq;
 use dynibo::{Error, Frame, IndexedLoad, InverseKinematicsOptions, Robot, Twist, Wrench};
 use nalgebra::{Matrix3, SMatrix, SVector, Translation3, UnitQuaternion, Vector3};
@@ -10,11 +12,11 @@ use support::{
 };
 
 fn test_arm() -> Robot {
-    SERIAL_ARM.robot(dynibo::BaseMode::Fixed)
+    SERIAL_ARM.robot(RootType::Fixed)
 }
 
 fn tree_arm() -> Robot {
-    TREE_ARM.robot(dynibo::BaseMode::Fixed)
+    TREE_ARM.robot(RootType::Fixed)
 }
 
 #[test]
@@ -37,7 +39,6 @@ fn supplied_base_frame_is_used_consistently_by_fixed_base_calculations() {
         Translation3::new(0.4, -0.3, 0.7),
         UnitQuaternion::from_euler_angles(0.35, -0.2, 0.45),
     );
-    let transformed_base = dynibo::BaseState::fixed_at(base).unwrap();
 
     let target = identity_robot.link_id("test_link_4").unwrap();
     let tool = Frame::translation(0.12, -0.04, 0.09);
@@ -45,12 +46,10 @@ fn supplied_base_frame_is_used_consistently_by_fixed_base_calculations() {
     let qd = [-0.3, 0.5, -0.2, 0.8];
     let qdd = [0.7, -0.4, 0.1, 0.3];
 
-    let identity_frame = identity_robot
-        .forward_kinematics(&dynibo::BaseState::fixed(), &q, target)
-        .unwrap();
-    let transformed_frame = identity_robot
-        .forward_kinematics(&transformed_base, &q, target)
-        .unwrap();
+    let identity_frame = identity_robot.forward_kinematics(&q, target).unwrap();
+    let mut transformed_robot = identity_robot.fork();
+    transformed_robot.set_base_frame(base).unwrap();
+    let transformed_frame = transformed_robot.forward_kinematics(&q, target).unwrap();
     let expected_frame = base * identity_frame;
     assert_relative_eq!(
         transformed_frame.translation.vector,
@@ -64,10 +63,10 @@ fn supplied_base_frame_is_used_consistently_by_fixed_base_calculations() {
     );
 
     let identity_velocity = identity_robot
-        .forward_velocity_kinematics(&dynibo::BaseState::fixed(), &q, &qd, target, &tool)
+        .forward_velocity_kinematics(&q, &qd, target, &tool)
         .unwrap();
-    let transformed_velocity = identity_robot
-        .forward_velocity_kinematics(&transformed_base, &q, &qd, target, &tool)
+    let transformed_velocity = transformed_robot
+        .forward_velocity_kinematics(&q, &qd, target, &tool)
         .unwrap();
     assert_relative_eq!(
         transformed_velocity.angular,
@@ -81,10 +80,10 @@ fn supplied_base_frame_is_used_consistently_by_fixed_base_calculations() {
     );
 
     let identity_acceleration = identity_robot
-        .forward_acceleration_kinematics(&dynibo::BaseState::fixed(), &q, &qd, &qdd, target)
+        .forward_acceleration_kinematics(&q, &qd, &qdd, target)
         .unwrap();
-    let transformed_acceleration = identity_robot
-        .forward_acceleration_kinematics(&transformed_base, &q, &qd, &qdd, target)
+    let transformed_acceleration = transformed_robot
+        .forward_acceleration_kinematics(&q, &qd, &qdd, target)
         .unwrap();
     assert_relative_eq!(
         transformed_acceleration.angular,
@@ -99,24 +98,17 @@ fn supplied_base_frame_is_used_consistently_by_fixed_base_calculations() {
 
     let mut identity_gravity = [0.0; 4];
     let mut transformed_gravity = [0.0; 4];
-    identity_robot
-        .gravity(&transformed_base, &q, &[], &mut transformed_gravity)
+    transformed_robot
+        .gravity(&q, &[], &mut transformed_gravity)
         .unwrap();
     identity_robot
-        .gravity(&dynibo::BaseState::fixed(), &q, &[], &mut identity_gravity)
+        .gravity(&q, &[], &mut identity_gravity)
         .unwrap();
     assert_ne!(transformed_gravity, identity_gravity);
 
     let mut transformed_inverse = [0.0; 4];
-    identity_robot
-        .inverse_dynamics(
-            &transformed_base,
-            &q,
-            &[0.0; 4],
-            &[0.0; 4],
-            &[],
-            &mut transformed_inverse,
-        )
+    transformed_robot
+        .inverse_dynamics(&q, &[0.0; 4], &[0.0; 4], &[], &mut transformed_inverse)
         .unwrap();
     assert_slice_close(&transformed_inverse, &transformed_gravity);
 }
@@ -161,9 +153,7 @@ fn all_dynamic_calculations_match_pinocchio_references() {
     );
     let tool = Frame::translation(0.1, -0.03, 0.2);
 
-    let frame = robot
-        .forward_kinematics(&dynibo::BaseState::fixed(), &q, target_id)
-        .unwrap();
+    let frame = robot.forward_kinematics(&q, target_id).unwrap();
     let expected_rotation = Matrix3::from_column_slice(&[
         0.7495962650805186,
         0.15195068551164034,
@@ -187,9 +177,7 @@ fn all_dynamic_calculations_match_pinocchio_references() {
     );
 
     let mut jacobian = vec![f64::NAN; 24];
-    robot
-        .jacobian(&dynibo::BaseState::fixed(), &q, target_id, &mut jacobian)
-        .unwrap();
+    robot.jacobian(&q, target_id, &mut jacobian).unwrap();
     let expected_jacobian = SMatrix::<f64, 6, 4>::from_column_slice(&[
         0.0,
         0.0,
@@ -222,9 +210,9 @@ fn all_dynamic_calculations_match_pinocchio_references() {
         epsilon = 2.0e-12
     );
 
-    let base_state = dynibo::BaseState::fixed_at(base).unwrap();
+    robot.set_base_frame(base).unwrap();
     let velocity = robot
-        .forward_velocity_kinematics(&base_state, &q, &qd, target_id, &tool)
+        .forward_velocity_kinematics(&q, &qd, target_id, &tool)
         .unwrap();
     let mut tool_jacobian = expected_jacobian;
     let offset_world = frame.rotation * tool.translation.vector;
@@ -248,8 +236,9 @@ fn all_dynamic_calculations_match_pinocchio_references() {
         epsilon = 2.0e-12
     );
 
+    robot.set_base_frame(Frame::identity()).unwrap();
     let acceleration = robot
-        .forward_acceleration_kinematics(&dynibo::BaseState::fixed(), &q, &qd, &qdd, target_id)
+        .forward_acceleration_kinematics(&q, &qd, &qdd, target_id)
         .unwrap();
     assert_relative_eq!(
         acceleration.to_vector(),
@@ -265,9 +254,7 @@ fn all_dynamic_calculations_match_pinocchio_references() {
     );
 
     let mut gravity = vec![f64::NAN; 4];
-    robot
-        .gravity(&dynibo::BaseState::fixed(), &q, &[], &mut gravity)
-        .unwrap();
+    robot.gravity(&q, &[], &mut gravity).unwrap();
     assert_relative_eq!(
         SVector::<f64, 4>::from_column_slice(&gravity),
         SVector::<f64, 4>::new(
@@ -281,14 +268,7 @@ fn all_dynamic_calculations_match_pinocchio_references() {
 
     let mut dynamics = vec![f64::NAN; 4];
     robot
-        .inverse_dynamics(
-            &dynibo::BaseState::fixed(),
-            &q,
-            &qd,
-            &qdd,
-            &[],
-            &mut dynamics,
-        )
+        .inverse_dynamics(&q, &qd, &qdd, &[], &mut dynamics)
         .unwrap();
     assert_relative_eq!(
         SVector::<f64, 4>::from_column_slice(&dynamics),
@@ -302,13 +282,10 @@ fn all_dynamic_calculations_match_pinocchio_references() {
     );
 
     let desired_q = [0.2, 1.0, -1.2, 0.45];
-    let desired = robot
-        .forward_kinematics(&dynibo::BaseState::fixed(), &desired_q, target_id)
-        .unwrap();
+    let desired = robot.forward_kinematics(&desired_q, target_id).unwrap();
     let mut solution = vec![f64::NAN; 4];
     robot
         .inverse_kinematics(
-            &dynibo::BaseState::fixed(),
             &[0.0; 4],
             target_id,
             &desired,
@@ -316,9 +293,7 @@ fn all_dynamic_calculations_match_pinocchio_references() {
             &mut solution,
         )
         .unwrap();
-    let solved = robot
-        .forward_kinematics(&dynibo::BaseState::fixed(), &solution, target_id)
-        .unwrap();
+    let solved = robot.forward_kinematics(&solution, target_id).unwrap();
     assert_relative_eq!(solved, desired, epsilon = 1.0e-6);
 }
 
@@ -337,20 +312,12 @@ fn repeated_calculations_clear_internal_scratch_state() {
     let mut first = vec![0.0; 7];
     let mut middle = vec![0.0; 7];
     let mut third = vec![0.0; 7];
-    robot
-        .gravity(&dynibo::BaseState::fixed(), &q_a, &[load], &mut first)
-        .unwrap();
-    robot
-        .gravity(&dynibo::BaseState::fixed(), &q_b, &[], &mut middle)
-        .unwrap();
-    robot
-        .gravity(&dynibo::BaseState::fixed(), &q_a, &[load], &mut third)
-        .unwrap();
+    robot.gravity(&q_a, &[load], &mut first).unwrap();
+    robot.gravity(&q_b, &[], &mut middle).unwrap();
+    robot.gravity(&q_a, &[load], &mut third).unwrap();
     assert_slice_close(&first, &third);
     let mut expected_middle = vec![0.0; 7];
-    robot
-        .gravity(&dynibo::BaseState::fixed(), &q_b, &[], &mut expected_middle)
-        .unwrap();
+    robot.gravity(&q_b, &[], &mut expected_middle).unwrap();
     assert_slice_close(&middle, &expected_middle);
 
     let zero = [0.0; 7];
@@ -358,86 +325,39 @@ fn repeated_calculations_clear_internal_scratch_state() {
     let mut middle_rnea = vec![0.0; 7];
     let mut third_rnea = vec![0.0; 7];
     robot
-        .inverse_dynamics(
-            &dynibo::BaseState::fixed(),
-            &q_a,
-            &zero,
-            &zero,
-            &[load, load],
-            &mut first_rnea,
-        )
+        .inverse_dynamics(&q_a, &zero, &zero, &[load, load], &mut first_rnea)
         .unwrap();
     robot
-        .inverse_dynamics(
-            &dynibo::BaseState::fixed(),
-            &q_b,
-            &zero,
-            &zero,
-            &[],
-            &mut middle_rnea,
-        )
+        .inverse_dynamics(&q_b, &zero, &zero, &[], &mut middle_rnea)
         .unwrap();
     robot
-        .inverse_dynamics(
-            &dynibo::BaseState::fixed(),
-            &q_a,
-            &zero,
-            &zero,
-            &[load, load],
-            &mut third_rnea,
-        )
+        .inverse_dynamics(&q_a, &zero, &zero, &[load, load], &mut third_rnea)
         .unwrap();
     assert_slice_close(&first_rnea, &third_rnea);
     let mut expected_middle_rnea = vec![0.0; 7];
     robot
-        .inverse_dynamics(
-            &dynibo::BaseState::fixed(),
-            &q_b,
-            &zero,
-            &zero,
-            &[],
-            &mut expected_middle_rnea,
-        )
+        .inverse_dynamics(&q_b, &zero, &zero, &[], &mut expected_middle_rnea)
         .unwrap();
     assert_slice_close(&middle_rnea, &expected_middle_rnea);
 
     let mut jacobian = vec![f64::NAN; 42];
-    robot
-        .jacobian(&dynibo::BaseState::fixed(), &q_a, left_id, &mut jacobian)
-        .unwrap();
-    robot
-        .jacobian(&dynibo::BaseState::fixed(), &q_b, right_id, &mut jacobian)
-        .unwrap();
+    robot.jacobian(&q_a, left_id, &mut jacobian).unwrap();
+    robot.jacobian(&q_b, right_id, &mut jacobian).unwrap();
     let mut expected_jacobian = vec![0.0; 42];
     robot
-        .jacobian(
-            &dynibo::BaseState::fixed(),
-            &q_b,
-            right_id,
-            &mut expected_jacobian,
-        )
+        .jacobian(&q_b, right_id, &mut expected_jacobian)
         .unwrap();
     assert_slice_close(&jacobian, &expected_jacobian);
+    robot.jacobian(&q_a, left_id, &mut jacobian).unwrap();
     robot
-        .jacobian(&dynibo::BaseState::fixed(), &q_a, left_id, &mut jacobian)
-        .unwrap();
-    robot
-        .jacobian(
-            &dynibo::BaseState::fixed(),
-            &q_a,
-            left_id,
-            &mut expected_jacobian,
-        )
+        .jacobian(&q_a, left_id, &mut expected_jacobian)
         .unwrap();
     assert_slice_close(&jacobian, &expected_jacobian);
 
-    let desired = robot
-        .forward_kinematics(&dynibo::BaseState::fixed(), &q_a, left_id)
-        .unwrap();
+    let desired = robot.forward_kinematics(&q_a, left_id).unwrap();
     let mut solution = vec![0.0; 7];
     robot
         .inverse_kinematics(
-            &dynibo::BaseState::fixed(),
             &[0.0; 7],
             left_id,
             &desired,
@@ -446,9 +366,7 @@ fn repeated_calculations_clear_internal_scratch_state() {
         )
         .unwrap();
     assert_relative_eq!(
-        robot
-            .forward_kinematics(&dynibo::BaseState::fixed(), &solution, left_id)
-            .unwrap(),
+        robot.forward_kinematics(&solution, left_id).unwrap(),
         desired,
         epsilon = 1.0e-6
     );
@@ -463,11 +381,11 @@ fn dynamic_api_rejects_wrong_models_and_lengths() {
     let q = [0.0; 4];
 
     assert!(matches!(
-        robot_a.forward_kinematics(&dynibo::BaseState::fixed(), &q, target_b),
+        robot_a.forward_kinematics(&q, target_b),
         Err(Error::InvalidLinkId)
     ));
     assert!(matches!(
-        robot_a.forward_kinematics(&dynibo::BaseState::fixed(), &q[..3], target_a),
+        robot_a.forward_kinematics(&q[..3], target_a),
         Err(Error::WrongSliceLength {
             slice: "q",
             expected: 4,
@@ -476,12 +394,7 @@ fn dynamic_api_rejects_wrong_models_and_lengths() {
     ));
     let mut wrong_jacobian = [0.0; 23];
     assert!(matches!(
-        robot_a.jacobian(
-            &dynibo::BaseState::fixed(),
-            &q,
-            target_a,
-            &mut wrong_jacobian
-        ),
+        robot_a.jacobian(&q, target_a, &mut wrong_jacobian),
         Err(Error::WrongSliceLength {
             slice: "jacobian output",
             expected: 24,
@@ -494,21 +407,12 @@ fn dynamic_api_rejects_wrong_models_and_lengths() {
     };
     let mut output = [0.0; 4];
     assert!(matches!(
-        robot_a.gravity(
-            &dynibo::BaseState::fixed(),
-            &q,
-            &[invalid_load],
-            &mut output,
-        ),
+        robot_a.gravity(&q, &[invalid_load], &mut output,),
         Err(Error::InvalidLinkId)
     ));
 
     let mut clone = robot_a.fork();
-    assert!(
-        clone
-            .forward_kinematics(&dynibo::BaseState::fixed(), &q, target_a)
-            .is_ok()
-    );
+    assert!(clone.forward_kinematics(&q, target_a).is_ok());
 }
 
 #[test]
@@ -524,41 +428,18 @@ fn every_dynamic_api_validates_links_and_slices() {
     let mut jacobian = [0.0; 24];
     let options = InverseKinematicsOptions::default();
     let identity = Frame::identity();
-    assert_wrong_length(
-        robot.jacobian(&dynibo::BaseState::fixed(), &short, target, &mut jacobian),
-        "q",
-    );
-    assert_invalid_link(robot.jacobian(
-        &dynibo::BaseState::fixed(),
-        &q,
-        foreign_target,
-        &mut jacobian,
-    ));
+    assert_wrong_length(robot.jacobian(&short, target, &mut jacobian), "q");
+    assert_invalid_link(robot.jacobian(&q, foreign_target, &mut jacobian));
 
     assert_wrong_length(
-        robot.inverse_kinematics(
-            &dynibo::BaseState::fixed(),
-            &short,
-            target,
-            &identity,
-            options,
-            &mut output,
-        ),
+        robot.inverse_kinematics(&short, target, &identity, options, &mut output),
         "initial_q",
     );
     assert_wrong_length(
-        robot.inverse_kinematics(
-            &dynibo::BaseState::fixed(),
-            &q,
-            target,
-            &identity,
-            options,
-            &mut short_output,
-        ),
+        robot.inverse_kinematics(&q, target, &identity, options, &mut short_output),
         "inverse kinematics output",
     );
     assert_invalid_link(robot.inverse_kinematics(
-        &dynibo::BaseState::fixed(),
         &q,
         foreign_target,
         &identity,
@@ -567,118 +448,53 @@ fn every_dynamic_api_validates_links_and_slices() {
     ));
 
     assert_wrong_length(
-        robot.forward_velocity_kinematics(
-            &dynibo::BaseState::fixed(),
-            &short,
-            &q,
-            target,
-            &identity,
-        ),
+        robot.forward_velocity_kinematics(&short, &q, target, &identity),
         "q",
     );
     assert_wrong_length(
-        robot.forward_velocity_kinematics(
-            &dynibo::BaseState::fixed(),
-            &q,
-            &short,
-            target,
-            &identity,
-        ),
+        robot.forward_velocity_kinematics(&q, &short, target, &identity),
         "qd",
     );
-    assert_invalid_link(robot.forward_velocity_kinematics(
-        &dynibo::BaseState::fixed(),
-        &q,
-        &q,
-        foreign_target,
-        &identity,
-    ));
+    assert_invalid_link(robot.forward_velocity_kinematics(&q, &q, foreign_target, &identity));
 
     assert_wrong_length(
-        robot.forward_acceleration_kinematics(&dynibo::BaseState::fixed(), &short, &q, &q, target),
+        robot.forward_acceleration_kinematics(&short, &q, &q, target),
         "q",
     );
     assert_wrong_length(
-        robot.forward_acceleration_kinematics(&dynibo::BaseState::fixed(), &q, &short, &q, target),
+        robot.forward_acceleration_kinematics(&q, &short, &q, target),
         "qd",
     );
     assert_wrong_length(
-        robot.forward_acceleration_kinematics(&dynibo::BaseState::fixed(), &q, &q, &short, target),
+        robot.forward_acceleration_kinematics(&q, &q, &short, target),
         "qdd",
     );
-    assert_invalid_link(robot.forward_acceleration_kinematics(
-        &dynibo::BaseState::fixed(),
-        &q,
-        &q,
-        &q,
-        foreign_target,
-    ));
+    assert_invalid_link(robot.forward_acceleration_kinematics(&q, &q, &q, foreign_target));
+
+    assert_wrong_length(robot.gravity(&short, &[], &mut output), "q");
+    assert_wrong_length(robot.gravity(&q, &[], &mut short_output), "gravity output");
 
     assert_wrong_length(
-        robot.gravity(&dynibo::BaseState::fixed(), &short, &[], &mut output),
+        robot.inverse_dynamics(&short, &q, &q, &[], &mut output),
         "q",
     );
     assert_wrong_length(
-        robot.gravity(&dynibo::BaseState::fixed(), &q, &[], &mut short_output),
-        "gravity output",
-    );
-
-    assert_wrong_length(
-        robot.inverse_dynamics(
-            &dynibo::BaseState::fixed(),
-            &short,
-            &q,
-            &q,
-            &[],
-            &mut output,
-        ),
-        "q",
-    );
-    assert_wrong_length(
-        robot.inverse_dynamics(
-            &dynibo::BaseState::fixed(),
-            &q,
-            &short,
-            &q,
-            &[],
-            &mut output,
-        ),
+        robot.inverse_dynamics(&q, &short, &q, &[], &mut output),
         "qd",
     );
     assert_wrong_length(
-        robot.inverse_dynamics(
-            &dynibo::BaseState::fixed(),
-            &q,
-            &q,
-            &short,
-            &[],
-            &mut output,
-        ),
+        robot.inverse_dynamics(&q, &q, &short, &[], &mut output),
         "qdd",
     );
     assert_wrong_length(
-        robot.inverse_dynamics(
-            &dynibo::BaseState::fixed(),
-            &q,
-            &q,
-            &q,
-            &[],
-            &mut short_output,
-        ),
+        robot.inverse_dynamics(&q, &q, &q, &[], &mut short_output),
         "inverse dynamics output",
     );
     let invalid_load = IndexedLoad {
         link: foreign_target,
         wrench: Wrench::zeros(),
     };
-    assert_invalid_link(robot.inverse_dynamics(
-        &dynibo::BaseState::fixed(),
-        &q,
-        &q,
-        &q,
-        &[invalid_load],
-        &mut output,
-    ));
+    assert_invalid_link(robot.inverse_dynamics(&q, &q, &q, &[invalid_load], &mut output));
 }
 
 #[test]
@@ -696,62 +512,29 @@ fn matrix_and_jacobian_derivative_apis_validate_links_and_slices() {
     let mut output = [0.0; 4];
     let mut short_output = [0.0; 3];
     assert_wrong_length(
-        robot.jacobian_derivative(
-            &dynibo::BaseState::fixed(),
-            &short,
-            &q,
-            target,
-            &mut derivative,
-        ),
+        robot.jacobian_derivative(&short, &q, target, &mut derivative),
         "q",
     );
     assert_wrong_length(
-        robot.jacobian_derivative(
-            &dynibo::BaseState::fixed(),
-            &q,
-            &short,
-            target,
-            &mut derivative,
-        ),
+        robot.jacobian_derivative(&q, &short, target, &mut derivative),
         "qd",
     );
     assert_wrong_length(
-        robot.jacobian_derivative(
-            &dynibo::BaseState::fixed(),
-            &q,
-            &q,
-            target,
-            &mut short_derivative,
-        ),
+        robot.jacobian_derivative(&q, &q, target, &mut short_derivative),
         "jacobian derivative output",
     );
-    assert_invalid_link(robot.jacobian_derivative(
-        &dynibo::BaseState::fixed(),
-        &q,
-        &q,
-        foreign_target,
-        &mut derivative,
-    ));
+    assert_invalid_link(robot.jacobian_derivative(&q, &q, foreign_target, &mut derivative));
 
+    assert_wrong_length(robot.mass_matrix(&short, &mut matrix), "q");
     assert_wrong_length(
-        robot.mass_matrix(&dynibo::BaseState::fixed(), &short, &mut matrix),
-        "q",
-    );
-    assert_wrong_length(
-        robot.mass_matrix(&dynibo::BaseState::fixed(), &q, &mut short_matrix),
+        robot.mass_matrix(&q, &mut short_matrix),
         "mass matrix output",
     );
 
+    assert_wrong_length(robot.velocity_product_forces(&short, &q, &mut output), "q");
+    assert_wrong_length(robot.velocity_product_forces(&q, &short, &mut output), "qd");
     assert_wrong_length(
-        robot.velocity_product_forces(&dynibo::BaseState::fixed(), &short, &q, &mut output),
-        "q",
-    );
-    assert_wrong_length(
-        robot.velocity_product_forces(&dynibo::BaseState::fixed(), &q, &short, &mut output),
-        "qd",
-    );
-    assert_wrong_length(
-        robot.velocity_product_forces(&dynibo::BaseState::fixed(), &q, &q, &mut short_output),
+        robot.velocity_product_forces(&q, &q, &mut short_output),
         "velocity product output",
     );
 }
@@ -764,13 +547,10 @@ fn inverse_kinematics_skips_fixed_joints_on_the_ancestor_path() {
         Robot::from_urdf(fixture_path("oracle_mixed.urdf")).expect("oracle URDF must load");
     let target = robot.link_id("tool").unwrap();
     let q = [0.3, 0.12, -0.4];
-    let desired = robot
-        .forward_kinematics(&dynibo::BaseState::fixed(), &q, target)
-        .unwrap();
+    let desired = robot.forward_kinematics(&q, target).unwrap();
     let mut solution = [0.0; 3];
     robot
         .inverse_kinematics(
-            &dynibo::BaseState::fixed(),
             &[0.0; 3],
             target,
             &desired,
@@ -778,9 +558,7 @@ fn inverse_kinematics_skips_fixed_joints_on_the_ancestor_path() {
             &mut solution,
         )
         .unwrap();
-    let reached = robot
-        .forward_kinematics(&dynibo::BaseState::fixed(), &solution, target)
-        .unwrap();
+    let reached = robot.forward_kinematics(&solution, target).unwrap();
     assert_relative_eq!(reached, desired, epsilon = 1.0e-6);
 }
 
@@ -789,33 +567,17 @@ fn dynamic_root_results_are_zero_or_identity() {
     let mut robot = test_arm();
     let root = robot.link_id("test_base_link").unwrap();
     let q = [0.1, -0.2, 0.3, -0.4];
-    let frame = robot
-        .forward_kinematics(&dynibo::BaseState::fixed(), &q, root)
-        .unwrap();
+    let frame = robot.forward_kinematics(&q, root).unwrap();
     assert_relative_eq!(frame, Frame::identity(), epsilon = 2.0e-12);
     let mut jacobian = [f64::NAN; 24];
-    robot
-        .jacobian(&dynibo::BaseState::fixed(), &q, root, &mut jacobian)
-        .unwrap();
+    robot.jacobian(&q, root, &mut jacobian).unwrap();
     assert_eq!(jacobian, [0.0; 24]);
     let acceleration = robot
-        .forward_acceleration_kinematics(
-            &dynibo::BaseState::fixed(),
-            &q,
-            &[0.2; 4],
-            &[0.3; 4],
-            root,
-        )
+        .forward_acceleration_kinematics(&q, &[0.2; 4], &[0.3; 4], root)
         .unwrap();
     assert_eq!(acceleration, Twist::zeros());
     let velocity = robot
-        .forward_velocity_kinematics(
-            &dynibo::BaseState::fixed(),
-            &q,
-            &[0.2; 4],
-            root,
-            &Frame::identity(),
-        )
+        .forward_velocity_kinematics(&q, &[0.2; 4], root, &Frame::identity())
         .unwrap();
     assert_eq!(velocity, Twist::zeros());
 
@@ -825,11 +587,7 @@ fn dynamic_root_results_are_zero_or_identity() {
     };
     let mut baseline = [0.0; 4];
     let mut loaded = [f64::NAN; 4];
-    robot
-        .gravity(&dynibo::BaseState::fixed(), &q, &[], &mut baseline)
-        .unwrap();
-    robot
-        .gravity(&dynibo::BaseState::fixed(), &q, &[root_load], &mut loaded)
-        .unwrap();
+    robot.gravity(&q, &[], &mut baseline).unwrap();
+    robot.gravity(&q, &[root_load], &mut loaded).unwrap();
     assert_slice_close(&loaded, &baseline);
 }

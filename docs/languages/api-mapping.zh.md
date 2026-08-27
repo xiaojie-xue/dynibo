@@ -10,14 +10,14 @@ Rust 使用 crate 和 type namespace，Python 使用 module 和 class，C++ 使�
 | 概念 | Rust | Python | C++ | C |
 |---|---|---|---|---|
 | 加载固定基模型 | `Robot::from_urdf` | `Robot.from_urdf` | `dynibo::Robot(path)` | `dynibo_robot_from_urdf` |
-| 指定 base mode 加载 | `Robot::from_urdf_with_base` | `Robot.from_urdf_with_base` | `dynibo::Robot(path, mode)` | `dynibo_robot_from_urdf_with_base` |
-| 查找 link | `robot.link_id` | `robot.link_id` | `robot.link_id` | `dynibo_robot_link_id` |
-| 正运动学 | `robot.forward_kinematics` | `robot.forward_kinematics` | `robot.forward_kinematics` | `dynibo_forward_kinematics` |
-| 雅可比矩阵 | `robot.jacobian` | `robot.jacobian` | `robot.jacobian` | `dynibo_jacobian` |
-| 质量矩阵 | `robot.mass_matrix` | `robot.mass_matrix` | `robot.mass_matrix` | `dynibo_mass_matrix` |
-| 逆动力学 | `robot.inverse_dynamics` | `robot.inverse_dynamics` | `robot.inverse_dynamics` | `dynibo_inverse_dynamics` |
-| 正动力学 | `robot.forward_dynamics` | `robot.forward_dynamics` | `robot.forward_dynamics` | `dynibo_forward_dynamics` |
-| Workspace | 显式参数 | 由 `Robot` 持有 | 由 `Robot` 持有 | 显式 handle |
+| 加载浮动基模型 | `FloatingRobot::from_urdf` | `FloatingRobot.from_urdf` | `dynibo::FloatingRobot(path)` | `dynibo_floating_robot_from_urdf` |
+| 查找 fixed/floating link | `robot.link_id` | `robot.link_id` | `robot.link_id` | `dynibo_robot_link_id` / `dynibo_floating_robot_link_id` |
+| 固定基正运动学 | `Robot::forward_kinematics` | `Robot.forward_kinematics` | `Robot.forward_kinematics` | `dynibo_forward_kinematics` |
+| 浮动基正运动学 | `FloatingRobot::forward_kinematics(base, …)` | `FloatingRobot.forward_kinematics(base, …)` | `FloatingRobot.forward_kinematics(base, …)` | `dynibo_floating_forward_kinematics` |
+| fixed/floating 雅可比矩阵 | `Robot` / `FloatingRobot` methods | `Robot` / `FloatingRobot` methods | `Robot` / `FloatingRobot` methods | `dynibo_jacobian` / `dynibo_floating_jacobian` |
+| 固定基质量/动力学 | `Robot` methods | `Robot` methods | `Robot` methods | `dynibo_mass_matrix`, `dynibo_inverse_dynamics`, `dynibo_forward_dynamics` |
+| 浮动基质量/动力学 | 带 `base` 的 `FloatingRobot` methods | 带 `base` 的 `FloatingRobot` methods | 带 `base` 的 `FloatingRobot` methods | `dynibo_floating_mass_matrix`, `dynibo_floating_inverse_dynamics`, `dynibo_floating_forward_dynamics` |
+| fixed/floating workspace | 由 typed robot 持有 | 由 typed robot 持有 | 由 typed robot 持有 | `DyniboWorkspace` / `DyniboFloatingWorkspace` |
 | 矩阵输出 | 调用方 buffer | 一维 tuple | 一维 `std::vector` | 调用方 buffer |
 | 错误 | `Result<T>` | 异常 | `dynibo::Error` | `DyniboStatus` |
 

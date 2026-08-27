@@ -24,12 +24,17 @@ Copy the string when it must outlive the next call.
 
 ## Thread-safety rules
 
-- Immutable model queries may be read when no thread is mutating base state.
-- One mutable workspace cannot be used by simultaneous calculations.
-- Rust and C callers should allocate one workspace per concurrent calculation.
-- Python serializes methods on one `Robot`; separate instances enable parallel
-  native calls.
-- The C++ wrapper has no internal lock; use one `dynibo::Robot` per worker.
+- Immutable model queries may be read when no thread is changing a fixed
+  `Robot` base frame.
+- Each Rust `Robot` or `FloatingRobot` owns one mutable workspace; calculation
+  methods require mutable access. Use `fork()` to obtain an independent
+  instance for each concurrent calculation.
+- C callers create one typed workspace per concurrent calculation:
+  `DyniboWorkspace` for fixed and `DyniboFloatingWorkspace` for floating.
+- Python serializes methods on one `Robot` or `FloatingRobot`; separate
+  instances enable parallel native calls.
+- The C++ wrapper has no internal lock; use one `dynibo::Robot` or
+  `dynibo::FloatingRobot` per worker.
 - Never destroy or move an object while another thread is using its handles.
 
 ## Recovery

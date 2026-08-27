@@ -32,4 +32,24 @@ value objects. Matrix methods return flat tuples in column-major order; see
 Each `Robot` owns one native workspace. Calls on the same instance are
 serialized. Use separate robot instances when calculations must run in parallel.
 
+## Floating bases
+
+`FloatingRobot` has its own workspace and never stores a mutable base state.
+Supply `BaseState` as the first argument to every calculation:
+
+```python
+from dynibo import BaseState, FloatingRobot, Pose
+
+with FloatingRobot.from_urdf("robot.urdf") as robot:
+    target = robot.link_id("tool")
+    q = [0.0] * robot.joint_count
+    base = BaseState(frame=Pose(translation=(0.1, 0.0, 0.0)))
+    pose = robot.forward_kinematics(base, q, target)
+    mass = robot.mass_matrix(base, q)
+```
+
+For floating robots, `generalized_count == joint_count + 6`; generalized
+outputs begin with world-frame angular then linear base components. Only fixed
+`Robot` exposes `set_base_frame()`.
+
 [Open the Python API reference](../reference/python.md){ .md-button }

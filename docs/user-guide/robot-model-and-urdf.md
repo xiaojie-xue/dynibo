@@ -56,6 +56,7 @@ data or use it with an independently loaded robot.
 ## Model state and calculation state
 
 Topology and inertial data come from URDF. Joint position, velocity, and
-acceleration are supplied to each calculation. Base pose and motion are stored
-on the robot because they apply consistently to all calculations; see [Fixed
-and Floating Bases](fixed-and-floating-bases.md).
+acceleration are supplied to each calculation. A fixed `Robot` persists its
+base frame; floating pose, velocity, and acceleration are the `BaseState`
+passed to each `FloatingRobot` calculation. See [Fixed and Floating
+Bases](fixed-and-floating-bases.md).

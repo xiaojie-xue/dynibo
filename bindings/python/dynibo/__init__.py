@@ -1,28 +1,30 @@
 """Python interface to the dynibo robot kinematics and dynamics library."""
 
 from ._native import (
-    BaseMode,
+    BaseState,
     DyniboError,
     IkOptions,
     Load,
     ModelError,
     PanicError,
     Pose,
+    FloatingRobot,
     Robot,
     SolverError,
     Twist,
 )
 
 __all__ = [
-    "BaseMode",
+    "BaseState",
     "DyniboError",
     "IkOptions",
     "Load",
     "ModelError",
     "PanicError",
     "Pose",
+    "FloatingRobot",
     "Robot",
     "SolverError",
     "Twist",
 ]
-__version__ = "0.3.0"
+__version__ = "0.4.0"

@@ -2,22 +2,17 @@ use nalgebra::Vector3;
 
 use crate::{BaseState, Frame, JointType, Result, Twist};
 
-use super::super::{LinkId, Model, Robot, Workspace};
+use super::super::{FloatingRobot, LinkId, Model, Robot, Workspace};
 
 impl Robot {
     /// Computes the world frame of a target link.
     ///
     /// # Errors
     ///
-    /// Returns an error for an invalid base state, input length, or link ID.
-    pub fn forward_kinematics(
-        &mut self,
-        base: &BaseState,
-        q: &[f64],
-        target: LinkId,
-    ) -> Result<Frame> {
+    /// Returns an error for an invalid input length or link ID.
+    pub fn forward_kinematics(&mut self, q: &[f64], target: LinkId) -> Result<Frame> {
         self.model
-            .forward_kinematics(base, q, target, &mut self.workspace)
+            .forward_kinematics(&self.world_from_root, q, target, &mut self.workspace)
     }
 
     /// Computes the world-expressed spatial velocity of a target-link point.
@@ -26,7 +21,63 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error for an invalid base state, input length, or link ID.
+    /// Returns an error for an invalid input length or link ID.
+    pub fn forward_velocity_kinematics(
+        &mut self,
+        q: &[f64],
+        qd: &[f64],
+        target: LinkId,
+        tool: &Frame,
+    ) -> Result<Twist> {
+        self.model.forward_velocity_kinematics(
+            &self.world_from_root,
+            Twist::zeros(),
+            q,
+            qd,
+            target,
+            tool,
+            &mut self.workspace,
+        )
+    }
+
+    /// Computes the world-expressed spatial acceleration of a target-link origin.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid input length or link ID.
+    pub fn forward_acceleration_kinematics(
+        &mut self,
+        q: &[f64],
+        qd: &[f64],
+        qdd: &[f64],
+        target: LinkId,
+    ) -> Result<Twist> {
+        self.model.forward_acceleration_kinematics(
+            &self.world_from_root,
+            Twist::zeros(),
+            Twist::zeros(),
+            q,
+            qd,
+            qdd,
+            target,
+            &mut self.workspace,
+        )
+    }
+}
+
+impl FloatingRobot {
+    /// Computes the world frame of a target link.
+    pub fn forward_kinematics(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        target: LinkId,
+    ) -> Result<Frame> {
+        self.model
+            .forward_kinematics(base.frame(), q, target, &mut self.workspace)
+    }
+
+    /// Computes the world-expressed spatial velocity of a target-link point.
     pub fn forward_velocity_kinematics(
         &mut self,
         base: &BaseState,
@@ -35,15 +86,18 @@ impl Robot {
         target: LinkId,
         tool: &Frame,
     ) -> Result<Twist> {
-        self.model
-            .forward_velocity_kinematics(base, q, qd, target, tool, &mut self.workspace)
+        self.model.forward_velocity_kinematics(
+            base.frame(),
+            base.velocity(),
+            q,
+            qd,
+            target,
+            tool,
+            &mut self.workspace,
+        )
     }
 
     /// Computes the world-expressed spatial acceleration of a target-link origin.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for an invalid base state, input length, or link ID.
     pub fn forward_acceleration_kinematics(
         &mut self,
         base: &BaseState,
@@ -52,8 +106,16 @@ impl Robot {
         qdd: &[f64],
         target: LinkId,
     ) -> Result<Twist> {
-        self.model
-            .forward_acceleration_kinematics(base, q, qd, qdd, target, &mut self.workspace)
+        self.model.forward_acceleration_kinematics(
+            base.frame(),
+            base.velocity(),
+            base.acceleration(),
+            q,
+            qd,
+            qdd,
+            target,
+            &mut self.workspace,
+        )
     }
 }
 
@@ -72,16 +134,15 @@ impl Model {
     /// Returns an error for an invalid input length or link ID.
     fn forward_kinematics(
         &self,
-        base: &BaseState,
+        base_frame: &Frame,
         q: &[f64],
         target: LinkId,
         workspace: &mut Workspace,
     ) -> Result<Frame> {
-        self.validate_base_state(base)?;
         self.validate_slice("q", q)?;
         let target_index = self.validate_link_id(target)?;
         let depth = self.prepare_ancestor_path(target_index, &mut workspace.ancestor_path);
-        Ok(*base.frame() * self.target_frame_kernel(q, &workspace.ancestor_path[..depth]))
+        Ok(*base_frame * self.target_frame_kernel(q, &workspace.ancestor_path[..depth]))
     }
 
     /// Computes runtime-sized spatial velocity at a point on a target link.
@@ -97,16 +158,17 @@ impl Model {
     /// # Errors
     ///
     /// Returns an error for invalid input lengths or link ID.
+    #[allow(clippy::too_many_arguments)]
     fn forward_velocity_kinematics(
         &self,
-        base: &BaseState,
+        base_frame: &Frame,
+        base_velocity: Twist,
         q: &[f64],
         qd: &[f64],
         target: LinkId,
         tool: &Frame,
         workspace: &mut Workspace,
     ) -> Result<Twist> {
-        self.validate_base_state(base)?;
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
         let target_index = self.validate_link_id(target)?;
@@ -115,8 +177,8 @@ impl Model {
             qd,
             target_index,
             tool,
-            base.frame(),
-            base.velocity(),
+            base_frame,
+            base_velocity,
             &mut workspace.ancestor_path,
         ))
     }
@@ -132,16 +194,18 @@ impl Model {
     /// # Errors
     ///
     /// Returns an error for invalid input lengths or link ID.
+    #[allow(clippy::too_many_arguments)]
     fn forward_acceleration_kinematics(
         &self,
-        base: &BaseState,
+        base_frame: &Frame,
+        base_velocity: Twist,
+        base_acceleration: Twist,
         q: &[f64],
         qd: &[f64],
         qdd: &[f64],
         target: LinkId,
         workspace: &mut Workspace,
     ) -> Result<Twist> {
-        self.validate_base_state(base)?;
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
         self.validate_slice("qdd", qdd)?;
@@ -153,12 +217,10 @@ impl Model {
             qdd,
             workspace.ancestor_path[..depth].iter().rev().copied(),
         );
-        let rotation = base.frame().rotation;
+        let rotation = base_frame.rotation;
         let offset = rotation * local_target.translation.vector;
         let relative_angular = rotation * relative_velocity.angular;
         let relative_linear = rotation * relative_velocity.linear;
-        let base_velocity = base.velocity();
-        let base_acceleration = base.acceleration();
         Ok(Twist::new(
             base_acceleration.angular
                 + base_velocity.angular.cross(&relative_angular)
