@@ -32,8 +32,9 @@ Jacobians begin with six base-motion columns.
 
 `forward_velocity_kinematics` accepts a tool pose relative to the target link
 and returns velocity at that tool point. `forward_acceleration_kinematics`
-returns acceleration at the target-link origin. Both include the base state
-stored on the robot.
+returns acceleration at the target-link origin. Fixed calculations use the
+frame stored on `Robot`; floating calculations use the `BaseState` supplied to
+that call.
 
 ## Inverse kinematics
 

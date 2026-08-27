@@ -48,9 +48,9 @@ $$
 $$
 
 For a floating base, input forces and output accelerations begin with
-world-frame angular and linear base components. The supplied base pose and
-velocity participate in the calculation; a floating base's stored acceleration
-is ignored because it is part of the result. A singular joint or floating-base articulated
+world-frame angular and linear base components. The supplied `BaseState` pose
+and velocity participate in the calculation; its acceleration is ignored
+because acceleration is the result. A singular joint or floating-base articulated
 inertia produces a solver error rather than non-finite acceleration.
 
 ## Calling the operations

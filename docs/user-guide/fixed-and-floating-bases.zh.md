@@ -28,28 +28,30 @@ URDF root link 必须声明 inertial block，并具有严格为正的质量。�
 === "Python"
 
     ```python
-    robot = Robot.from_urdf_with_base("robot.urdf", BaseMode.FLOATING)
-    robot.set_floating_base_state(frame, velocity, acceleration)
+    robot = FloatingRobot.from_urdf("robot.urdf")
+    base = BaseState(frame, velocity, acceleration)
+    forces = robot.inverse_dynamics(base, q, qd, qdd)
     ```
 
 === "C++"
 
     ```cpp
-    dynibo::Robot robot("robot.urdf", DYNIBO_BASE_FLOATING);
-    robot.set_floating_base_state(frame, velocity, acceleration);
+    dynibo::FloatingRobot robot("robot.urdf");
+    dynibo::BaseState base(frame, velocity, acceleration);
+    auto forces = robot.inverse_dynamics(base, q, qd, qdd);
     ```
 
 === "C"
 
     ```c
-    check(dynibo_robot_from_urdf_with_base(
-        "robot.urdf", DYNIBO_BASE_FLOATING, &robot));
-    check(dynibo_robot_set_floating_base_state(
-        robot, &frame, velocity, acceleration));
+    check(dynibo_floating_robot_from_urdf("robot.urdf", &robot));
+    DyniboBaseState base = {frame, velocity, acceleration};
+    check(dynibo_floating_inverse_dynamics(robot, workspace, &base,
+        q, qd, qdd, joint_count, loads, load_count, forces, generalized_count));
     ```
 
 关节数组长度仍然是 `J`，不要在开头添加四元数或六个基座值。Rust 计算方法显式接收
-`BaseState`；当前 Python 和 C 系列适配层为了 API 兼容仍保留 setter 状态。
+`BaseState`；所有语言的浮动计算都显式接收 state，handle 不保存可变状态。
 
 ## 对计算的影响
 
@@ -58,8 +60,9 @@ URDF root link 必须声明 inertial block，并具有严格为正的质量。�
 - 雅可比矩阵增加开头六个基座列。
 - 质量矩阵和广义力增加六个基座行或元素。
 - 正动力学在关节加速度之前返回六个世界坐标系基座加速度元素。
-- 正动力学使用传入的位姿和速度，但忽略保存的加速度。
+- 正动力学使用传入的位姿和速度，但忽略传入的基座加速度。
 - 逆运动学只在 `Robot` 上可用，`FloatingRobot` 不提供该方法。
 
-Rust 的基座状态是不可变计算输入，因此一个 robot 可以配合不同的状态和 workspace
-并发计算。
+Rust 的基座状态是不可变计算输入，因此同一个 `FloatingRobot` 可以按顺序配合不同的
+`BaseState` 复用。每个 `Robot` 和 `FloatingRobot` 都只拥有一个 workspace，计算方法
+需要可变访问；并行计算应调用 `fork()` 创建相互独立的实例。

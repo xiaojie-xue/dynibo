@@ -2,7 +2,7 @@
 
 mod support;
 
-use support::context::TestBaseMode as BaseMode;
+use support::context::TestRootType as RootType;
 
 use std::collections::HashMap;
 
@@ -117,7 +117,7 @@ fn generated_models_match_pinocchio() {
     for case in selected_model_cases(24) {
         let seed = case.seed;
         let base_mode = case.options.base_mode;
-        if base_mode != BaseMode::Fixed {
+        if base_mode != RootType::Fixed {
             continue;
         }
         let generated = generate_case(&case);
@@ -153,7 +153,7 @@ fn generated_models_match_pinocchio() {
                 },
             };
             let pinocchio = contexts.entry(target_name.clone()).or_insert_with(|| {
-                if base_mode == BaseMode::Fixed {
+                if base_mode == RootType::Fixed {
                     PinocchioContext::new(&robot, generated.path(), &target_name)
                 } else {
                     unreachable!("floating cases are handled by the typed floating oracle suite")
@@ -164,8 +164,8 @@ fn generated_models_match_pinocchio() {
                 .map(|load| pinocchio.load(&load.link_name, load.wrench))
                 .collect();
             let (pin_q, pin_qd, pin_qdd) = match base_mode {
-                BaseMode::Fixed => pinocchio.state(&state.q, &state.qd, &state.qdd),
-                BaseMode::Floating => pinocchio.floating_state(
+                RootType::Fixed => pinocchio.state(&state.q, &state.qd, &state.qdd),
+                RootType::Floating => pinocchio.floating_state(
                     &state.q,
                     &state.qd,
                     &state.qdd,
@@ -222,8 +222,8 @@ fn generated_models_match_pinocchio() {
                     ))),
                     AlgorithmCase::Jacobian { .. } => {
                         let values = match base_mode {
-                            BaseMode::Fixed => pinocchio.jacobian(&pin_q),
-                            BaseMode::Floating => pinocchio.floating_jacobian(&pin_q, base.frame()),
+                            RootType::Fixed => pinocchio.jacobian(&pin_q),
+                            RootType::Floating => pinocchio.floating_jacobian(&pin_q, base.frame()),
                         };
                         Ok(Observation::Matrix {
                             rows: 6,
@@ -233,8 +233,8 @@ fn generated_models_match_pinocchio() {
                     }
                     AlgorithmCase::JacobianDerivative { .. } => {
                         let values = match base_mode {
-                            BaseMode::Fixed => pinocchio.jacobian_derivative(&pin_q, &pin_qd),
-                            BaseMode::Floating => pinocchio.floating_jacobian_derivative(
+                            RootType::Fixed => pinocchio.jacobian_derivative(&pin_q, &pin_qd),
+                            RootType::Floating => pinocchio.floating_jacobian_derivative(
                                 &pin_q,
                                 &pin_qd,
                                 base.frame(),
@@ -249,8 +249,8 @@ fn generated_models_match_pinocchio() {
                     }
                     AlgorithmCase::MassMatrix => {
                         let values = match base_mode {
-                            BaseMode::Fixed => pinocchio.mass_matrix(&pin_q),
-                            BaseMode::Floating => {
+                            RootType::Fixed => pinocchio.mass_matrix(&pin_q),
+                            RootType::Floating => {
                                 pinocchio.floating_mass_matrix(&pin_q, base.frame())
                             }
                         };
@@ -262,8 +262,8 @@ fn generated_models_match_pinocchio() {
                         })
                     }
                     AlgorithmCase::Gravity => Ok(Observation::Vector(match base_mode {
-                        BaseMode::Fixed => pinocchio.gravity_with_loads(&pin_q, &pinocchio_loads),
-                        BaseMode::Floating => pinocchio.floating_gravity_with_loads(
+                        RootType::Fixed => pinocchio.gravity_with_loads(&pin_q, &pinocchio_loads),
+                        RootType::Floating => pinocchio.floating_gravity_with_loads(
                             &pin_q,
                             base.frame(),
                             &pinocchio_loads,
@@ -272,13 +272,13 @@ fn generated_models_match_pinocchio() {
                     AlgorithmCase::VelocityProduct => {
                         let zero = vec![0.0; state.q.len()];
                         let values = match base_mode {
-                            BaseMode::Fixed => {
+                            RootType::Fixed => {
                                 let (_, _, pin_zero) = pinocchio.state(&state.q, &state.qd, &zero);
                                 let bias = pinocchio.rnea(&pin_q, &pin_qd, &pin_zero);
                                 let gravity = pinocchio.gravity(&pin_q);
                                 bias.iter().zip(gravity).map(|(b, g)| b - g).collect()
                             }
-                            BaseMode::Floating => {
+                            RootType::Floating => {
                                 let (velocity_q, velocity_qd, velocity_qdd) = pinocchio
                                     .floating_state(
                                         &state.q,
@@ -302,10 +302,10 @@ fn generated_models_match_pinocchio() {
                         Ok(Observation::Vector(values))
                     }
                     AlgorithmCase::InverseDynamics => Ok(Observation::Vector(match base_mode {
-                        BaseMode::Fixed => {
+                        RootType::Fixed => {
                             pinocchio.rnea_with_loads(&pin_q, &pin_qd, &pin_qdd, &pinocchio_loads)
                         }
-                        BaseMode::Floating => pinocchio.floating_rnea_with_loads(
+                        RootType::Floating => pinocchio.floating_rnea_with_loads(
                             &pin_q,
                             &pin_qd,
                             &pin_qdd,
@@ -314,10 +314,10 @@ fn generated_models_match_pinocchio() {
                         ),
                     })),
                     AlgorithmCase::ForwardDynamics => Ok(Observation::Vector(match base_mode {
-                        BaseMode::Fixed => {
+                        RootType::Fixed => {
                             pinocchio.aba_with_loads(&pin_q, &pin_qd, &state.tau, &pinocchio_loads)
                         }
-                        BaseMode::Floating => pinocchio.floating_aba_with_loads(
+                        RootType::Floating => pinocchio.floating_aba_with_loads(
                             &pin_q,
                             &pin_qd,
                             &state.tau,
@@ -336,7 +336,7 @@ fn generated_models_match_pinocchio() {
 #[test]
 fn generated_floating_models_match_pinocchio() {
     for case in selected_model_cases(24) {
-        if case.options.base_mode != BaseMode::Floating {
+        if case.options.base_mode != RootType::Floating {
             continue;
         }
         let generated = generate_case(&case);
@@ -425,7 +425,7 @@ fn generated_floating_models_match_pinocchio() {
                 let context = TestContext::new(algorithm.name(), "generated-pinocchio")
                     .seed(case.seed)
                     .sample(sample)
-                    .base_mode(BaseMode::Floating)
+                    .base_mode(RootType::Floating)
                     .target(&target_name)
                     .load_case(&matrix_case.load_case);
                 assert_observation_close(&actual, &expected, DYNAMICS, &context);

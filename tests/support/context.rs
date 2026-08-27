@@ -1,7 +1,7 @@
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum TestBaseMode {
+pub enum TestRootType {
     #[default]
     Fixed,
     Floating,
@@ -13,7 +13,7 @@ pub struct TestContext {
     pub fixture: String,
     pub seed: Option<u64>,
     pub sample: usize,
-    pub base_mode: TestBaseMode,
+    pub base_mode: TestRootType,
     pub target: Option<String>,
     pub load_case: Option<String>,
     pub step: Option<usize>,
@@ -26,7 +26,7 @@ impl TestContext {
             fixture: fixture.into(),
             seed: None,
             sample: 0,
-            base_mode: TestBaseMode::Fixed,
+            base_mode: TestRootType::Fixed,
             target: None,
             load_case: None,
             step: None,
@@ -43,7 +43,7 @@ impl TestContext {
         self
     }
 
-    pub fn base_mode(mut self, base_mode: TestBaseMode) -> Self {
+    pub fn base_mode(mut self, base_mode: TestRootType) -> Self {
         self.base_mode = base_mode;
         self
     }

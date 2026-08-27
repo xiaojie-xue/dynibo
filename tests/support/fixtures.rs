@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::context::TestBaseMode as BaseMode;
+use super::context::TestRootType as RootType;
 use dynibo::{IndexedLoad, Robot, Wrench};
 
 #[derive(Clone, Copy, Debug)]
@@ -17,10 +17,10 @@ impl Fixture {
             .join(self.urdf)
     }
 
-    pub fn robot(self, base_mode: BaseMode) -> Robot {
+    pub fn robot(self, base_mode: RootType) -> Robot {
         assert_eq!(
             base_mode,
-            BaseMode::Fixed,
+            RootType::Fixed,
             "use FloatingRobot for floating fixtures"
         );
         Robot::from_urdf(self.path())

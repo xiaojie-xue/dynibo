@@ -1,6 +1,6 @@
 mod support;
 
-use support::context::TestBaseMode as BaseMode;
+use support::context::TestRootType as RootType;
 
 use approx::assert_relative_eq;
 use dynibo::{BaseState, FloatingRobot, Frame, IndexedLoad, Robot, Twist, Wrench};
@@ -12,11 +12,11 @@ use support::{
 };
 
 fn tree_arm() -> Robot {
-    TREE_ARM.robot(BaseMode::Fixed)
+    TREE_ARM.robot(RootType::Fixed)
 }
 
 fn mixed_oracle_arm() -> Robot {
-    MIXED_ARM.robot(BaseMode::Fixed)
+    MIXED_ARM.robot(RootType::Fixed)
 }
 
 fn deterministic_state(sample: usize, phase: f64, amplitude: f64) -> [f64; 7] {

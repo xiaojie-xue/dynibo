@@ -1,6 +1,6 @@
 mod support;
 
-use support::context::TestBaseMode as BaseMode;
+use support::context::TestRootType as RootType;
 
 use dynibo::{BaseState, FloatingRobot, Frame, IndexedLoad, Wrench};
 use nalgebra::Vector3;
@@ -20,7 +20,7 @@ fn generated_model_matrix_preserves_dynamics_and_aba_identities() {
     for case in selected_model_cases(24) {
         let seed = case.seed;
         let options = case.options;
-        if options.base_mode != BaseMode::Fixed {
+        if options.base_mode != RootType::Fixed {
             continue;
         }
         let generated = generate_case(&case);
@@ -129,7 +129,7 @@ fn generated_model_matrix_preserves_dynamics_and_aba_identities() {
 #[test]
 fn generated_floating_models_produce_finite_results() {
     for case in selected_model_cases(24) {
-        if case.options.base_mode != BaseMode::Floating {
+        if case.options.base_mode != RootType::Floating {
             continue;
         }
         let generated = generate_case(&case);

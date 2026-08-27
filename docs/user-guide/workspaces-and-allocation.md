@@ -8,10 +8,10 @@ buffers once in a model-scoped workspace and reuses them.
 
 | Interface | Workspace ownership | Calculation outputs |
 |---|---|---|
-| Rust | One workspace owned by each `Robot` | Caller supplies matrix and force buffers |
-| Python | One native workspace owned by each `Robot` | Python tuples/value objects are returned |
-| C++ | One native workspace owned by each `dynibo::Robot` | `std::vector` or value objects are returned |
-| C | Explicit `DyniboWorkspace*` | Caller supplies buffers and structs |
+| Rust | One workspace owned by each `Robot` or `FloatingRobot` | Caller supplies matrix and force buffers |
+| Python | One native workspace owned by each `Robot` or `FloatingRobot` | Python tuples/value objects are returned |
+| C++ | One native workspace owned by each `dynibo::Robot` or `dynibo::FloatingRobot` | `std::vector` or value objects are returned |
+| C | Explicit `DyniboWorkspace*` or `DyniboFloatingWorkspace*` | Caller supplies buffers and structs |
 
 Rust and C give direct control over output allocation:
 
@@ -37,12 +37,12 @@ containers for results such as matrices.
 
 ## Model scope
 
-Each `Robot` instance owns a workspace scoped to its immutable model. `fork()`
+Each `Robot` or `FloatingRobot` instance owns a workspace scoped to its immutable model. `fork()`
 creates fresh calculation storage while sharing that model.
 
 ## Parallel calculations
 
-Each Rust `Robot` is mutable and may participate in only one calculation at a
-time. Use `fork()` to create an instance per concurrent calculation. Python
-serializes calls on one `Robot`; use separate robot instances for parallel work.
-C++ performs no internal locking, so use a separate `Robot` per worker.
+Each Rust `Robot` or `FloatingRobot` is mutable and may participate in only one
+calculation at a time. Use `fork()` to create an instance per concurrent calculation. Python
+serializes calls on one `Robot` or `FloatingRobot`; use separate robot instances for parallel work.
+C++ performs no internal locking, so use a separate `Robot` or `FloatingRobot` per worker.

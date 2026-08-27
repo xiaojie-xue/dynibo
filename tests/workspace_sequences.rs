@@ -1,6 +1,6 @@
 mod support;
 
-use support::context::TestBaseMode as BaseMode;
+use support::context::TestRootType as RootType;
 
 use dynibo::{BaseState, FloatingRobot, Frame, Robot, Wrench};
 use nalgebra::Vector3;
@@ -16,7 +16,7 @@ use support::{
 #[test]
 #[allow(clippy::single_element_loop)]
 fn fixed_workspace_sequences_match_clean_forks_step_by_step() {
-    for (fixture, base_mode, seed) in [(TREE_ARM, BaseMode::Fixed, 101_u64)] {
+    for (fixture, base_mode, seed) in [(TREE_ARM, RootType::Fixed, 101_u64)] {
         let prototype = fixture.robot(base_mode);
         let target_names: Vec<_> = fixture
             .targets

@@ -28,8 +28,8 @@ $$
 ## 正向速度与加速度
 
 `forward_velocity_kinematics` 接受相对于目标 link 的 tool pose，并返回该工具点的
-速度。`forward_acceleration_kinematics` 返回目标 link 原点的加速度。两者都会包含
-robot 中保存的基座状态。
+速度。`forward_acceleration_kinematics` 返回目标 link 原点的加速度。固定基计算使用
+`Robot` 保存的 frame；浮动基计算使用该次调用显式传入的 `BaseState`。
 
 ## 逆运动学
 

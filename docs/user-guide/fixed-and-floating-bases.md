@@ -32,29 +32,31 @@ inertia for rotational or joint-subtree singularities.
 === "Python"
 
     ```python
-    robot = Robot.from_urdf_with_base("robot.urdf", BaseMode.FLOATING)
-    robot.set_floating_base_state(frame, velocity, acceleration)
+    robot = FloatingRobot.from_urdf("robot.urdf")
+    base = BaseState(frame, velocity, acceleration)
+    forces = robot.inverse_dynamics(base, q, qd, qdd)
     ```
 
 === "C++"
 
     ```cpp
-    dynibo::Robot robot("robot.urdf", DYNIBO_BASE_FLOATING);
-    robot.set_floating_base_state(frame, velocity, acceleration);
+    dynibo::FloatingRobot robot("robot.urdf");
+    dynibo::BaseState base(frame, velocity, acceleration);
+    auto forces = robot.inverse_dynamics(base, q, qd, qdd);
     ```
 
 === "C"
 
     ```c
-    check(dynibo_robot_from_urdf_with_base(
-        "robot.urdf", DYNIBO_BASE_FLOATING, &robot));
-    check(dynibo_robot_set_floating_base_state(
-        robot, &frame, velocity, acceleration));
+    check(dynibo_floating_robot_from_urdf("robot.urdf", &robot));
+    DyniboBaseState base = {frame, velocity, acceleration};
+    check(dynibo_floating_inverse_dynamics(robot, workspace, &base,
+        q, qd, qdd, joint_count, loads, load_count, forces, generalized_count));
     ```
 
 The joint arrays remain length `J`; do not prepend a quaternion or six base
-values. Rust calculation methods receive `BaseState` explicitly. The current
-Python and C-family adapters retain setter-based state for API compatibility.
+values. Every language's floating calculation methods receive `BaseState`
+explicitly; no floating robot handle stores mutable state.
 
 ## Effects on calculations
 
@@ -63,8 +65,10 @@ Python and C-family adapters retain setter-based state for API compatibility.
 - Jacobians gain six leading base columns.
 - Mass matrices and generalized forces gain six base rows or entries.
 - Forward dynamics returns six world-frame base acceleration entries before joint acceleration.
-- Forward dynamics uses the supplied pose and velocity but ignores the stored acceleration.
+- Forward dynamics uses the supplied pose and velocity; the base acceleration is ignored.
 - Inverse kinematics is available on `Robot`, not `FloatingRobot`.
 
-Rust base states are immutable calculation inputs, so one robot can be shared
-across calculations using different states and workspaces.
+Rust base states are immutable calculation inputs, so one `FloatingRobot` may
+be reused *sequentially* with different `BaseState` values. Each `Robot` and
+`FloatingRobot` owns one workspace and calculation methods require mutable
+access; call `fork()` to create independent instances for parallel work.

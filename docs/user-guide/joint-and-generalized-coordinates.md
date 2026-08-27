@@ -14,8 +14,9 @@ Let:
 For a fixed base, `G = J`. For a floating base, `G = J + 6`.
 
 Inputs `q`, `qd`, and `qdd` always contain exactly `J` values in non-fixed URDF
-joint order. Floating-base coordinates are not prepended to these arrays. The
-base pose, velocity, and acceleration are stored separately on the robot.
+joint order. Floating-base coordinates are not prepended to these arrays. A
+fixed `Robot` stores its root frame; a `FloatingRobot` receives pose, velocity,
+and acceleration through an explicit `BaseState` on every calculation.
 
 ## Generalized ordering
 

@@ -94,7 +94,7 @@ pub fn run_workspace_sequence(
         let mut context = TestContext::new(name, fixture)
             .seed(seed)
             .sample(state)
-            .base_mode(super::context::TestBaseMode::Fixed)
+            .base_mode(super::context::TestRootType::Fixed)
             .step(step)
             .load_case(&cases[state].load_case);
         if let Operation::Valid { algorithm, .. } = operation
@@ -129,7 +129,7 @@ pub fn run_floating_workspace_sequence(
         let mut context = TestContext::new(name, fixture)
             .seed(seed)
             .sample(state)
-            .base_mode(super::context::TestBaseMode::Floating)
+            .base_mode(super::context::TestRootType::Floating)
             .step(step)
             .load_case(&cases[state].load_case);
         if let Operation::Valid { algorithm, .. } = operation

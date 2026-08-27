@@ -1,6 +1,6 @@
 mod support;
 
-use support::context::TestBaseMode as BaseMode;
+use support::context::TestRootType as RootType;
 
 use approx::assert_relative_eq;
 use dynibo::{
@@ -44,7 +44,7 @@ fn assert_slice_close(actual: &[f64], expected: &[f64], tolerance: f64) {
         actual,
         expected,
         Tolerance::new(tolerance, 0.0),
-        &TestContext::new("floating-base", FLOATING_ARM.name).base_mode(BaseMode::Floating),
+        &TestContext::new("floating-base", FLOATING_ARM.name).base_mode(RootType::Floating),
     );
 }
 

@@ -1,6 +1,6 @@
 mod support;
 
-use support::context::TestBaseMode as BaseMode;
+use support::context::TestRootType as RootType;
 
 use approx::assert_relative_eq;
 use dynibo::{Error, Frame, IndexedLoad, InverseKinematicsOptions, Robot, Twist, Wrench};
@@ -12,11 +12,11 @@ use support::{
 };
 
 fn test_arm() -> Robot {
-    SERIAL_ARM.robot(BaseMode::Fixed)
+    SERIAL_ARM.robot(RootType::Fixed)
 }
 
 fn tree_arm() -> Robot {
-    TREE_ARM.robot(BaseMode::Fixed)
+    TREE_ARM.robot(RootType::Fixed)
 }
 
 #[test]

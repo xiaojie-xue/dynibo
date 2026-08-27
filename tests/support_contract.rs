@@ -1,6 +1,6 @@
 mod support;
 
-use support::context::TestBaseMode as BaseMode;
+use support::context::TestRootType as RootType;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -69,7 +69,7 @@ fn deterministic_state_and_generalized_order_are_stable() {
 
 #[test]
 fn load_specs_resolve_to_model_scoped_handles_shared_by_forks() {
-    let robot = MIXED_ARM.robot(BaseMode::Fixed);
+    let robot = MIXED_ARM.robot(RootType::Fixed);
     let fork = robot.fork();
     let spec = LoadSpec::new(
         "tool",
@@ -84,7 +84,7 @@ fn generated_model_is_reproducible_and_loadable() {
         active_joints: 8,
         topology: TopologyKind::Balanced,
         fixed_layout: FixedJointLayout::ToolFrames,
-        base_mode: BaseMode::Floating,
+        base_mode: RootType::Floating,
         joint_mix: JointMix::AllSupported,
         axis_profile: AxisProfile::General,
         inertial_profile: InertialProfile::OffsetRotated,
@@ -111,11 +111,11 @@ fn default_corpus_uses_stable_stratified_pseudo_random_seeds() {
 fn default_corpus_covers_independent_structure_dimensions() {
     let cases = corpus_model_cases(24);
     assert!(cases.iter().any(|case| {
-        case.options.base_mode == BaseMode::Floating
+        case.options.base_mode == RootType::Floating
             && case.options.topology == TopologyKind::Serial
     }));
     assert!(cases.iter().any(|case| {
-        case.options.base_mode == BaseMode::Floating
+        case.options.base_mode == RootType::Floating
             && case.options.topology != TopologyKind::Serial
     }));
     for topology in [

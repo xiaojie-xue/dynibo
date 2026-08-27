@@ -1,6 +1,6 @@
 mod support;
 
-use support::context::TestBaseMode as BaseMode;
+use support::context::TestRootType as RootType;
 
 use dynibo::{BaseState, Error, FloatingRobot, Frame, IndexedLoad, Robot, Twist, Wrench};
 use nalgebra::{Translation3, UnitQuaternion, Vector3};
@@ -14,7 +14,7 @@ use support::{
 #[test]
 fn fixed_forward_dynamics_inverts_inverse_dynamics_for_tree_and_mixed_joints() {
     for (fixture, target_name) in [(TREE_ARM, "right_tool"), (MIXED_ARM, "tool")] {
-        let mut robot = fixture.robot(BaseMode::Fixed);
+        let mut robot = fixture.robot(RootType::Fixed);
         let joint_count = robot.joint_count();
         let load = IndexedLoad {
             link: robot.link_id(target_name).unwrap(),
@@ -122,7 +122,7 @@ fn floating_forward_dynamics_inverts_moving_base_inverse_dynamics() {
         &expected,
         Tolerance::new(3.0e-10, 3.0e-10),
         &TestContext::new("floating-rnea-aba-round-trip", FLOATING_ARM.name)
-            .base_mode(BaseMode::Floating)
+            .base_mode(RootType::Floating)
             .target("tool")
             .load_case("single"),
     );
@@ -130,8 +130,8 @@ fn floating_forward_dynamics_inverts_moving_base_inverse_dynamics() {
 
 #[test]
 fn forward_dynamics_validates_dimensions_base_state_and_load_ids() {
-    let mut robot = FLOATING_ARM.robot(BaseMode::Fixed);
-    let other = FLOATING_ARM.robot(BaseMode::Fixed);
+    let mut robot = FLOATING_ARM.robot(RootType::Fixed);
+    let other = FLOATING_ARM.robot(RootType::Fixed);
     let foreign_load = IndexedLoad {
         link: other.link_id("tool").unwrap(),
         wrench: Wrench::zeros(),
