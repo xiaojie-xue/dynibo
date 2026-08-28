@@ -21,8 +21,8 @@ Install the wheel from PyPI:
 python -m pip install dynibo
 ```
 
-The wheel bundles the native dynibo library and has no runtime Python package
-dependencies.
+The wheel contains a PyO3 extension that calls the Rust core directly. NumPy is
+installed as its runtime array dependency.
 
 ## C and C++
 

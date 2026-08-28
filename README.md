@@ -132,12 +132,16 @@ python -m pip install dynibo
 The Python binding owns its reusable native calculation storage:
 
 ```python
+import numpy as np
+
 from dynibo import Robot
 
 robot = Robot.from_urdf("robot.urdf")
 tool = robot.link_id("tool")
-q = [0.0] * robot.joint_count
+q = np.zeros(robot.joint_count)
 pose = robot.forward_kinematics(q, tool)
+jacobian = np.empty(6 * robot.generalized_count)
+robot.jacobian(q, tool, out=jacobian)
 print(pose.translation)
 ```
 

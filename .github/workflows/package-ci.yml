@@ -199,7 +199,7 @@ jobs:
         shell: bash
         run: |
           python -m venv target/sdist-test
-          target/sdist-test/bin/python -m pip install --no-deps dist/from-sdist/*.whl
+          target/sdist-test/bin/python -m pip install dist/from-sdist/*.whl
           target/sdist-test/bin/python tests/python/test_package.py tests/data/test_arm.urdf tests/data/pinocchio_reference_v1.tsv
       - name: Upload Python source distribution
         uses: actions/upload-artifact@v7

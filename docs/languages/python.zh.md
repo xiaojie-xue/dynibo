@@ -22,9 +22,20 @@ except DyniboError as error:
 
 ## 数组与结果
 
-关节输入接受由数字组成的 Python sequence。Pose 和 twist 是不可变的值对象。
-矩阵方法返回使用 column-major 顺序的一维 tuple，详见
+关节输入接受 NumPy 数组或由数字组成的 Python sequence；连续 `float64` 数组走
+零拷贝路径。Pose 和 twist 是不可变的值对象。向量和矩阵方法返回 `float64`
+NumPy 数组，矩阵仍使用 column-major 顺序的一维布局，详见
 [参考系与空间向量](../user-guide/frames-and-spatial-vectors.md)。
+
+控制循环可以通过 `out=` 复用调用方分配的存储：
+
+```python
+import numpy as np
+
+q = np.zeros(robot.joint_count)
+gravity = np.empty(robot.generalized_count)
+robot.gravity(q, out=gravity)
+```
 
 每个 `Robot` 持有一个原生 workspace，同一实例上的调用会被串行化。需要并行计算时，
 请使用相互独立的 robot 实例。

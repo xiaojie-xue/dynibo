@@ -26,7 +26,7 @@ exclude = [
 rustdoc-args = ["--html-in-header", "docs/rustdoc/katex-header.html"]
 
 [workspace]
-members = ["bindings/c"]
+members = ["bindings/c", "bindings/python"]
 resolver = "3"
 
 [workspace.package]

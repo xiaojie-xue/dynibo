@@ -123,12 +123,16 @@ python -m pip install dynibo
 Python binding 会在内部持有并复用原生计算存储：
 
 ```python
+import numpy as np
+
 from dynibo import Robot
 
 with Robot.from_urdf("robot.urdf") as robot:
     tool = robot.link_id("tool")
-    q = [0.0] * robot.joint_count
+    q = np.zeros(robot.joint_count)
     pose = robot.forward_kinematics(q, tool)
+    jacobian = np.empty(6 * robot.generalized_count)
+    robot.jacobian(q, tool, out=jacobian)
     print(pose.translation)
 ```
 

@@ -25,9 +25,21 @@ All inherit from `DyniboError`.
 
 ## Arrays and results
 
-Joint inputs accept Python sequences of numbers. Poses and twists are immutable
-value objects. Matrix methods return flat tuples in column-major order; see
+Joint inputs accept NumPy arrays or Python sequences of numbers. Contiguous
+`float64` arrays use the zero-copy path. Poses and twists are immutable value
+objects. Vector and matrix methods return `float64` NumPy arrays; matrices stay
+flat and column-major. See
 [Frames and Spatial Vectors](../user-guide/frames-and-spatial-vectors.md).
+
+Reuse caller-owned storage in control loops with `out=`:
+
+```python
+import numpy as np
+
+q = np.zeros(robot.joint_count)
+gravity = np.empty(robot.generalized_count)
+robot.gravity(q, out=gravity)
+```
 
 Each `Robot` owns one native workspace. Calls on the same instance are
 serialized. Use separate robot instances when calculations must run in parallel.

@@ -20,7 +20,7 @@ different numerical API.
 | Fixed mass/dynamics | `Robot` methods | `Robot` methods | `Robot` methods | `dynibo_mass_matrix`, `dynibo_inverse_dynamics`, `dynibo_forward_dynamics` |
 | Floating mass/dynamics | `FloatingRobot` methods with `base` | `FloatingRobot` methods with `base` | `FloatingRobot` methods with `base` | `dynibo_floating_mass_matrix`, `dynibo_floating_inverse_dynamics`, `dynibo_floating_forward_dynamics` |
 | Fixed/floating workspace | Owned by typed robot | Owned by typed robot | Owned by typed robot | `DyniboWorkspace` / `DyniboFloatingWorkspace` |
-| Matrix output | Caller buffer | Flat tuple | Flat `std::vector` | Caller buffer |
+| Matrix output | Caller buffer | Flat NumPy array or reusable `out=` | Flat `std::vector` | Caller buffer |
 | Errors | `Result<T>` | Exceptions | `dynibo::Error` | `DyniboStatus` |
 
 ## Value types
