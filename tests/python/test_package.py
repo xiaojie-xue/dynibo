@@ -257,7 +257,19 @@ class PackageTests(unittest.TestCase):
 
         with self.assertRaisesRegex(TypeError, "sequence of numbers"):
             self.robot.forward_kinematics(["not-a-number"] * 4, self.target)
-        with self.assertRaisesRegex(ValueError, "expected 4 elements"):
+        with self.assertRaisesRegex(ValueError, "max_iterations must be greater than zero"):
+            dynibo.IkOptions(max_iterations=-1)
+        with self.assertRaisesRegex(ValueError, "max_iterations must be greater than zero"):
+            dynibo.IkOptions(max_iterations=0)
+        with self.assertRaisesRegex(TypeError, "max_iterations must be an integer"):
+            dynibo.IkOptions(max_iterations=1.5)
+        for invalid in (float("nan"), float("inf"), float("-inf")):
+            q = self.q.copy()
+            q[0] = invalid
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(ValueError, "q contains a non-finite value"):
+                    self.robot.forward_kinematics(q, self.target)
+        with self.assertRaises((TypeError, ValueError)):
             self.robot.mass_matrix(ChangingLengthSequence())
         with self.assertRaisesRegex(ValueError, "q and qd must have the same length"):
             self.robot.forward_velocity_kinematics(self.q, self.q[:-1], self.target)

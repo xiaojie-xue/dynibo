@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes as ct
 import ctypes.util
 import os
+import operator
 import sys
 import threading
 from dataclasses import dataclass, field
@@ -41,7 +42,26 @@ class BaseState:
 @dataclass(frozen=True)
 class Load: link_id: int; torque: tuple[float,float,float]=(0.,0.,0.); force: tuple[float,float,float]=(0.,0.,0.)
 @dataclass(frozen=True)
-class IkOptions: max_iterations:int=100; translation_tolerance:float=1e-6; rotation_tolerance:float=1e-6; damping:float=1e-3; max_step_norm:float=.5
+class IkOptions:
+    max_iterations: int = 100
+    translation_tolerance: float = 1e-6
+    rotation_tolerance: float = 1e-6
+    damping: float = 1e-3
+    max_step_norm: float = .5
+
+    def __post_init__(self) -> None:
+        if isinstance(self.max_iterations, bool):
+            raise TypeError("max_iterations must be an integer")
+        try:
+            value = operator.index(self.max_iterations)
+        except TypeError as error:
+            raise TypeError("max_iterations must be an integer") from error
+        if value <= 0:
+            raise ValueError("max_iterations must be greater than zero")
+        size_t_max = (1 << (8 * ct.sizeof(ct.c_size_t))) - 1
+        if value > size_t_max:
+            raise OverflowError("max_iterations does not fit in size_t")
+        object.__setattr__(self, "max_iterations", value)
 class DyniboError(RuntimeError): pass
 class ModelError(DyniboError): pass
 class SolverError(DyniboError): pass

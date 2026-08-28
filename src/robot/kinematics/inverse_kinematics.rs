@@ -134,11 +134,6 @@ impl Model {
         self.validate_joint_output("IK joint workspace", q_work)?;
         self.validate_joint_output("IK step workspace", step)?;
         validate_inverse_kinematics_options(options)?;
-        if !initial_q.iter().all(|value| value.is_finite()) {
-            return Err(Error::NonFiniteIkInput {
-                input: "initial joint vector",
-            });
-        }
         if !desired
             .translation
             .vector

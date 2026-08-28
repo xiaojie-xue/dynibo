@@ -124,7 +124,12 @@ impl Model {
     }
 
     fn validate_slice(&self, name: &'static str, slice: &[f64]) -> Result<()> {
-        self.validate_slice_length(name, slice.len(), self.joint_count())
+        self.validate_slice_length(name, slice.len(), self.joint_count())?;
+        if slice.iter().all(|value| value.is_finite()) {
+            Ok(())
+        } else {
+            Err(Error::NonFiniteInput { input: name })
+        }
     }
 
     fn validate_output(
@@ -603,5 +608,19 @@ mod tests {
         ));
         assert_eq!(*robot.base_frame(), frame);
         assert_ne!(original, frame);
+    }
+
+    #[test]
+    fn joint_inputs_must_be_finite() {
+        let robot = robot();
+        let mut values = vec![0.0; robot.joint_count()];
+
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            values[0] = invalid;
+            assert!(matches!(
+                robot.model.validate_slice("q", &values),
+                Err(Error::NonFiniteInput { input: "q" })
+            ));
+        }
     }
 }

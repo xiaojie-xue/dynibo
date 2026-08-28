@@ -422,9 +422,7 @@ fn inverse_kinematics_reports_specific_solver_errors() {
         .unwrap_err();
     assert!(matches!(
         error,
-        Error::NonFiniteIkInput {
-            input: "initial joint vector"
-        }
+        Error::NonFiniteInput { input: "initial_q" }
     ));
 
     let outside_q = JointVector::<4>::new(0.8, 0.0, 0.0, 0.0);
