@@ -90,7 +90,8 @@ pub struct DyniboRobot {
 /// Fixed-base calculation storage.
 pub struct DyniboWorkspace {
     inner: Robot,
-    indexed_loads: Box<[IndexedLoad]>,
+    converted_loads: Box<[IndexedLoad]>,
+    load_positions: Box<[usize]>,
 }
 /// Floating-base model and metadata. It intentionally contains no base state.
 pub struct DyniboFloatingRobot {
@@ -101,7 +102,8 @@ pub struct DyniboFloatingRobot {
 /// Floating-base calculation storage.
 pub struct DyniboFloatingWorkspace {
     inner: FloatingRobot,
-    indexed_loads: Box<[IndexedLoad]>,
+    converted_loads: Box<[IndexedLoad]>,
+    load_positions: Box<[usize]>,
 }
 
 type CResult<T> = Result<T, (DyniboStatus, String)>;
@@ -287,12 +289,10 @@ fn base_from_c(b: &DyniboBaseState) -> CResult<BaseState> {
 fn loads<'a>(
     ids: &[LinkId],
     output: &'a mut [IndexedLoad],
+    positions: &mut [usize],
     p: *const DyniboLoad,
     n: usize,
 ) -> CResult<&'a [IndexedLoad]> {
-    for load in output.iter_mut() {
-        load.wrench = Wrench::zeros();
-    }
     if n == 0 {
         return Ok(&output[..0]);
     }
@@ -306,13 +306,28 @@ fn loads<'a>(
         if load.link_id >= ids.len() {
             return Err(invalid(format!("invalid link id {}", load.link_id)));
         }
-        let old = output[load.link_id].wrench;
-        output[load.link_id].wrench = Wrench::new(
-            old.torque + Vector3::from(load.torque),
-            old.force + Vector3::from(load.force),
+    }
+    let mut used = 0;
+    for load in values {
+        let position = &mut positions[load.link_id];
+        if *position == usize::MAX {
+            *position = used;
+            output[used] = IndexedLoad {
+                link: ids[load.link_id],
+                wrench: Wrench::zeros(),
+            };
+            used += 1;
+        }
+        let converted = &mut output[*position].wrench;
+        *converted = Wrench::new(
+            converted.torque + Vector3::from(load.torque),
+            converted.force + Vector3::from(load.force),
         );
     }
-    Ok(output)
+    for load in values {
+        positions[load.link_id] = usize::MAX;
+    }
+    Ok(&output[..used])
 }
 fn fixed_parts<'a>(
     robot: *const DyniboRobot,
@@ -353,6 +368,9 @@ fn make_loads(ids: &[LinkId]) -> Box<[IndexedLoad]> {
             wrench: Wrench::zeros(),
         })
         .collect()
+}
+fn make_load_positions(ids: &[LinkId]) -> Box<[usize]> {
+    vec![usize::MAX; ids.len()].into_boxed_slice()
 }
 fn info<R>(
     robot: &R,
@@ -553,7 +571,8 @@ pub unsafe extern "C" fn dynibo_workspace_create(
         let out = unsafe { required_mut(out, "output") }?;
         *out = Box::into_raw(Box::new(DyniboWorkspace {
             inner: robot.inner.fork(),
-            indexed_loads: make_loads(&robot.link_ids),
+            converted_loads: make_loads(&robot.link_ids),
+            load_positions: make_load_positions(&robot.link_ids),
         }));
         Ok(())
     })
@@ -568,7 +587,8 @@ pub unsafe extern "C" fn dynibo_floating_workspace_create(
         let out = unsafe { required_mut(out, "output") }?;
         *out = Box::into_raw(Box::new(DyniboFloatingWorkspace {
             inner: robot.inner.fork(),
-            indexed_loads: make_loads(&robot.link_ids),
+            converted_loads: make_loads(&robot.link_ids),
+            load_positions: make_load_positions(&robot.link_ids),
         }));
         Ok(())
     })
@@ -927,7 +947,13 @@ pub unsafe extern "C" fn dynibo_gravity(
         let (r, w) = fixed_parts(r, w)?;
         reject_output_overlap!(out, on; q, n, "q");
         let q = unsafe { input_slice(q, n, "q") }?;
-        let ls = loads(&r.link_ids, &mut w.indexed_loads, lp, ln)?;
+        let ls = loads(
+            &r.link_ids,
+            &mut w.converted_loads,
+            &mut w.load_positions,
+            lp,
+            ln,
+        )?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner.gravity(q, ls, out).map_err(core_error)
     })
@@ -949,7 +975,13 @@ pub unsafe extern "C" fn dynibo_floating_gravity(
         reject_output_overlap!(out, on; q, n, "q");
         let b = base_from_c(unsafe { required_ref(b, "base") }?)?;
         let q = unsafe { input_slice(q, n, "q") }?;
-        let ls = loads(&r.link_ids, &mut w.indexed_loads, lp, ln)?;
+        let ls = loads(
+            &r.link_ids,
+            &mut w.converted_loads,
+            &mut w.load_positions,
+            lp,
+            ln,
+        )?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner.gravity(&b, q, ls, out).map_err(core_error)
     })
@@ -973,7 +1005,13 @@ pub unsafe extern "C" fn dynibo_inverse_dynamics(
         let q = unsafe { input_slice(q, n, "q") }?;
         let qd = unsafe { input_slice(qd, n, "qd") }?;
         let qdd = unsafe { input_slice(qdd, n, "qdd") }?;
-        let ls = loads(&r.link_ids, &mut w.indexed_loads, lp, ln)?;
+        let ls = loads(
+            &r.link_ids,
+            &mut w.converted_loads,
+            &mut w.load_positions,
+            lp,
+            ln,
+        )?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner
             .inverse_dynamics(q, qd, qdd, ls, out)
@@ -1001,7 +1039,13 @@ pub unsafe extern "C" fn dynibo_floating_inverse_dynamics(
         let q = unsafe { input_slice(q, n, "q") }?;
         let qd = unsafe { input_slice(qd, n, "qd") }?;
         let qdd = unsafe { input_slice(qdd, n, "qdd") }?;
-        let ls = loads(&r.link_ids, &mut w.indexed_loads, lp, ln)?;
+        let ls = loads(
+            &r.link_ids,
+            &mut w.converted_loads,
+            &mut w.load_positions,
+            lp,
+            ln,
+        )?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner
             .inverse_dynamics(&b, q, qd, qdd, ls, out)
@@ -1028,7 +1072,13 @@ pub unsafe extern "C" fn dynibo_forward_dynamics(
         let q = unsafe { input_slice(q, n, "q") }?;
         let qd = unsafe { input_slice(qd, n, "qd") }?;
         let f = unsafe { input_slice(f, fn_, "generalized_forces") }?;
-        let ls = loads(&r.link_ids, &mut w.indexed_loads, lp, ln)?;
+        let ls = loads(
+            &r.link_ids,
+            &mut w.converted_loads,
+            &mut w.load_positions,
+            lp,
+            ln,
+        )?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner
             .forward_dynamics(q, qd, f, ls, out)
@@ -1057,7 +1107,13 @@ pub unsafe extern "C" fn dynibo_floating_forward_dynamics(
         let q = unsafe { input_slice(q, n, "q") }?;
         let qd = unsafe { input_slice(qd, n, "qd") }?;
         let f = unsafe { input_slice(f, fn_, "generalized_forces") }?;
-        let ls = loads(&r.link_ids, &mut w.indexed_loads, lp, ln)?;
+        let ls = loads(
+            &r.link_ids,
+            &mut w.converted_loads,
+            &mut w.load_positions,
+            lp,
+            ln,
+        )?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner
             .forward_dynamics(&b, q, qd, f, ls, out)

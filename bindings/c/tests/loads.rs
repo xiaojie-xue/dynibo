@@ -134,3 +134,29 @@ fn load_workspace_aggregates_duplicates_clears_state_and_isolates_links() {
         .collect();
     assert_close(&both, &expected);
 }
+
+#[test]
+fn compact_load_workspace_handles_more_inputs_than_links() {
+    let mut fixture = Fixture::tree();
+    let left = fixture.link_id(c"left_tool");
+    let q = [0.2, -0.1, 0.35, -0.4, 0.15, 0.3, -0.25];
+    let repeated = DyniboLoad {
+        link_id: left,
+        torque: [0.125, -0.25, 0.5],
+        force: [1.0, -0.5, 0.25],
+    };
+    let combined = DyniboLoad {
+        link_id: left,
+        torque: [4.0, -8.0, 16.0],
+        force: [32.0, -16.0, 8.0],
+    };
+
+    let duplicate_inputs = vec![repeated; 32];
+    let duplicate_output = fixture.gravity(&q, &duplicate_inputs);
+    let combined_output = fixture.gravity(&q, &[combined]);
+    assert_close(&duplicate_output, &combined_output);
+
+    let baseline = fixture.gravity(&q, &[]);
+    let cleared = fixture.gravity(&q, &[]);
+    assert_close(&cleared, &baseline);
+}
