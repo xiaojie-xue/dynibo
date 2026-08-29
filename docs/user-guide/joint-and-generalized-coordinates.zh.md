@@ -42,8 +42,8 @@ Dynibo 区分关节状态输入和广义输出，这一点对浮动基模型尤�
 | 质量矩阵 | `G * G` |
 | 广义力 | `G` |
 
-C 和 Rust 的矩阵及广义力操作要求调用方提供输出 buffer。Python 和 C++ 会分配返回的
-tuple 或 vector，但结果尺寸完全相同。
+C 和 Rust 的矩阵及广义力操作要求调用方提供输出 buffer。Python 返回 NumPy 数组或
+写入 `out=`，C++ 返回 vector，但结果尺寸完全相同。
 
 ## 关节限制
 

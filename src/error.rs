@@ -24,6 +24,11 @@ pub enum Error {
         /// Number of elements supplied by the caller.
         actual: usize,
     },
+    /// A runtime-sized numerical input contains a non-finite value.
+    NonFiniteInput {
+        /// Name of the rejected input.
+        input: &'static str,
+    },
     /// A joint axis is too small to normalize.
     InvalidJointAxis {
         /// Name of the joint with the invalid axis.
@@ -118,6 +123,7 @@ impl Error {
             | Self::UnsupportedJointType { .. }
             | Self::InvalidJointAxis { .. } => ErrorCategory::Model,
             Self::WrongSliceLength { .. }
+            | Self::NonFiniteInput { .. }
             | Self::UnknownLink { .. }
             | Self::InvalidJointIndex { .. }
             | Self::InvalidLinkId
@@ -148,6 +154,9 @@ impl fmt::Display for Error {
                 expected,
                 actual,
             } => write!(f, "expected {expected} elements in {slice}, found {actual}"),
+            Self::NonFiniteInput { input } => {
+                write!(f, "{input} contains a non-finite value")
+            }
             Self::InvalidJointAxis { joint } => write!(f, "joint {joint} has an invalid axis"),
             Self::UnknownLink { name } => write!(f, "link {name} does not exist in the model"),
             Self::InvalidJointIndex { index } => {
@@ -247,6 +256,10 @@ mod tests {
                     actual: 3,
                 },
                 "expected 4 elements in q, found 3".to_owned(),
+            ),
+            (
+                Error::NonFiniteInput { input: "q" },
+                "q contains a non-finite value".to_owned(),
             ),
             (
                 Error::InvalidJointAxis {

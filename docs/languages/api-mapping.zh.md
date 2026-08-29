@@ -18,7 +18,7 @@ Rust 使用 crate 和 type namespace，Python 使用 module 和 class，C++ 使�
 | 固定基质量/动力学 | `Robot` methods | `Robot` methods | `Robot` methods | `dynibo_mass_matrix`, `dynibo_inverse_dynamics`, `dynibo_forward_dynamics` |
 | 浮动基质量/动力学 | 带 `base` 的 `FloatingRobot` methods | 带 `base` 的 `FloatingRobot` methods | 带 `base` 的 `FloatingRobot` methods | `dynibo_floating_mass_matrix`, `dynibo_floating_inverse_dynamics`, `dynibo_floating_forward_dynamics` |
 | fixed/floating workspace | 由 typed robot 持有 | 由 typed robot 持有 | 由 typed robot 持有 | `DyniboWorkspace` / `DyniboFloatingWorkspace` |
-| 矩阵输出 | 调用方 buffer | 一维 tuple | 一维 `std::vector` | 调用方 buffer |
+| 矩阵输出 | 调用方 buffer | 一维 NumPy 数组或可复用的 `out=` | 一维 `std::vector` | 调用方 buffer |
 | 错误 | `Result<T>` | 异常 | `dynibo::Error` | `DyniboStatus` |
 
 ## 值类型

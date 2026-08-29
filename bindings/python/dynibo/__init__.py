@@ -2,19 +2,34 @@
 
 from importlib.metadata import version as distribution_version
 
-from ._native import (
-    BaseState,
-    DyniboError,
-    IkOptions,
-    Load,
-    ModelError,
-    PanicError,
-    Pose,
-    FloatingRobot,
-    Robot,
-    SolverError,
-    Twist,
-)
+try:
+    from ._dynibo import (
+        BaseState,
+        DyniboError,
+        FloatingRobot,
+        IkOptions,
+        Load,
+        ModelError,
+        PanicError,
+        Pose,
+        Robot,
+        SolverError,
+        Twist,
+    )
+except ImportError:  # pragma: no cover - transitional source-tree fallback
+    from ._native import (
+        BaseState,
+        DyniboError,
+        FloatingRobot,
+        IkOptions,
+        Load,
+        ModelError,
+        PanicError,
+        Pose,
+        Robot,
+        SolverError,
+        Twist,
+    )
 
 __all__ = [
     "BaseState",

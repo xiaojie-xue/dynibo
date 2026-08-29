@@ -21,7 +21,7 @@ cargo add dynibo
 python -m pip install dynibo
 ```
 
-wheel 已包含 dynibo 原生动态库，没有运行时 Python 包依赖。
+wheel 包含直接调用 Rust core 的 PyO3 扩展，并以 NumPy 作为运行时数组依赖。
 
 ## C 和 C++
 

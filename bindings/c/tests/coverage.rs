@@ -438,6 +438,30 @@ fn calculation_pointer_and_length_errors_are_reported() {
 }
 
 #[test]
+fn non_finite_joint_inputs_are_rejected() {
+    let handles = Handles::new();
+    let mut q = [0.0; 4];
+    let mut pose = DyniboPose::default();
+
+    for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        q[0] = invalid;
+        assert_eq!(
+            unsafe {
+                dynibo_forward_kinematics(
+                    handles.fixed,
+                    handles.fixed_workspace,
+                    q.as_ptr(),
+                    q.len(),
+                    handles.target,
+                    &mut pose,
+                )
+            },
+            DyniboStatus::InvalidArgument
+        );
+    }
+}
+
+#[test]
 fn zero_length_buffers_are_rejected_by_model_validation_without_dereferencing() {
     let handles = Handles::new();
     let base = DyniboBaseState::default();

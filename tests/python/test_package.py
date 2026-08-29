@@ -9,6 +9,7 @@ from importlib.metadata import version as distribution_version
 from pathlib import Path
 
 import dynibo
+import numpy as np
 
 
 URDF = (
@@ -66,7 +67,9 @@ class PackageTests(unittest.TestCase):
 
     def test_dynamics_and_inverse_kinematics(self) -> None:
         pose = self.robot.forward_kinematics(self.q, self.target)
-        self.assertEqual(self.robot.inverse_kinematics(self.q, self.target, pose), tuple(self.q))
+        np.testing.assert_allclose(
+            self.robot.inverse_kinematics(self.q, self.target, pose), self.q
+        )
         gravity = self.robot.gravity(self.q)
         dynamics = self.robot.inverse_dynamics(self.q, self.q, self.q)
         self.assertEqual(len(gravity), self.robot.joint_count)
@@ -77,7 +80,7 @@ class PackageTests(unittest.TestCase):
         loaded = self.robot.gravity(
             self.q, loads=[dynibo.Load(self.target, force=(0.0, 1.0, 0.0))]
         )
-        self.assertNotEqual(loaded, gravity)
+        self.assertFalse(np.array_equal(loaded, gravity))
 
     def test_second_order_dynamics_apis(self) -> None:
         q = [0.2, 1.0, -0.7, 0.4]
@@ -140,6 +143,11 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(robot.generalized_count, robot.joint_count + 6)
             self.assertEqual(len(robot.jacobian(base, q, target)), 6 * robot.generalized_count)
             self.assertEqual(len(robot.mass_matrix(base, q)), robot.generalized_count**2)
+            gravity_out = np.empty(robot.generalized_count, dtype=np.float64)
+            self.assertIs(robot.gravity(base, q, out=gravity_out), gravity_out)
+            np.testing.assert_allclose(
+                gravity_out, reference("floating_gravity"), atol=2.0e-12
+            )
             pose = robot.forward_kinematics(base, q, target)
             for actual, expected_value in zip(
                 pose.translation, reference("floating_fk_translation")
@@ -209,7 +217,7 @@ class PackageTests(unittest.TestCase):
         )
         self.assertNotEqual(transformed_pose, identity_pose)
         self.assertNotEqual(tool_velocity, origin_velocity)
-        self.assertNotEqual(self.robot.gravity(self.q), identity_gravity)
+        self.assertFalse(np.array_equal(self.robot.gravity(self.q), identity_gravity))
 
         pose = self.robot.forward_kinematics(self.q, self.target)
         options = dynibo.IkOptions(
@@ -219,8 +227,8 @@ class PackageTests(unittest.TestCase):
             damping=1.0e-4,
             max_step_norm=0.1,
         )
-        self.assertEqual(
-            self.robot.inverse_kinematics(self.q, self.target, pose, options), tuple(self.q)
+        np.testing.assert_allclose(
+            self.robot.inverse_kinematics(self.q, self.target, pose, options), self.q
         )
 
     def test_pinocchio_numeric_reference(self) -> None:
@@ -255,9 +263,21 @@ class PackageTests(unittest.TestCase):
             def __iter__(self):
                 return iter((0.0, 0.0, 0.0))
 
-        with self.assertRaisesRegex(TypeError, "sequence of numbers"):
+        with self.assertRaises((TypeError, ValueError)):
             self.robot.forward_kinematics(["not-a-number"] * 4, self.target)
-        with self.assertRaisesRegex(ValueError, "expected 4 elements"):
+        with self.assertRaisesRegex(ValueError, "max_iterations must be greater than zero"):
+            dynibo.IkOptions(max_iterations=-1)
+        with self.assertRaisesRegex(ValueError, "max_iterations must be greater than zero"):
+            dynibo.IkOptions(max_iterations=0)
+        with self.assertRaisesRegex(TypeError, "max_iterations must be an integer"):
+            dynibo.IkOptions(max_iterations=1.5)
+        for invalid in (float("nan"), float("inf"), float("-inf")):
+            q = self.q.copy()
+            q[0] = invalid
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(ValueError, "q contains a non-finite value"):
+                    self.robot.forward_kinematics(q, self.target)
+        with self.assertRaises((TypeError, ValueError)):
             self.robot.mass_matrix(ChangingLengthSequence())
         with self.assertRaisesRegex(ValueError, "q and qd must have the same length"):
             self.robot.forward_velocity_kinematics(self.q, self.q[:-1], self.target)
@@ -275,9 +295,9 @@ class PackageTests(unittest.TestCase):
             self.robot.mass_matrix(self.q[:-1])
         with self.assertRaisesRegex(ValueError, "expected 4 elements"):
             self.robot.forward_dynamics(self.q, self.q, self.q[:-1])
-        with self.assertRaisesRegex(ValueError, "pose translation must contain exactly 3"):
+        with self.assertRaisesRegex(ValueError, "sequence of length 3"):
             self.robot.set_base_frame(dynibo.Pose(translation=(0.0, 0.0)))
-        with self.assertRaisesRegex(ValueError, "load force must contain exactly 3"):
+        with self.assertRaisesRegex(ValueError, "sequence of length 3"):
             self.robot.gravity(self.q, loads=[dynibo.Load(self.target, force=(1.0, 2.0))])
         self.assertFalse(hasattr(dynibo, "Base" + "Mode"))
 
@@ -296,7 +316,9 @@ class PackageTests(unittest.TestCase):
             try:
                 barrier.wait()
                 for _ in range(50):
-                    self.assertEqual(self.robot.jacobian(self.q, self.target), expected)
+                    np.testing.assert_array_equal(
+                        self.robot.jacobian(self.q, self.target), expected
+                    )
                     self.robot.mass_matrix(self.q)
             except BaseException as error:
                 failures.append(error)
@@ -308,6 +330,39 @@ class PackageTests(unittest.TestCase):
             thread.join()
         if failures:
             raise failures[0]
+
+    def test_numpy_fast_path_and_reusable_outputs(self) -> None:
+        q = np.asarray(self.q, dtype=np.float64)
+        qd = np.linspace(-0.2, 0.2, self.robot.joint_count, dtype=np.float64)
+
+        jacobian = self.robot.jacobian(q, self.target)
+        self.assertIsInstance(jacobian, np.ndarray)
+        self.assertEqual(jacobian.dtype, np.float64)
+        self.assertEqual(jacobian.shape, (6 * self.robot.generalized_count,))
+
+        jacobian_out = np.empty_like(jacobian)
+        returned = self.robot.jacobian(q, self.target, out=jacobian_out)
+        self.assertIs(returned, jacobian_out)
+        np.testing.assert_array_equal(returned, jacobian)
+
+        mass_out = np.empty(self.robot.generalized_count**2, dtype=np.float64)
+        returned_mass = self.robot.mass_matrix(q, out=mass_out)
+        self.assertIs(returned_mass, mass_out)
+        np.testing.assert_allclose(returned_mass, self.robot.mass_matrix(q))
+
+        # A strided input remains supported through a temporary contiguous view.
+        strided_q = np.repeat(q, 2)[::2]
+        np.testing.assert_allclose(
+            self.robot.velocity_product_forces(strided_q, qd),
+            self.robot.velocity_product_forces(q, qd),
+        )
+
+        with self.assertRaisesRegex(ValueError, "out must contain exactly"):
+            self.robot.gravity(q, out=np.empty(self.robot.generalized_count - 1))
+        with self.assertRaises((TypeError, ValueError)):
+            self.robot.gravity(q, out=np.empty(self.robot.generalized_count, dtype=np.float32))
+        with self.assertRaises(ValueError):
+            self.robot.gravity(q, out=q)
 
 
 if __name__ == "__main__":

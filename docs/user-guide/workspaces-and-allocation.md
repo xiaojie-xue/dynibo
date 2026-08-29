@@ -9,7 +9,7 @@ buffers once in a model-scoped workspace and reuses them.
 | Interface | Workspace ownership | Calculation outputs |
 |---|---|---|
 | Rust | One workspace owned by each `Robot` or `FloatingRobot` | Caller supplies matrix and force buffers |
-| Python | One native workspace owned by each `Robot` or `FloatingRobot` | Python tuples/value objects are returned |
+| Python | One native workspace owned by each `Robot` or `FloatingRobot` | NumPy arrays/value objects are returned; `out=` reuses caller storage |
 | C++ | One native workspace owned by each `dynibo::Robot` or `dynibo::FloatingRobot` | `std::vector` or value objects are returned |
 | C | Explicit `DyniboWorkspace*` or `DyniboFloatingWorkspace*` | Caller supplies buffers and structs |
 
@@ -32,8 +32,8 @@ Rust and C give direct control over output allocation:
     ```
 
 Creating a workspace allocates all internal scratch buffers. Reusing it does not
-resize those buffers. Python and C++ still allocate language-level return
-containers for results such as matrices.
+resize those buffers. Python can reuse an `out=` NumPy array; without one it
+allocates a result array. C++ allocates language-level return containers.
 
 ## Model scope
 

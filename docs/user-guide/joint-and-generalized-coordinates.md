@@ -47,8 +47,8 @@ The same ordering defines Jacobian columns and both axes of the mass matrix.
 | Generalized force | `G` |
 
 C and Rust require caller-provided output buffers for matrix and generalized
-force operations. Python and C++ allocate their returned tuple or vector, but
-the result has the same dimensions.
+force operations. Python returns NumPy arrays or writes into `out=`, while C++
+allocates a vector; the result has the same dimensions.
 
 ## Joint limits
 

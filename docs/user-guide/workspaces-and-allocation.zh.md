@@ -8,7 +8,7 @@ Dynibo 在模型局部的 workspace 中一次性分配这些 buffer，之后重�
 | 接口 | Workspace 所有权 | 计算输出 |
 |---|---|---|
 | Rust | 每个 `Robot` 或 `FloatingRobot` 持有一个 workspace | 矩阵和广义力 buffer 由调用方提供 |
-| Python | 每个 `Robot` 或 `FloatingRobot` 持有一个原生 workspace | 返回 Python tuple 或值对象 |
+| Python | 每个 `Robot` 或 `FloatingRobot` 持有一个原生 workspace | 返回 NumPy 数组或值对象；`out=` 可复用调用方存储 |
 | C++ | 每个 `dynibo::Robot` 或 `dynibo::FloatingRobot` 持有一个原生 workspace | 返回 `std::vector` 或值对象 |
 | C | 显式 `DyniboWorkspace*` 或 `DyniboFloatingWorkspace*` | buffer 和结构体由调用方提供 |
 
@@ -31,7 +31,8 @@ Rust 和 C 可以直接控制输出内存：
     ```
 
 创建 workspace 时会分配全部内部临时 buffer；复用时不会调整这些 buffer 的尺寸。
-Python 和 C++ 对矩阵等结果仍会分配语言层的返回容器。
+Python 可通过 `out=` 复用 NumPy 数组，未提供时才分配结果数组；C++ 会分配语言层的
+返回容器。
 
 ## 模型作用域
 
