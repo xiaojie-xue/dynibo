@@ -23,7 +23,10 @@ def main() -> None:
         "urdf",
         nargs="?",
         type=Path,
-        default=Path(__file__).resolve().parents[1] / "data" / "franka_fer.urdf",
+        default=Path(__file__).resolve().parents[1]
+        / "data"
+        / "franka"
+        / "franka_fer.urdf",
     )
     parser.add_argument("--target", default="fer_link8")
     args = parser.parse_args()

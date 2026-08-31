@@ -4,7 +4,7 @@
 
 <h1>dynibo</h1>
 
-<p><strong>Fast &middot; Lightweight &middot; Reliable</strong></p>
+<p><strong>Fast &middot; Reliable &middot; Easy to Use</strong></p>
 
 <p>
   <a href="https://dynibo.readthedocs.io/en/latest/zh/">文档</a> &nbsp;&middot;&nbsp;
@@ -21,7 +21,7 @@
 
 </div>
 
-`dynibo` 是一个快速、轻量且可靠的机器人运动学与动力学库。它在运行时从 URDF
+`dynibo` 是一个快速、可靠且易用的机器人运动学与动力学库。它在运行时从 URDF
 加载机器人，并通过 Robot 内部的可复用存储提供计算期零分配的接口；同时基于同一
 套 Rust 核心开放 Python 与 C/C++ 接口。
 
@@ -51,7 +51,14 @@ i9-14900K、rustc 1.97.1 和 Pinocchio 3.9.0。初始化和内存分配不计入
 cargo bench --features pinocchio-bench --bench pinocchio -- --quick
 ```
 
-### 轻量
+### 可靠
+
+Dynibo 将随机生成的、可精确复现的 URDF 用例与长期维护的固定用例相结合，覆盖串联与树状
+机器人、固定基座与浮动基座、混合关节、外部载荷、非法输入及 workspace 重复使用。结果通过
+有限差分近似、算法间一致性关系和独立 Pinocchio oracle 校验；另有专项测试验证计算期零分配
+及安装后的 Rust、Python、C 和 C++ 包。详见[测试架构](tests/TESTING.zh.md)。
+
+### 易用
 
 Dynibo 专注于最常用的机器人运动学与动力学接口：
 
@@ -68,14 +75,8 @@ Dynibo 专注于最常用的机器人运动学与动力学接口：
 - `forward_dynamics` — 线性时间复杂度的 articulated-body 正动力学
 
 API 围绕少量核心类型构建：`Robot`、`LinkId`、`Frame`、`Twist` 和
-`Wrench`。Rust、Python、C 和 C++ 接口共用同一套 Rust 实现。
-
-### 可靠
-
-Dynibo 将随机生成的、可精确复现的 URDF 用例与长期维护的固定用例相结合，覆盖串联与树状
-机器人、固定基座与浮动基座、混合关节、外部载荷、非法输入及 workspace 重复使用。结果通过
-有限差分近似、算法间一致性关系和独立 Pinocchio oracle 校验；另有专项测试验证计算期零分配
-及安装后的 Rust、Python、C 和 C++ 包。详见[测试架构](tests/TESTING.zh.md)。
+`Wrench`。静态内存分配由库在内部隐藏式管理，用户无需分别构造 `Model` 和 `Data`。
+Rust、Python、C 和 C++ 接口共用同一套 Rust 实现。
 
 ## 依赖
 
@@ -187,6 +188,11 @@ cargo test --workspace --all-targets --locked
 ```bash
 bash ci/test-all.sh
 ```
+
+## 许可证
+
+Dynibo 代码使用 [MIT 许可证](LICENSE)。随项目提供的机器人描述保留各自的
+[第三方许可证](examples/data/README.md)，包括 Franka 的 Apache-2.0 和 Unitree 的 BSD-3-Clause。
 
 ## 贡献
 

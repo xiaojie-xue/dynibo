@@ -158,7 +158,8 @@ impl Model {
         workspace.step.fill(0.0);
         workspace.link_loads.fill(Wrench::zeros());
         output.fill(0.0);
-        self.inverse_dynamics_kernel(
+        self.inverse_dynamics_kernel_validated(
+            false,
             q,
             qd,
             &workspace.step,
@@ -237,7 +238,8 @@ impl Model {
         workspace.link_loads.fill(Wrench::zeros());
         output.fill(0.0);
         let joint_offset = base_dof_count(base_mode);
-        let base_load = self.inverse_dynamics_kernel(
+        let base_load = self.inverse_dynamics_kernel_validated(
+            joint_offset != 0,
             q,
             qd,
             &workspace.step,
@@ -351,7 +353,8 @@ impl Model {
         let root_load = self.prepare_indexed_loads(loads, &mut workspace.link_loads)?;
         output.fill(0.0);
         let joint_offset = base_dof_count(base_mode);
-        let base_load = self.inverse_dynamics_kernel(
+        let base_load = self.inverse_dynamics_kernel_validated(
+            joint_offset != 0,
             q,
             qd,
             qdd,
@@ -389,7 +392,8 @@ impl Model {
     ) -> Result<()> {
         let root_load = self.prepare_indexed_loads(loads, &mut workspace.link_loads)?;
         output.fill(0.0);
-        self.inverse_dynamics_kernel(
+        self.inverse_dynamics_kernel_validated(
+            false,
             q,
             qd,
             qdd,
@@ -464,9 +468,14 @@ impl Model {
         Ok(())
     }
 
+    // Callers must validate user q/qd/qdd before entering this kernel. The
+    // velocity-product callers instead supply a freshly zeroed qdd workspace.
+    // Keep length checks here for that internal buffer, but do not rescan values.
+    // Fixed-base callers do not consume the returned root reaction wrench.
     #[allow(clippy::too_many_arguments)]
-    fn inverse_dynamics_kernel(
+    fn inverse_dynamics_kernel_validated(
         &self,
+        compute_root_wrench: bool,
         q: &[f64],
         qd: &[f64],
         qdd: &[f64],
@@ -478,9 +487,9 @@ impl Model {
         scratch: DynamicsScratch<'_>,
         output: &mut [f64],
     ) -> Result<Wrench> {
-        self.validate_slice("q", q)?;
-        self.validate_slice("qd", qd)?;
-        self.validate_slice("qdd", qdd)?;
+        self.validate_slice_length("q", q.len(), self.joint_count())?;
+        self.validate_slice_length("qd", qd.len(), self.joint_count())?;
+        self.validate_slice_length("qdd", qdd.len(), self.joint_count())?;
         self.validate_dynamics_scratch(&scratch)?;
         self.validate_joint_output("inverse dynamics joint output", output)?;
         let base_rotation_inverse = base_frame.rotation.inverse();
@@ -510,7 +519,8 @@ impl Model {
             let velocity = self.joint_value(qd, i);
             let acceleration_value = self.joint_value(qdd, i);
             let transform = joint.frame(position);
-            let rotation_inverse = transform.rotation.inverse();
+            // Reuse one stack-local matrix for the three rotations below.
+            let rotation_inverse = transform.rotation.inverse().to_rotation_matrix();
             let translation = transform.translation.vector;
             let axis = joint.axis.as_ref();
             let rotated_omega = rotation_inverse * parent_omega;
@@ -548,20 +558,24 @@ impl Model {
             scratch.transforms[i] = transform;
         }
 
-        let root = self.link_dynamics[0];
-        let root_center_acceleration = base_origin_acceleration
-            + base_angular_acceleration.cross(&root.center_of_mass)
-            + base_omega.cross(&base_omega.cross(&root.center_of_mass));
-        let root_force = root.mass * root_center_acceleration;
-        let mut accumulated_root_load = add_wrench(
-            root_load,
-            Wrench::new(
-                root.center_of_mass.cross(&root_force)
-                    + root.inertia * base_angular_acceleration
-                    + base_omega.cross(&(root.inertia * base_omega)),
-                root_force,
-            ),
-        );
+        let mut accumulated_root_load = if compute_root_wrench {
+            let root = self.link_dynamics[0];
+            let root_center_acceleration = base_origin_acceleration
+                + base_angular_acceleration.cross(&root.center_of_mass)
+                + base_omega.cross(&base_omega.cross(&root.center_of_mass));
+            let root_force = root.mass * root_center_acceleration;
+            add_wrench(
+                root_load,
+                Wrench::new(
+                    root.center_of_mass.cross(&root_force)
+                        + root.inertia * base_angular_acceleration
+                        + base_omega.cross(&(root.inertia * base_omega)),
+                    root_force,
+                ),
+            )
+        } else {
+            Wrench::zeros()
+        };
         for i in (0..self.model_joint_count()).rev() {
             let joint = self.joint_kinematics[i];
             let link = self.link_dynamics[i + 1];
@@ -586,7 +600,7 @@ impl Model {
                 let parent_load = wrench_to_parent(&scratch.transforms[i], scratch.link_loads[i]);
                 scratch.link_loads[parent - 1] =
                     add_wrench(scratch.link_loads[parent - 1], parent_load);
-            } else {
+            } else if compute_root_wrench {
                 accumulated_root_load = add_wrench(
                     accumulated_root_load,
                     wrench_to_parent(&scratch.transforms[i], scratch.link_loads[i]),

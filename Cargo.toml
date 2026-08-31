@@ -65,6 +65,10 @@ required-features = ["core-bench"]
 name = "franka"
 path = "examples/rust/franka.rs"
 
+[[example]]
+name = "g1"
+path = "examples/rust/g1.rs"
+
 [profile.release]
 codegen-units = 1
 lto = "fat"

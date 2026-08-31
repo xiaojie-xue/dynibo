@@ -4,7 +4,7 @@
 
 <h1>dynibo</h1>
 
-<p><strong>Fast &middot; Lightweight &middot; Reliable</strong></p>
+<p><strong>Fast &middot; Reliable &middot; Easy to Use</strong></p>
 
 <p>
   <a href="https://dynibo.readthedocs.io/">Documentation</a> &nbsp;&middot;&nbsp;
@@ -21,7 +21,7 @@
 
 </div>
 
-`dynibo` is a fast, lightweight, and reliable library for
+`dynibo` is a fast, reliable, and easy-to-use library for
 robot kinematics and dynamics. It loads robot topology from URDF at runtime and
 provides allocation-free calculations through reusable per-robot storage. Python and
 C/C++ interfaces are available on top of the same Rust core.
@@ -55,7 +55,17 @@ measured 0.703 ns fixed C ABI overhead. With Pinocchio available through
 cargo bench --features pinocchio-bench --bench pinocchio -- --quick
 ```
 
-### Lightweight
+### Reliable
+
+Dynibo combines maintained fixtures with a seed-reproducible generated-URDF
+corpus, covering serial and branched robots, fixed and floating bases, mixed
+joint types, external loads, invalid inputs, and repeated workspace use. Results
+are checked against finite-difference approximations, consistency relations
+between related algorithms, and outputs from an independent Pinocchio oracle.
+Separate tests verify allocation-free execution and the installed Rust, Python,
+C, and C++ packages. See the [test architecture](tests/TESTING.md) for details.
+
+### Easy to Use
 
 Dynibo intentionally focuses on the most commonly used robot kinematics and
 dynamics interfaces:
@@ -73,18 +83,9 @@ dynamics interfaces:
 - `forward_dynamics` — linear-time articulated-body forward dynamics
 
 The API is built around a small set of types: `Robot`, `LinkId`,
-`Frame`, `Twist`, and `Wrench`. Rust, Python, C, and C++ interfaces share the
-same Rust implementation.
-
-### Reliable
-
-Dynibo combines maintained fixtures with a seed-reproducible generated-URDF
-corpus, covering serial and branched robots, fixed and floating bases, mixed
-joint types, external loads, invalid inputs, and repeated workspace use. Results
-are checked against finite-difference approximations, consistency relations
-between related algorithms, and outputs from an independent Pinocchio oracle.
-Separate tests verify allocation-free execution and the installed Rust, Python,
-C, and C++ packages. See the [test architecture](tests/TESTING.md) for details.
+`Frame`, `Twist`, and `Wrench`. Static memory allocation is managed internally,
+so users do not need to construct separate `Model` and `Data` objects. Rust,
+Python, C, and C++ interfaces share the same Rust implementation.
 
 ## Dependencies
 
@@ -202,6 +203,12 @@ available through `pkg-config`.
 ```bash
 bash ci/test-all.sh
 ```
+
+## License
+
+Dynibo code is licensed under [MIT](LICENSE). Bundled robot descriptions retain
+their [third-party licenses](examples/data/README.md), including Franka's
+Apache-2.0 license and Unitree's BSD-3-Clause license.
 
 ## Contributing
 

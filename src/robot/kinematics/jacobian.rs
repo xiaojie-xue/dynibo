@@ -4,12 +4,6 @@ use crate::{BaseState, Frame, JointType, Result};
 
 use super::super::{FLOATING_BASE_DOF, FloatingRobot, LinkId, Model, Robot, Workspace};
 
-struct JacobianScratch<'a> {
-    frames: &'a mut [Frame],
-    jacobian: &'a mut [f64],
-    ancestor_path: &'a mut [usize],
-}
-
 struct JacobianDerivativeScratch<'a> {
     frames: &'a mut [Frame],
     angular_velocities: &'a mut [Vector3<f64>],
@@ -100,18 +94,7 @@ impl Model {
         self.validate_slice("q", q)?;
         self.validate_slice_length("jacobian output", output.len(), 6 * self.joint_count())?;
         let target_index = self.validate_link_id(target)?;
-        let local_target = self.forward_kinematics_and_jacobian_kernel(
-            q,
-            target_index,
-            JacobianScratch {
-                frames: &mut workspace.frames,
-                jacobian: &mut workspace.jacobian,
-                ancestor_path: &mut workspace.ancestor_path,
-            },
-            true,
-        )?;
-        self.write_fixed_jacobian(base_frame, &workspace.jacobian, &local_target, output);
-        Ok(())
+        self.direct_world_jacobian(q, target_index, base_frame, 0, workspace, output)
     }
 
     fn fixed_jacobian_derivative(
@@ -187,18 +170,14 @@ impl Model {
             6 * (self.joint_count() + FLOATING_BASE_DOF),
         )?;
         let target_index = self.validate_link_id(target)?;
-        let local_target = self.forward_kinematics_and_jacobian_kernel(
+        self.direct_world_jacobian(
             q,
             target_index,
-            JacobianScratch {
-                frames: &mut workspace.frames,
-                jacobian: &mut workspace.jacobian,
-                ancestor_path: &mut workspace.ancestor_path,
-            },
-            true,
-        )?;
-        self.write_floating_jacobian(base, &workspace.jacobian, &local_target, output);
-        Ok(())
+            base.frame(),
+            FLOATING_BASE_DOF,
+            workspace,
+            output,
+        )
     }
 
     /// Writes the runtime-sized `6 x G` time derivative of the geometric
@@ -263,27 +242,69 @@ impl Model {
         Ok(())
     }
 
-    fn forward_kinematics_and_jacobian_kernel(
+    // Entry points have validated q, target and output dimensions. This path
+    // writes world-oriented frames relative to the root origin into scratch;
+    // IK/J-dot and other kernels rebuild frames before using root-local data.
+    fn direct_world_jacobian(
         &self,
         q: &[f64],
         target_index: usize,
-        scratch: JacobianScratch<'_>,
-        clear_output: bool,
-    ) -> Result<Frame> {
-        let JacobianScratch {
-            frames,
-            jacobian,
-            ancestor_path,
-        } = scratch;
-        let depth = self.prepare_ancestor_path(target_index, ancestor_path);
-        self.target_frames_kernel(q, &ancestor_path[..depth], frames)?;
-        self.jacobian_kernel(
-            frames,
-            target_index,
-            &ancestor_path[..depth],
-            jacobian,
-            clear_output,
-        )
+        base_frame: &Frame,
+        base_columns: usize,
+        workspace: &mut Workspace,
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.validate_slice_length(
+            "frame workspace",
+            workspace.frames.len(),
+            self.model_joint_count(),
+        )?;
+        self.validate_slice_length(
+            "jacobian output",
+            workspace.jacobian.len(),
+            6 * self.joint_count(),
+        )?;
+        let depth = self.prepare_ancestor_path(target_index, &mut workspace.ancestor_path);
+        let path = &workspace.ancestor_path[..depth];
+        // World axes but positions relative to the base origin: large absolute
+        // translations must not degrade the target-to-joint moment arms.
+        let mut frame = Frame::identity();
+        frame.rotation = base_frame.rotation;
+        for &joint_index in path.iter().rev() {
+            frame *= self.joint_kinematics[joint_index].frame(self.joint_value(q, joint_index));
+            workspace.frames[joint_index] = frame;
+        }
+        let target = frame_for_target(&workspace.frames, target_index);
+        output.fill(0.0);
+        if base_columns != 0 {
+            for i in 0..3 {
+                output[6 * i + i] = 1.0;
+                let linear = Vector3::ith(i, 1.0).cross(&target.translation.vector);
+                output[6 * i + 3..6 * i + 6].copy_from_slice(linear.as_slice());
+                output[6 * (i + 3) + i + 3] = 1.0;
+            }
+        }
+        for &joint_index in path {
+            let Some(dof) = self.joint_dof_indices[joint_index] else {
+                continue;
+            };
+            let joint = self.joint_kinematics[joint_index];
+            let joint_frame = workspace.frames[joint_index];
+            let axis = joint_frame.rotation * joint.axis.as_ref();
+            let column = &mut output[6 * (base_columns + dof)..6 * (base_columns + dof + 1)];
+            match joint.joint_type {
+                JointType::Revolute => {
+                    column[..3].copy_from_slice(axis.as_slice());
+                    column[3..].copy_from_slice(
+                        axis.cross(&(target.translation.vector - joint_frame.translation.vector))
+                            .as_slice(),
+                    );
+                }
+                JointType::Prismatic => column[3..].copy_from_slice(axis.as_slice()),
+                JointType::Fixed => unreachable!(),
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn jacobian_kernel(
@@ -323,56 +344,6 @@ impl Model {
             }
         }
         Ok(target_frame)
-    }
-
-    fn write_floating_jacobian(
-        &self,
-        base: &BaseState,
-        joint_jacobian: &[f64],
-        local_target: &Frame,
-        output: &mut [f64],
-    ) {
-        output.fill(0.0);
-        let base_columns = FLOATING_BASE_DOF;
-        let rotation = base.frame().rotation;
-        if base_columns != 0 {
-            let offset = rotation * local_target.translation.vector;
-            for axis_index in 0..3 {
-                let axis = Vector3::ith(axis_index, 1.0);
-                let angular_column = &mut output[6 * axis_index..6 * axis_index + 6];
-                angular_column[..3].copy_from_slice(axis.as_slice());
-                angular_column[3..].copy_from_slice(axis.cross(&offset).as_slice());
-                output[6 * (axis_index + 3) + 3 + axis_index] = 1.0;
-            }
-        }
-        for dof_index in 0..self.joint_count() {
-            let source = &joint_jacobian[6 * dof_index..6 * dof_index + 6];
-            let angular = rotation * Vector3::from_column_slice(&source[..3]);
-            let linear = rotation * Vector3::from_column_slice(&source[3..]);
-            let column_index = base_columns + dof_index;
-            let column = &mut output[6 * column_index..6 * column_index + 6];
-            column[..3].copy_from_slice(angular.as_slice());
-            column[3..].copy_from_slice(linear.as_slice());
-        }
-    }
-
-    fn write_fixed_jacobian(
-        &self,
-        base_frame: &Frame,
-        joint_jacobian: &[f64],
-        _local_target: &Frame,
-        output: &mut [f64],
-    ) {
-        output.fill(0.0);
-        let rotation = base_frame.rotation;
-        for dof_index in 0..self.joint_count() {
-            let source = &joint_jacobian[6 * dof_index..6 * dof_index + 6];
-            let column = &mut output[6 * dof_index..6 * dof_index + 6];
-            column[..3]
-                .copy_from_slice((rotation * Vector3::from_column_slice(&source[..3])).as_slice());
-            column[3..]
-                .copy_from_slice((rotation * Vector3::from_column_slice(&source[3..])).as_slice());
-        }
     }
 
     fn jacobian_derivative_kernel(

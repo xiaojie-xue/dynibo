@@ -175,6 +175,63 @@ fn generalized_jacobian_and_derivative_match_forward_motion() {
 }
 
 #[test]
+fn world_jacobians_are_invariant_to_large_base_translations() {
+    let rotation = UnitQuaternion::from_euler_angles(0.3, -0.2, 0.4);
+
+    let mut fixed = Robot::from_urdf(FLOATING_ARM.path()).unwrap();
+    let q = [0.1, -0.3];
+    for target in [fixed.root_link_id(), fixed.link_id("tool").unwrap()] {
+        fixed
+            .set_base_frame(Frame::from_parts(Translation3::identity(), rotation))
+            .unwrap();
+        let mut expected = vec![0.0; 6 * fixed.generalized_count()];
+        fixed.jacobian(&q, target, &mut expected).unwrap();
+        for shift in [-1e12, 1e12] {
+            fixed
+                .set_base_frame(Frame::from_parts(
+                    Translation3::new(shift, -shift, shift),
+                    rotation,
+                ))
+                .unwrap();
+            let mut actual = vec![f64::NAN; expected.len()];
+            fixed.jacobian(&q, target, &mut actual).unwrap();
+            assert_eq!(actual, expected);
+        }
+    }
+
+    let mut floating = robot();
+    for target in [floating.root_link_id(), floating.link_id("tool").unwrap()] {
+        let q = [0.1, -0.3];
+        let mut expected = vec![0.0; 6 * floating.generalized_count()];
+        floating
+            .jacobian(
+                &BaseState::stationary(Frame::from_parts(Translation3::identity(), rotation))
+                    .unwrap(),
+                &q,
+                target,
+                &mut expected,
+            )
+            .unwrap();
+        for shift in [-1e12, 1e12] {
+            let mut actual = vec![f64::NAN; expected.len()];
+            floating
+                .jacobian(
+                    &BaseState::stationary(Frame::from_parts(
+                        Translation3::new(shift, -shift, shift),
+                        rotation,
+                    ))
+                    .unwrap(),
+                    &q,
+                    target,
+                    &mut actual,
+                )
+                .unwrap();
+            assert_eq!(actual, expected);
+        }
+    }
+}
+
+#[test]
 fn floating_mass_velocity_product_gravity_and_rnea_obey_manipulator_identities() {
     let mut robot = robot();
     let moving_base = BaseState::new(base_frame(), base_velocity(), Twist::zeros()).unwrap();

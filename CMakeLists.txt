@@ -82,7 +82,7 @@ add_library(dynibo_c SHARED IMPORTED GLOBAL)
 set_target_properties(dynibo_c PROPERTIES
     IMPORTED_LOCATION "${DYNIBO_BUILT_LIBRARY}"
     INTERFACE_INCLUDE_DIRECTORIES
-        "${DYNIBO_GENERATED_INCLUDE_DIR};${CMAKE_CURRENT_SOURCE_DIR}/bindings/c/include")
+        "${DYNIBO_GENERATED_INCLUDE_DIR};${DYNIBO_GENERATED_INCLUDE_DIR}/dynibo;${CMAKE_CURRENT_SOURCE_DIR}/bindings/c/include")
 if(WIN32)
     set(DYNIBO_CARGO_IMPLIB
         "${CMAKE_CURRENT_SOURCE_DIR}/target/${DYNIBO_CARGO_TARGET_DIR}/${DYNIBO_IMPLIB_FILE}")
@@ -97,6 +97,9 @@ if(DYNIBO_BUILD_EXAMPLES)
     add_executable(dynibo_cpp_example examples/cpp/franka.cpp)
     target_compile_features(dynibo_cpp_example PRIVATE cxx_std_17)
     target_link_libraries(dynibo_cpp_example PRIVATE dynibo::dynibo)
+    add_executable(dynibo_cpp_g1_example examples/cpp/g1.cpp)
+    target_compile_features(dynibo_cpp_g1_example PRIVATE cxx_std_17)
+    target_link_libraries(dynibo_cpp_g1_example PRIVATE dynibo::dynibo)
 endif()
 
 configure_package_config_file(

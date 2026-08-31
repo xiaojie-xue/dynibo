@@ -11,7 +11,8 @@ fn print_vector(label: &str, values: &[f64]) {
 }
 
 fn main() -> dynibo::Result<()> {
-    let urdf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/data/franka_fer.urdf");
+    let urdf =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/data/franka/franka_fer.urdf");
     let mut robot = Robot::from_urdf(urdf)?;
     let flange = robot.link_id("fer_link8")?;
 
