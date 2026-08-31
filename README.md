@@ -22,7 +22,8 @@
 </div>
 
 `dynibo` is a fast, reliable, and easy-to-use library for
-robot kinematics and dynamics. It loads robot topology from URDF at runtime and
+robot kinematics and dynamics, supporting both fixed- and floating-base robots.
+It loads robot topology from URDF at runtime and
 provides allocation-free calculations through reusable per-robot storage. Python and
 C/C++ interfaces are available on top of the same Rust core.
 
@@ -30,30 +31,46 @@ C/C++ interfaces are available on top of the same Rust core.
 
 ### Fast
 
-Across the benchmarks below, Dynibo runs 1.19–2.51× as fast as Pinocchio for the
-measured core operations. It is written in Rust and keeps allocation outside the
-calculation loop. After a `Robot` and output buffers are created, the main
-kinematics and dynamics routines reuse internal memory without allocating or resizing.
+Dynibo is written in Rust and reuses per-robot storage. After a `Robot` and
+output buffers are created, the main kinematics and dynamics routines do not
+allocate or resize memory inside the calculation loop.
 
-The table below shows Dynibo's speedup over Pinocchio for core kinematics and
-dynamics operations.
+The table below shows Dynibo's speedup over Pinocchio on two robots:
+Franka, a fixed-base manipulator with 7 joints, and unitree G1, a floating-base
+humanoid with 29 joints.
 
-| Model | FK | Jacobian | Gravity | RNEA |
-|---|---:|---:|---:|---:|
-| Two-leaf tree (7 joints, fixed base) | 1.90× | 2.05× | 1.89× | 1.94× |
-| Two-leaf tree (7 joints, floating base) | 2.16× | 2.51× | 2.15× | 2.20× |
-| Serial chain (40 joints, fixed base) | 1.19× | 1.49× | 1.78× | 1.99× |
-| Serial chain (40 joints, floating base) | 1.21× | 1.56× | 1.79× | 2.09× |
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2">Operation</th>
+      <th colspan="2" align="center">Rust</th>
+      <th colspan="2" align="center">Python</th>
+    </tr>
+    <tr>
+      <th>Franka</th><th>unitree G1</th>
+      <th>Franka</th><th>unitree G1</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Jacobian</td>
+      <td align="right">1.59×</td><td align="right">1.80×</td>
+      <td align="right">1.28×</td><td align="right">1.38×</td>
+    </tr>
+    <tr>
+      <td>RNEA</td>
+      <td align="right">1.74×</td><td align="right">1.81×</td>
+      <td align="right">1.17×</td><td align="right">1.54×</td>
+    </tr>
+    <tr>
+      <td>ABA</td>
+      <td align="right">1.20×</td><td align="right">1.14×</td>
+      <td align="right">1.81×</td><td align="right">1.89×</td>
+    </tr>
+  </tbody>
+</table>
 
-These Criterion quick-mode results use the same URDF models and joint states on
-an Intel Core i9-14900K with rustc 1.97.1 and Pinocchio 3.9.0. Setup and
-allocation are excluded, and speedups use interval medians after subtracting the
-measured 0.703 ns fixed C ABI overhead. With Pinocchio available through
-`pkg-config`, rerun the raw benchmarks with:
-
-```bash
-cargo bench --features pinocchio-bench --bench pinocchio -- --quick
-```
+Source code to reproduce these results is available in [`benches/`](benches/).
 
 ### Reliable
 
@@ -184,8 +201,9 @@ kinematics and dynamics methods listed above.
 
 ## Supported models
 
-Dynibo supports runtime-sized tree URDFs with revolute, continuous, prismatic,
-and fixed joints. It rejects invalid topology and reports structured errors for
+Dynibo supports both **fixed-base robots** and **floating-base robots**, using
+runtime-sized tree URDFs with revolute, continuous, prismatic, and fixed joints.
+It rejects invalid topology and reports structured errors for
 bad input lengths, model-mismatched handles, and solver failures.
 
 ## Testing
