@@ -86,3 +86,12 @@ Installed C, C++, and Python package tests also remain black-box tests rather
 than using Rust test helpers. They consume the versioned
 `tests/data/pinocchio_reference_v1.tsv` corpus; the feature-gated Pinocchio
 oracle verifies that committed corpus before package tests reuse it.
+
+Python package tests additionally cover rotated floating-base motion with
+stationary joints and with moving joints. Complete Jacobian derivatives,
+velocities, accelerations, tool-point velocities, and velocity-product forces
+are checked against the Pinocchio-verified corpus. Generalized-coordinate
+ordering and column-major matrix layout are also checked through kinematic
+identities. Both robot types exercise constructors, lifecycle errors, NumPy
+input layouts, reusable outputs, and recovery after invalid calls. Non-finite
+loads must raise `ValueError` before writing an output buffer.
