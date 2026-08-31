@@ -4,11 +4,11 @@
 
 <h1>dynibo</h1>
 
-<p><strong>Fast &middot; Reliable &middot; Easy to Use</strong></p>
+<p><strong>Dynamics for the Loop</strong></p>
 
 <p>
   <a href="https://dynibo.readthedocs.io/">Documentation</a> &nbsp;&middot;&nbsp;
-  <strong>English</strong> | <a href="README.zh.md">简体中文</a>
+  <strong>English</strong> | <a href="https://github.com/xiaojie-xue/dynibo/blob/main/README.zh.md">简体中文</a>
 </p>
 
 <p>
@@ -16,16 +16,15 @@
   <a href="https://codecov.io/gh/xiaojie-xue/dynibo"><img alt="codecov" src="https://codecov.io/gh/xiaojie-xue/dynibo/branch/main/graph/badge.svg"></a>
   <a href="https://crates.io/crates/dynibo"><img alt="crates.io" src="https://img.shields.io/crates/v/dynibo.svg?color=CE422B&amp;logo=rust&amp;logoColor=white"></a>
   <a href="https://pypi.org/project/dynibo/"><img alt="PyPI" src="https://img.shields.io/pypi/v/dynibo.svg?color=3776AB&amp;logo=python&amp;logoColor=white"></a>
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <a href="https://github.com/xiaojie-xue/dynibo/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
 </p>
 
 </div>
 
-`dynibo` is a fast, reliable, and easy-to-use library for
-robot kinematics and dynamics, supporting both fixed- and floating-base robots.
-It loads robot topology from URDF at runtime and
-provides allocation-free calculations through reusable per-robot storage. Python and
-C/C++ interfaces are available on top of the same Rust core.
+`dynibo` is a robot kinematics and dynamics library for controller development.
+It supports manipulators, humanoids, and other robots with fixed or floating
+bases. It loads robot models from URDF and provides Rust, Python, C, and C++
+interfaces.
 
 ## Features
 
@@ -35,9 +34,11 @@ Dynibo is written in Rust and reuses per-robot storage. After a `Robot` and
 output buffers are created, the main kinematics and dynamics routines do not
 allocate or resize memory inside the calculation loop.
 
-The table below shows Dynibo's speedup over Pinocchio on two robots:
-Franka, a fixed-base manipulator with 7 joints, and unitree G1, a floating-base
-humanoid with 29 joints.
+To put its computation speed in context, we benchmark Dynibo against
+[Pinocchio](https://github.com/stack-of-tasks/pinocchio), an open-source library
+for robot kinematics and dynamics. The benchmarks use Franka, a fixed-base
+manipulator with 7 joints, and unitree G1, a floating-base humanoid with 29 joints.
+The table below shows Dynibo's speedup over Pinocchio for each operation.
 
 <table>
   <thead>
@@ -70,7 +71,8 @@ humanoid with 29 joints.
   </tbody>
 </table>
 
-Source code to reproduce these results is available in [`benches/`](benches/).
+Source code to reproduce these results is available in
+[`benches/`](https://github.com/xiaojie-xue/dynibo/tree/main/benches).
 
 ### Reliable
 
@@ -80,29 +82,17 @@ joint types, external loads, invalid inputs, and repeated workspace use. Results
 are checked against finite-difference approximations, consistency relations
 between related algorithms, and outputs from an independent Pinocchio oracle.
 Separate tests verify allocation-free execution and the installed Rust, Python,
-C, and C++ packages. See the [test architecture](tests/TESTING.md) for details.
+C, and C++ packages. See the
+[test architecture](https://github.com/xiaojie-xue/dynibo/blob/main/tests/TESTING.md)
+for details.
 
 ### Easy to Use
 
-Dynibo intentionally focuses on the most commonly used robot kinematics and
-dynamics interfaces:
-
-- `forward_kinematics` — target-link pose
-- `jacobian` — target-link Jacobian
-- `jacobian_derivative` — time derivative of the target-link Jacobian
-- `forward_velocity_kinematics` — spatial velocity
-- `forward_acceleration_kinematics` — spatial acceleration
-- `inverse_kinematics` — damped least-squares IK
-- `mass_matrix` — joint-space mass matrix
-- `velocity_product_forces` — Coriolis and centrifugal generalized forces
-- `gravity` — gravity compensation with optional external loads
-- `inverse_dynamics` — recursive Newton–Euler inverse dynamics
-- `forward_dynamics` — linear-time articulated-body forward dynamics
-
-The API is built around a small set of types: `Robot`, `LinkId`,
-`Frame`, `Twist`, and `Wrench`. Static memory allocation is managed internally,
-so users do not need to construct separate `Model` and `Data` objects. Rust,
-Python, C, and C++ interfaces share the same Rust implementation.
+Dynibo's API is built around `Robot`: load a URDF, then call kinematics and
+dynamics algorithms. `Robot` manages its internal calculation storage, so
+users do not need to create and maintain separate `Model` and `Data` objects.
+Rust, Python, C, and C++ interfaces share the same Rust core, making it easy to
+integrate Dynibo into projects in different languages.
 
 ## Dependencies
 
@@ -111,7 +101,7 @@ The Rust core has two direct runtime dependencies:
 - [`nalgebra`](https://nalgebra.rs/) — linear algebra and numerical types
 - [`urdf-rs`](https://github.com/openrr/urdf-rs) — URDF parsing
 
-Python wheels bundle the native library and have no runtime Python dependencies.
+Python wheels bundle the native library and require NumPy 1.23 or newer at runtime.
 
 ## Quick start
 
@@ -190,14 +180,14 @@ target_link_libraries(my_robot PRIVATE dynibo::dynibo)
 
 Configure the consumer with `-DCMAKE_PREFIX_PATH` pointing to the extracted
 archive directory or the installation prefix. See the
-[installation guide](docs/getting-started/installation.md) for platform-specific
-runtime library paths.
+[installation guide](https://github.com/xiaojie-xue/dynibo/blob/main/docs/getting-started/installation.md)
+for platform-specific runtime library paths.
 
 ## Examples
 
 Complete Rust, Python, C++, and C examples are available in the
-[`examples/`](examples/) directory. Each example exercises all of the main
-kinematics and dynamics methods listed above.
+[`examples/`](https://github.com/xiaojie-xue/dynibo/tree/main/examples) directory.
+Each example exercises all of the main kinematics and dynamics methods.
 
 ## Supported models
 
@@ -224,15 +214,17 @@ bash ci/test-all.sh
 
 ## License
 
-Dynibo code is licensed under [MIT](LICENSE). Bundled robot descriptions retain
-their [third-party licenses](examples/data/README.md), including Franka's
-Apache-2.0 license and Unitree's BSD-3-Clause license.
+Dynibo code is licensed under
+[MIT](https://github.com/xiaojie-xue/dynibo/blob/main/LICENSE).
+Bundled robot descriptions retain their
+[third-party licenses](https://github.com/xiaojie-xue/dynibo/blob/main/examples/data/README.md),
+including Franka's Apache-2.0 license and Unitree's BSD-3-Clause license.
 
 ## Contributing
 
 Dynibo is still at an early stage, and contributions are welcome. See
-[`CONTRIBUTING.md`](CONTRIBUTING.md) for development setup, required checks, and
-pull request guidelines.
+[`CONTRIBUTING.md`](https://github.com/xiaojie-xue/dynibo/blob/main/CONTRIBUTING.md)
+for development setup, required checks, and pull request guidelines.
 
 ## Citation
 

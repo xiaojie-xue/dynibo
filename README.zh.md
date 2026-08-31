@@ -4,7 +4,7 @@
 
 <h1>dynibo</h1>
 
-<p><strong>Fast &middot; Reliable &middot; Easy to Use</strong></p>
+<p><strong>Dynamics for the Loop</strong></p>
 
 <p>
   <a href="https://dynibo.readthedocs.io/en/latest/zh/">文档</a> &nbsp;&middot;&nbsp;
@@ -21,9 +21,8 @@
 
 </div>
 
-`dynibo` 是一个快速、可靠且易用的机器人运动学与动力学库，支持固定和浮动基座机器人。它在运行时从 URDF
-加载机器人，并通过 Robot 内部的可复用存储提供计算期零分配的接口；同时基于同一
-套 Rust 核心开放 Python 与 C/C++ 接口。
+`dynibo` 是一个面向控制器设计的机器人运动学与动力学库，适用于机械臂、人形机器人等
+多种形态，支持固定和浮动基座。它可从 URDF 加载机器人模型，并提供 Rust、Python、C 和 C++ 接口。
 
 ## 特性
 
@@ -32,8 +31,10 @@
 Dynibo 基于 Rust 实现，并复用每个机器人的内部存储。创建 `Robot` 和输出 buffer 后，
 主要运动学与动力学接口不会在计算循环中分配内存或调整容量。
 
-下表展示 Dynibo 相对 Pinocchio 在两种机器人上的加速比：Franka 是 7 关节固定基座机械臂，
-unitree G1 是 29 关节浮动基座人形机器人。
+为直观展示计算性能，我们选用开源机器人运动学与动力学库
+[Pinocchio](https://github.com/stack-of-tasks/pinocchio) 作为参照，
+在 Franka（7 关节固定基座机械臂）和 unitree G1（29 关节浮动基座人形机器人）上进行基准测试。
+下表给出 Dynibo 相对 Pinocchio 在各项运算中的计算效率提升比例。
 
 <table>
   <thead>
@@ -76,22 +77,9 @@ Dynibo 将随机生成的、可精确复现的 URDF 用例与长期维护的固�
 
 ### 易用
 
-Dynibo 专注于最常用的机器人运动学与动力学接口：
-
-- `forward_kinematics` — 目标 link 位姿
-- `jacobian` — 目标 link 的 Jacobian
-- `jacobian_derivative` — 目标 link Jacobian 的时间导数
-- `forward_velocity_kinematics` — 空间速度
-- `forward_acceleration_kinematics` — 空间加速度
-- `inverse_kinematics` — 阻尼最小二乘逆运动学
-- `mass_matrix` — 关节空间质量矩阵
-- `velocity_product_forces` — 离心力 + 科氏广义力
-- `gravity` — 重力补偿，可附加外部载荷
-- `inverse_dynamics` — 递归 Newton–Euler 逆动力学
-- `forward_dynamics` — 线性时间复杂度的 articulated-body 正动力学
-
-静态内存分配由库在内部隐藏式管理，用户无需分别构造 `Model` 和 `Data`。
-Rust、Python、C 和 C++ 接口共用同一套 Rust 实现。
+Dynibo 的 API 围绕 `Robot` 展开：加载 URDF 后，即可调用运动学与动力学算法。
+内部计算存储由 `Robot` 管理，无需分别创建和维护 `Model` 与 `Data` 对象。
+Rust、Python、C 和 C++ 接口共用同一套 Rust 核心，便于接入不同语言的项目。
 
 ## 依赖
 
@@ -100,7 +88,7 @@ Rust 核心只有两个直接运行时依赖：
 - [`nalgebra`](https://nalgebra.rs/) — 线性代数与数值类型
 - [`urdf-rs`](https://github.com/openrr/urdf-rs) — URDF 解析
 
-Python wheel 已包含原生库，无需额外的 Python 运行时依赖。
+Python wheel 已包含原生库，运行时需要 NumPy 1.23 或更高版本。
 
 ## 快速开始
 
@@ -182,7 +170,7 @@ target_link_libraries(my_robot PRIVATE dynibo::dynibo)
 ## 示例
 
 Rust、Python、C++ 和 C 的完整调用示例见 [`examples/`](examples/) 目录；每个示例均覆盖
-上文列出的全部主要运动学与动力学方法。
+全部主要运动学与动力学方法。
 
 ## 支持的模型
 
