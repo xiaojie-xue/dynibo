@@ -417,8 +417,17 @@ fn convert_loads(
         .unwrap_or_default()
         .iter()
         .map(|load| {
+            let link = target_link(links, load.link_id)?;
+            if !load
+                .torque
+                .iter()
+                .chain(&load.force)
+                .all(|value| value.is_finite())
+            {
+                return Err(PyValueError::new_err("load contains a non-finite value"));
+            }
             Ok(IndexedLoad {
-                link: target_link(links, load.link_id)?,
+                link,
                 wrench: Wrench::new(Vector3::from(load.torque), Vector3::from(load.force)),
             })
         })

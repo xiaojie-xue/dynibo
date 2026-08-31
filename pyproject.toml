@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "dynibo"
 dynamic = ["version"]
-description = "Python bindings for tree-structured robot kinematics and dynamics"
+description = "Dynamics for the Loop"
 readme = "bindings/python/README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }

@@ -4,7 +4,7 @@
 
 <h1>dynibo</h1>
 
-<p><strong>Fast &middot; Lightweight &middot; Reliable</strong></p>
+<p><strong>Dynamics for the Loop</strong></p>
 
 <p>
   <a href="https://dynibo.readthedocs.io/en/latest/zh/">文档</a> &nbsp;&middot;&nbsp;
@@ -21,61 +21,65 @@
 
 </div>
 
-`dynibo` 是一个快速、轻量且可靠的机器人运动学与动力学库。它在运行时从 URDF
-加载机器人，并通过 Robot 内部的可复用存储提供计算期零分配的接口；同时基于同一
-套 Rust 核心开放 Python 与 C/C++ 接口。
+`dynibo` 是一个面向控制器设计的机器人运动学与动力学库，适用于机械臂、人形机器人等
+多种形态，支持固定和浮动基座。它可从 URDF 加载机器人模型，并提供 Rust、Python、C 和 C++ 接口。
 
 ## 特性
 
 ### 快速
 
-在下列 benchmark 所测量的核心操作中，Dynibo 的运行速度是 Pinocchio 的
-1.19–2.51 倍。Dynibo 基于 Rust 实现，并将内存分配移出计算循环。创建 `Robot`
-和输出 buffer 后，主要运动学与动力学接口会复用内部存储，不再分配或调整容量。
+Dynibo 基于 Rust 实现，并复用每个机器人的内部存储。创建 `Robot` 和输出 buffer 后，
+主要运动学与动力学接口不会在计算循环中分配内存或调整容量。
 
-下表展示 Dynibo 相对 Pinocchio 在核心运动学与动力学接口上的加速比。
+为直观展示计算性能，我们选用开源机器人运动学与动力学库
+[Pinocchio](https://github.com/stack-of-tasks/pinocchio) 作为参照，
+在 Franka（7 关节固定基座机械臂）和 unitree G1（29 关节浮动基座人形机器人）上进行基准测试。
+下表给出 Dynibo 相对 Pinocchio 在各项运算中的计算效率提升比例。
 
-| 模型 | FK | Jacobian | Gravity | RNEA |
-|---|---:|---:|---:|---:|
-| 双末端树状模型（7 关节，固定基座） | 1.90× | 2.05× | 1.89× | 1.94× |
-| 双末端树状模型（7 关节，浮动基座） | 2.16× | 2.51× | 2.15× | 2.20× |
-| 串联模型（40 关节，固定基座） | 1.19× | 1.49× | 1.78× | 1.99× |
-| 串联模型（40 关节，浮动基座） | 1.21× | 1.56× | 1.79× | 2.09× |
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2">运算</th>
+      <th colspan="2" align="center">Rust</th>
+      <th colspan="2" align="center">Python</th>
+    </tr>
+    <tr>
+      <th>Franka</th><th>unitree G1</th>
+      <th>Franka</th><th>unitree G1</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Jacobian</td>
+      <td align="right">1.59×</td><td align="right">1.80×</td>
+      <td align="right">1.28×</td><td align="right">1.38×</td>
+    </tr>
+    <tr>
+      <td>RNEA</td>
+      <td align="right">1.74×</td><td align="right">1.81×</td>
+      <td align="right">1.17×</td><td align="right">1.54×</td>
+    </tr>
+    <tr>
+      <td>ABA</td>
+      <td align="right">1.20×</td><td align="right">1.14×</td>
+      <td align="right">1.81×</td><td align="right">1.89×</td>
+    </tr>
+  </tbody>
+</table>
 
-这些 Criterion quick 模式数据使用相同的 URDF 模型和关节状态，测试环境为 Intel Core
-i9-14900K、rustc 1.97.1 和 Pinocchio 3.9.0。初始化和内存分配不计入耗时；加速比根据
-报告区间的中值计算，并从 Pinocchio 耗时中扣除实测的 0.703 ns 固定 C ABI 开销。
-确保 `pkg-config` 能找到 Pinocchio 后，可通过以下命令重新运行原始 benchmark：
-
-```bash
-cargo bench --features pinocchio-bench --bench pinocchio -- --quick
-```
-
-### 轻量
-
-Dynibo 专注于最常用的机器人运动学与动力学接口：
-
-- `forward_kinematics` — 目标 link 位姿
-- `jacobian` — 目标 link 的 Jacobian
-- `jacobian_derivative` — 目标 link Jacobian 的时间导数
-- `forward_velocity_kinematics` — 空间速度
-- `forward_acceleration_kinematics` — 空间加速度
-- `inverse_kinematics` — 阻尼最小二乘逆运动学
-- `mass_matrix` — 关节空间质量矩阵
-- `velocity_product_forces` — 离心力 + 科氏广义力
-- `gravity` — 重力补偿，可附加外部载荷
-- `inverse_dynamics` — 递归 Newton–Euler 逆动力学
-- `forward_dynamics` — 线性时间复杂度的 articulated-body 正动力学
-
-API 围绕少量核心类型构建：`Robot`、`LinkId`、`Frame`、`Twist` 和
-`Wrench`。Rust、Python、C 和 C++ 接口共用同一套 Rust 实现。
+复现上述结果的源码见 [`benches/`](benches/)。
 
 ### 可靠
 
-Dynibo 将随机生成的、可精确复现的 URDF 用例与长期维护的固定用例相结合，覆盖串联与树状
-机器人、固定基座与浮动基座、混合关节、外部载荷、非法输入及 workspace 重复使用。结果通过
+Dynibo 将随机生成的、可精确复现的 URDF 用例与长期维护的固定用例相结合，覆盖串联与树状机器人、固定基座与浮动基座、混合关节、外部载荷、非法输入及 workspace 重复使用。结果通过
 有限差分近似、算法间一致性关系和独立 Pinocchio oracle 校验；另有专项测试验证计算期零分配
 及安装后的 Rust、Python、C 和 C++ 包。详见[测试架构](tests/TESTING.zh.md)。
+
+### 易用
+
+Dynibo 的 API 围绕 `Robot` 展开：加载 URDF 后，即可调用运动学与动力学算法。
+内部计算存储由 `Robot` 管理，无需分别创建和维护 `Model` 与 `Data` 对象。
+Rust、Python、C 和 C++ 接口共用同一套 Rust 核心，便于接入不同语言的项目。
 
 ## 依赖
 
@@ -84,7 +88,7 @@ Rust 核心只有两个直接运行时依赖：
 - [`nalgebra`](https://nalgebra.rs/) — 线性代数与数值类型
 - [`urdf-rs`](https://github.com/openrr/urdf-rs) — URDF 解析
 
-Python wheel 已包含原生库，无需额外的 Python 运行时依赖。
+Python wheel 已包含原生库，运行时需要 NumPy 1.23 或更高版本。
 
 ## 快速开始
 
@@ -166,11 +170,12 @@ target_link_libraries(my_robot PRIVATE dynibo::dynibo)
 ## 示例
 
 Rust、Python、C++ 和 C 的完整调用示例见 [`examples/`](examples/) 目录；每个示例均覆盖
-上文列出的全部主要运动学与动力学方法。
+全部主要运动学与动力学方法。
 
 ## 支持的模型
 
-Dynibo 支持运行时尺寸的树状 URDF，以及 revolute、continuous、prismatic 和 fixed joint。
+Dynibo 支持**固定基座（fixed-base）机器人**和**浮动基座（floating-base）机器人**，
+模型采用运行时尺寸的树状 URDF，支持 revolute、continuous、prismatic 和 fixed joint。
 无效拓扑、错误输入长度、模型不匹配的 handle 和求解失败都会返回结构化错误。
 
 ## 测试
@@ -187,6 +192,11 @@ cargo test --workspace --all-targets --locked
 ```bash
 bash ci/test-all.sh
 ```
+
+## 许可证
+
+Dynibo 代码使用 [MIT 许可证](LICENSE)。随项目提供的机器人描述保留各自的
+[第三方许可证](examples/data/README.md)，包括 Franka 的 Apache-2.0 和 Unitree 的 BSD-3-Clause。
 
 ## 贡献
 

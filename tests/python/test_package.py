@@ -365,5 +365,399 @@ class PackageTests(unittest.TestCase):
             self.robot.gravity(q, out=q)
 
 
+def motion_base() -> dynibo.BaseState:
+    velocity = reference("floating_base_velocity")
+    acceleration = reference("floating_base_acceleration")
+    return dynibo.BaseState(
+        dynibo.Pose(
+            translation=reference("floating_base_translation"),
+            rotation_xyzw=reference("floating_motion_rotation_xyzw"),
+        ),
+        dynibo.Twist(angular=velocity[:3], linear=velocity[3:]),
+        dynibo.Twist(angular=acceleration[:3], linear=acceleration[3:]),
+    )
+
+
+def twist_values(twist: dynibo.Twist) -> tuple[float, ...]:
+    return twist.angular + twist.linear
+
+
+class ValueTypeTests(unittest.TestCase):
+    def test_defaults_and_properties(self) -> None:
+        self.assertEqual(dynibo.Pose().translation, (0.0, 0.0, 0.0))
+        self.assertEqual(dynibo.Pose().rotation_xyzw, (0.0, 0.0, 0.0, 1.0))
+        self.assertEqual(twist_values(dynibo.Twist()), (0.0,) * 6)
+        base = dynibo.BaseState()
+        self.assertEqual(base.frame, dynibo.Pose())
+        self.assertEqual(base.velocity, dynibo.Twist())
+        self.assertEqual(base.acceleration, dynibo.Twist())
+        self.assertEqual(base, dynibo.BaseState(None, None, None))
+        moving = motion_base()
+        self.assertEqual(moving.frame.translation, reference("floating_base_translation"))
+        self.assertEqual(moving.frame.rotation_xyzw, reference("floating_motion_rotation_xyzw"))
+        self.assertEqual(twist_values(moving.velocity), reference("floating_base_velocity"))
+        self.assertEqual(twist_values(moving.acceleration), reference("floating_base_acceleration"))
+        self.assertNotEqual(moving, base)
+        self.assertEqual(dynibo.BaseState(frame=moving.frame).velocity, dynibo.Twist())
+        self.assertEqual(dynibo.BaseState(velocity=moving.velocity).frame, dynibo.Pose())
+
+        load = dynibo.Load(3)
+        self.assertEqual(load.link_id, 3)
+        self.assertEqual(load.torque, (0.0,) * 3)
+        self.assertEqual(load.force, (0.0,) * 3)
+        load = dynibo.Load(2, torque=(0.1, 0.2, 0.3), force=(-1.0, 2.0, 4.0))
+        self.assertEqual(load.link_id, 2)
+        self.assertEqual(load.torque, (0.1, 0.2, 0.3))
+        self.assertEqual(load.force, (-1.0, 2.0, 4.0))
+        self.assertEqual(load, dynibo.Load(2, load.torque, load.force))
+
+    def test_ik_options_defaults_and_custom_values(self) -> None:
+        defaults = dict(
+            max_iterations=100,
+            translation_tolerance=1.0e-6,
+            rotation_tolerance=1.0e-6,
+            damping=1.0e-3,
+            max_step_norm=0.5,
+        )
+        custom = dict(
+            max_iterations=12,
+            translation_tolerance=2.0e-7,
+            rotation_tolerance=3.0e-7,
+            damping=4.0e-4,
+            max_step_norm=0.2,
+        )
+        for options, expected in (
+            (dynibo.IkOptions(), defaults),
+            (dynibo.IkOptions(**custom), custom),
+        ):
+            for name, value in expected.items():
+                with self.subTest(name=name, value=value):
+                    self.assertEqual(getattr(options, name), value)
+        self.assertEqual(dynibo.IkOptions(), dynibo.IkOptions(**defaults))
+        for invalid in (True, False, "10", 1.5):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(TypeError, "max_iterations must be an integer"):
+                    dynibo.IkOptions(max_iterations=invalid)
+
+
+class FloatingMotionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.robot = dynibo.FloatingRobot(URDF)
+        self.addCleanup(self.robot.close)
+        self.target = self.robot.link_id("test_link_4")
+        self.q = reference("q")
+
+    def test_motion_matches_pinocchio(self) -> None:
+        base = motion_base()
+        tool = dynibo.Pose(translation=reference("floating_motion_tool_translation"))
+        for case in ("base_only", "moving"):
+            qd = reference("qd") if case == "moving" else (0.0,) * len(self.q)
+            qdd = reference("qdd") if case == "moving" else (0.0,) * len(self.q)
+            results = {
+                "jacobian_derivative": self.robot.jacobian_derivative(
+                    base, self.q, qd, self.target
+                ),
+                "velocity": twist_values(
+                    self.robot.forward_velocity_kinematics(base, self.q, qd, self.target)
+                ),
+                "acceleration": twist_values(
+                    self.robot.forward_acceleration_kinematics(base, self.q, qd, qdd, self.target)
+                ),
+                "tool_velocity": twist_values(
+                    self.robot.forward_velocity_kinematics(base, self.q, qd, self.target, tool=tool)
+                ),
+                "velocity_product": self.robot.velocity_product_forces(base, self.q, qd),
+            }
+            for name, actual in results.items():
+                with self.subTest(case=case, operation=name):
+                    expected = reference(f"floating_motion_{case}_{name}")
+                    self.assertEqual(np.shape(actual), np.shape(expected))
+                    np.testing.assert_allclose(actual, expected, atol=3.0e-9, rtol=1.0e-9)
+
+            # Independent kinematic identities also check the generalized-coordinate
+            # ordering and the column-major matrix layout exposed by Python.
+            n = self.robot.generalized_count
+            jacobian = self.robot.jacobian(base, self.q, self.target).reshape((6, n), order="F")
+            derivative = results["jacobian_derivative"].reshape((6, n), order="F")
+            velocity = np.asarray(twist_values(base.velocity) + qd)
+            acceleration = np.asarray(twist_values(base.acceleration) + qdd)
+            np.testing.assert_allclose(
+                jacobian @ velocity, results["velocity"], atol=2.0e-12, rtol=1.0e-10
+            )
+            np.testing.assert_allclose(
+                jacobian @ acceleration + derivative @ velocity,
+                results["acceleration"],
+                atol=2.0e-12,
+                rtol=1.0e-10,
+            )
+
+    def test_stationary_base_and_joints_have_zero_motion(self) -> None:
+        base = dynibo.BaseState(frame=motion_base().frame)
+        zero = (0.0,) * len(self.q)
+        np.testing.assert_array_equal(
+            self.robot.jacobian_derivative(base, self.q, zero, self.target),
+            np.zeros(6 * self.robot.generalized_count),
+        )
+        self.assertEqual(
+            self.robot.forward_velocity_kinematics(base, self.q, zero, self.target), dynibo.Twist()
+        )
+        self.assertEqual(
+            self.robot.forward_acceleration_kinematics(base, self.q, zero, zero, self.target),
+            dynibo.Twist(),
+        )
+        np.testing.assert_allclose(
+            self.robot.velocity_product_forces(base, self.q, zero),
+            np.zeros(self.robot.generalized_count),
+            atol=1.0e-12,
+            rtol=0,
+        )
+
+
+class BindingContractTests(unittest.TestCase):
+    def test_constructors_and_lifecycle(self) -> None:
+        for robot_type in (dynibo.Robot, dynibo.FloatingRobot):
+            with self.subTest(robot=robot_type.__name__):
+                with robot_type(URDF) as direct, robot_type.from_urdf(URDF) as factory:
+                    for name, expected in (
+                        ("name", "test_arm"),
+                        ("joint_count", 4),
+                        ("link_count", 5),
+                        ("generalized_count", 10 if robot_type is dynibo.FloatingRobot else 4),
+                    ):
+                        self.assertEqual(getattr(direct, name), expected)
+                        self.assertEqual(getattr(factory, name), expected)
+                    prefix = (dynibo.BaseState(),) if robot_type is dynibo.FloatingRobot else ()
+                    target = direct.link_id("test_link_4")
+                    args = prefix + (reference("q"), target)
+                    self.assertEqual(
+                        direct.forward_kinematics(*args), factory.forward_kinematics(*args)
+                    )
+                direct.close()
+                for name in ("name", "joint_count", "generalized_count", "link_count"):
+                    with self.assertRaisesRegex(RuntimeError, "robot is closed"):
+                        getattr(direct, name)
+                with self.assertRaisesRegex(RuntimeError, "robot is closed"):
+                    direct.forward_kinematics(*args)
+                with self.assertRaisesRegex(RuntimeError, "robot is closed"):
+                    direct.__enter__()
+                with self.assertRaisesRegex(RuntimeError, "context-body-error"):
+                    with robot_type(URDF) as interrupted:
+                        raise RuntimeError("context-body-error")
+                with self.assertRaisesRegex(RuntimeError, "robot is closed"):
+                    interrupted.link_id("test_link_4")
+                for constructor in (robot_type, robot_type.from_urdf):
+                    with self.assertRaises(dynibo.ModelError):
+                        constructor(URDF.with_name("missing-model.urdf"))
+
+    def test_array_inputs_and_output_reuse(self) -> None:
+        for robot_type in (dynibo.Robot, dynibo.FloatingRobot):
+            with robot_type(URDF) as robot:
+                prefix = (motion_base(),) if robot_type is dynibo.FloatingRobot else ()
+                target = robot.link_id("test_link_4")
+                buffers = {}
+                for shift in (0.0, 0.1):
+                    values = np.asarray(reference("q")) + shift
+                    for kind, q in (
+                        ("list", values.tolist()),
+                        ("contiguous", values),
+                        ("strided", np.repeat(values, 2)[::2]),
+                    ):
+                        qd, qdd = np.asarray(reference("qd")), np.asarray(reference("qdd"))
+                        forces = robot.inverse_dynamics(*prefix, q, qd, qdd)
+                        calls = {
+                            "jacobian": (q, target),
+                            "jacobian_derivative": (q, qd, target),
+                            "mass_matrix": (q,),
+                            "gravity": (q,),
+                            "velocity_product_forces": (q, qd),
+                            "inverse_dynamics": (q, qd, qdd),
+                            "forward_dynamics": (q, qd, forces),
+                        }
+                        if robot_type is dynibo.Robot:
+                            calls["inverse_kinematics"] = (
+                                q,
+                                target,
+                                robot.forward_kinematics(q, target),
+                            )
+                        for name, args in calls.items():
+                            with self.subTest(
+                                robot=robot_type.__name__, operation=name, shift=shift, input=kind
+                            ):
+                                method = getattr(robot, name)
+                                expected = method(*prefix, *args)
+                                canonical_args = (values.tolist(),) + args[1:]
+                                np.testing.assert_allclose(
+                                    expected,
+                                    method(*prefix, *canonical_args),
+                                    atol=1.0e-11,
+                                    rtol=1.0e-10,
+                                )
+                                self.assertEqual(expected.dtype, np.float64)
+                                out = buffers.setdefault(name, np.empty_like(expected))
+                                out.fill(np.nan)
+                                self.assertIs(method(*prefix, *args, out=out), out)
+                                self.assertTrue(np.isfinite(out).all())
+                                np.testing.assert_allclose(
+                                    out, expected, atol=1.0e-11, rtol=1.0e-10
+                                )
+
+    def test_invalid_outputs_and_recovery(self) -> None:
+        for robot_type in (dynibo.Robot, dynibo.FloatingRobot):
+            with robot_type(URDF) as robot:
+                prefix = (motion_base(),) if robot_type is dynibo.FloatingRobot else ()
+                q = np.asarray(reference("q"))
+                expected = robot.gravity(*prefix, q)
+                n = robot.generalized_count
+                readonly = np.empty(n)
+                readonly.setflags(write=False)
+                # Both the short q view and full out view refer to the same storage.
+                storage = np.asarray(list(q) + [0.0] * (n - len(q)))
+                cases = (
+                    ("length", q, np.empty(n - 1)),
+                    ("dtype", q, np.empty(n, dtype=np.float32)),
+                    ("readonly", q, readonly),
+                    ("strided", q, np.empty(2 * n)[::2]),
+                    ("overlap", storage[: len(q)], storage),
+                )
+                for name, input_q, out in cases:
+                    with self.subTest(robot=robot_type.__name__, case=name):
+                        with self.assertRaises((TypeError, ValueError)):
+                            robot.gravity(*prefix, input_q, out=out)
+                        recovered = np.full(n, np.nan)
+                        self.assertIs(robot.gravity(*prefix, q, out=recovered), recovered)
+                        np.testing.assert_allclose(recovered, expected, atol=1.0e-11, rtol=1.0e-10)
+
+    def test_invalid_arguments_and_recovery(self) -> None:
+        q, qd, qdd = reference("q"), reference("qd"), reference("qdd")
+        for robot_type in (dynibo.Robot, dynibo.FloatingRobot):
+            with robot_type(URDF) as robot:
+                prefix = (motion_base(),) if robot_type is dynibo.FloatingRobot else ()
+                target = robot.link_id("test_link_4")
+                expected = robot.mass_matrix(*prefix, q)
+                forces = robot.inverse_dynamics(*prefix, q, qd, qdd)
+                calls = (
+                    ("jacobian_derivative", (q, qd[:-1], target)),
+                    ("forward_velocity_kinematics", (q, qd[:-1], target)),
+                    ("forward_acceleration_kinematics", (q, qd[:-1], qdd, target)),
+                    ("forward_acceleration_kinematics", (q, qd, qdd[:-1], target)),
+                    ("inverse_dynamics", (q, qd[:-1], qdd)),
+                    ("inverse_dynamics", (q, qd, qdd[:-1])),
+                    ("forward_dynamics", (q, qd[:-1], forces)),
+                    ("forward_dynamics", (q, qd, forces[:-1])),
+                    ("velocity_product_forces", (q, qd[:-1])),
+                    ("mass_matrix", (q[:-1],)),
+                    ("forward_kinematics", (q, robot.link_count)),
+                    ("jacobian", (q, robot.link_count)),
+                    ("jacobian_derivative", (q, qd, robot.link_count)),
+                    ("forward_velocity_kinematics", (q, qd, robot.link_count)),
+                    ("forward_acceleration_kinematics", (q, qd, qdd, robot.link_count)),
+                )
+                for name, args in calls:
+                    with self.subTest(robot=robot_type.__name__, operation=name, args=args):
+                        with self.assertRaises(ValueError):
+                            getattr(robot, name)(*prefix, *args)
+                        np.testing.assert_allclose(
+                            robot.mass_matrix(*prefix, q), expected, atol=1.0e-11, rtol=1.0e-10
+                        )
+                with self.assertRaisesRegex(ValueError, "does not exist"):
+                    robot.link_id("missing")
+                with self.assertRaisesRegex(ValueError, "invalid link id"):
+                    robot.gravity(*prefix, q, loads=[dynibo.Load(robot.link_count)])
+                for invalid in (float("nan"), float("inf"), float("-inf")):
+                    bad = (invalid,) + q[1:]
+                    for name, args in (
+                        ("mass_matrix", (bad,)),
+                        ("velocity_product_forces", (q, bad)),
+                        ("inverse_dynamics", (q, qd, bad)),
+                    ):
+                        with self.subTest(
+                            robot=robot_type.__name__, operation=name, invalid=invalid
+                        ):
+                            with self.assertRaises(ValueError):
+                                getattr(robot, name)(*prefix, *args)
+                np.testing.assert_allclose(
+                    robot.mass_matrix(*prefix, q), expected, atol=1.0e-11, rtol=1.0e-10
+                )
+
+    def test_nonfinite_loads_are_rejected_before_writing_output(self) -> None:
+        q, qd, qdd = reference("q"), reference("qd"), reference("qdd")
+        for robot_type in (dynibo.Robot, dynibo.FloatingRobot):
+            with robot_type(URDF) as robot:
+                prefix = (motion_base(),) if robot_type is dynibo.FloatingRobot else ()
+                target = robot.link_id("test_link_4")
+                valid_load = dynibo.Load(target, torque=(0.2, -0.1, 0.3), force=(-0.4, 0.6, 0.5))
+                forces = robot.inverse_dynamics(*prefix, q, qd, qdd, loads=[valid_load])
+                for name, args in (
+                    ("gravity", (q,)),
+                    ("inverse_dynamics", (q, qd, qdd)),
+                    ("forward_dynamics", (q, qd, forces)),
+                ):
+                    method = getattr(robot, name)
+                    expected = method(*prefix, *args, loads=[valid_load])
+                    out = np.empty_like(expected)
+                    for component in ("torque", "force"):
+                        for axis in range(3):
+                            for invalid in (float("nan"), float("inf"), float("-inf")):
+                                values = [0.0, 0.0, 0.0]
+                                values[axis] = invalid
+                                load = dynibo.Load(target, **{component: values})
+                                with self.subTest(
+                                    robot=robot_type.__name__,
+                                    operation=name,
+                                    component=component,
+                                    axis=axis,
+                                    invalid=invalid,
+                                ):
+                                    out.fill(123.0)
+                                    with self.assertRaisesRegex(
+                                        ValueError, "load contains a non-finite value"
+                                    ):
+                                        method(*prefix, *args, loads=[valid_load, load], out=out)
+                                    np.testing.assert_array_equal(out, np.full_like(out, 123.0))
+                                    self.assertIs(
+                                        method(*prefix, *args, loads=[valid_load], out=out), out
+                                    )
+                                    np.testing.assert_allclose(
+                                        out, expected, atol=1.0e-11, rtol=1.0e-10
+                                    )
+
+    def test_invalid_frames_base_states_and_ik_options(self) -> None:
+        q = reference("q")
+        invalid_poses = (
+            dynibo.Pose(rotation_xyzw=(0.0,) * 4),
+            dynibo.Pose(rotation_xyzw=(float("inf"), 0.0, 0.0, 1.0)),
+            dynibo.Pose(translation=(float("nan"), 0.0, 0.0)),
+        )
+        with dynibo.Robot(URDF) as fixed, dynibo.FloatingRobot(URDF) as floating:
+            target = fixed.link_id("test_link_4")
+            expected = fixed.forward_kinematics(q, target)
+            for pose in invalid_poses:
+                with self.assertRaisesRegex(ValueError, "pose contains"):
+                    fixed.set_base_frame(pose)
+                with self.assertRaisesRegex(ValueError, "pose contains"):
+                    floating.forward_kinematics(dynibo.BaseState(frame=pose), q, target)
+                for robot, prefix in ((fixed, ()), (floating, (motion_base(),))):
+                    with self.assertRaisesRegex(ValueError, "pose contains"):
+                        robot.forward_velocity_kinematics(
+                            *prefix, q, reference("qd"), target, tool=pose
+                        )
+            for name in ("velocity", "acceleration"):
+                for component in ("angular", "linear"):
+                    twist = dynibo.Twist(**{component: (float("nan"), 0.0, 0.0)})
+                    with self.subTest(state=name, component=component):
+                        with self.assertRaises(ValueError):
+                            floating.mass_matrix(dynibo.BaseState(**{name: twist}), q)
+            for name in ("translation_tolerance", "rotation_tolerance", "damping", "max_step_norm"):
+                for invalid in (-1.0, float("nan"), float("inf")):
+                    with self.subTest(option=name, invalid=invalid):
+                        options = dynibo.IkOptions(**{name: invalid})
+                        with self.assertRaises(ValueError):
+                            fixed.inverse_kinematics(q, target, expected, options)
+            self.assertEqual(fixed.forward_kinematics(q, target), expected)
+            np.testing.assert_allclose(
+                fixed.inverse_kinematics(q, target, expected), q, atol=1.0e-12, rtol=0
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
