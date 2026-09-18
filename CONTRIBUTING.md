@@ -49,6 +49,10 @@ or publishing any artifacts.
 
 ## Guidelines
 
+- The core library (`src/`) forbids unsafe Rust with `#![forbid(unsafe_code)]`.
+  This restriction does not cover dependencies, language bindings, or the
+  separate integration test and benchmark crates, which currently use unsafe
+  code for FFI and allocation instrumentation.
 - Keep changes focused and add tests for new behavior or bug fixes.
 - Update public API documentation and examples when usage changes.
 - Keep `README.md` and `README.zh.md` aligned.

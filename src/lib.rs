@@ -1,5 +1,6 @@
 //! Tree-structured robot kinematics and dynamics with allocation-free calculation APIs.
 
+#![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 mod base;
