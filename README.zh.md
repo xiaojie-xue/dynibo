@@ -4,7 +4,7 @@
 
 <h1>dynibo</h1>
 
-<p><strong>Dynamics for the Loop</strong></p>
+<p><strong>a fast, reliable and easy to use library for robot kinematics and dynamics</strong></p>
 
 <p>
   <a href="https://dynibo.readthedocs.io/en/latest/zh/">文档</a> &nbsp;&middot;&nbsp;
