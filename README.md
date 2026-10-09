@@ -55,24 +55,32 @@ The table below shows Dynibo's speedup over Pinocchio for each operation.
   <tbody>
     <tr>
       <td>Jacobian</td>
-      <td align="right">1.59×</td><td align="right">1.80×</td>
-      <td align="right">1.28×</td><td align="right">1.38×</td>
+      <td align="right">1.61×</td><td align="right">1.78×</td>
+      <td align="right">1.26×</td><td align="right">1.40×</td>
     </tr>
     <tr>
       <td>RNEA</td>
-      <td align="right">1.74×</td><td align="right">1.81×</td>
-      <td align="right">1.17×</td><td align="right">1.54×</td>
+      <td align="right">1.72×</td><td align="right">1.80×</td>
+      <td align="right">1.19×</td><td align="right">1.56×</td>
     </tr>
     <tr>
       <td>ABA</td>
-      <td align="right">1.20×</td><td align="right">1.14×</td>
-      <td align="right">1.81×</td><td align="right">1.89×</td>
+      <td align="right">1.14×</td><td align="right">1.17×</td>
+      <td align="right">1.76×</td><td align="right">1.94×</td>
     </tr>
   </tbody>
 </table>
 
-Source code to reproduce these results is available in
-[`benches/`](https://github.com/xiaojie-xue/dynibo/tree/main/benches).
+Measured on 2026-10-09 at commit `74b4eebc`, on Linux with an Intel Core
+i9-14900K pinned to one performance core, using Pinocchio 3.9.0, Rust 1.97.1
+(release), and Python 3.10.12 / NumPy 2.2.6. Each ratio is Pinocchio's median
+time divided by Dynibo's median time; values above 1 mean Dynibo is faster.
+Rust uses preallocated outputs and a C++ bridge for Pinocchio; Python uses
+the default returned-array APIs. Results depend on hardware and build settings.
+
+Reproduction code is in [`benches/`](benches/). The [raw samples, environment,
+validation errors, and commands](benches/results/pinocchio-2026-10-09.json) are
+recorded with these measurements.
 
 ### Reliable
 
