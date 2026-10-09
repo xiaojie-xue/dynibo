@@ -3,7 +3,7 @@
 
 use dynibo::{
     BaseState, ErrorCategory, FloatingRobot, Frame, IndexedLoad, InverseKinematicsOptions, LinkId,
-    Robot, Twist, Wrench,
+    Robot, RobotModel, Twist, Wrench,
 };
 use nalgebra::{Quaternion, Translation3, UnitQuaternion, Vector3};
 use std::{
@@ -80,9 +80,9 @@ impl Default for DyniboIkOptions {
     }
 }
 
-/// Fixed-base model and metadata. The frame is persistent model state.
+/// Fixed-base model handle and metadata, plus its persistent base frame.
 pub struct DyniboRobot {
-    inner: Robot,
+    inner: RobotModel,
     base_frame: Frame,
     link_ids: Vec<LinkId>,
     name: CString,
@@ -96,7 +96,7 @@ pub struct DyniboWorkspace {
 }
 /// Floating-base model and metadata. It intentionally contains no base state.
 pub struct DyniboFloatingRobot {
-    inner: FloatingRobot,
+    inner: RobotModel,
     link_ids: Vec<LinkId>,
     name: CString,
 }
@@ -430,8 +430,13 @@ pub unsafe extern "C" fn dynibo_robot_from_urdf(
         let path = unsafe { CStr::from_ptr(path) }
             .to_str()
             .map_err(|_| invalid("path must be valid UTF-8"))?;
-        let inner = Robot::from_urdf(path).map_err(core_error)?;
-        let (link_ids, name) = info(&inner, Robot::link_count, Robot::link_id_at, Robot::name)?;
+        let inner = RobotModel::from_urdf(path).map_err(core_error)?;
+        let (link_ids, name) = info(
+            &inner,
+            RobotModel::link_count,
+            RobotModel::link_id_at,
+            RobotModel::name,
+        )?;
         *out = Box::into_raw(Box::new(DyniboRobot {
             inner,
             base_frame: Frame::identity(),
@@ -455,12 +460,13 @@ pub unsafe extern "C" fn dynibo_floating_robot_from_urdf(
         let path = unsafe { CStr::from_ptr(path) }
             .to_str()
             .map_err(|_| invalid("path must be valid UTF-8"))?;
-        let inner = FloatingRobot::from_urdf(path).map_err(core_error)?;
+        let inner = RobotModel::from_urdf(path).map_err(core_error)?;
+        inner.validate_floating_base().map_err(core_error)?;
         let (link_ids, name) = info(
             &inner,
-            FloatingRobot::link_count,
-            FloatingRobot::link_id_at,
-            FloatingRobot::name,
+            RobotModel::link_count,
+            RobotModel::link_id_at,
+            RobotModel::name,
         )?;
         *out = Box::into_raw(Box::new(DyniboFloatingRobot {
             inner,
@@ -498,7 +504,7 @@ pub unsafe extern "C" fn dynibo_robot_joint_count(p: *const DyniboRobot) -> usiz
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_robot_generalized_count(p: *const DyniboRobot) -> usize {
-    unsafe { p.as_ref() }.map_or(0, |x| x.inner.generalized_count())
+    unsafe { p.as_ref() }.map_or(0, |x| x.inner.joint_count())
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_robot_link_count(p: *const DyniboRobot) -> usize {
@@ -512,7 +518,7 @@ pub unsafe extern "C" fn dynibo_floating_robot_joint_count(p: *const DyniboFloat
 pub unsafe extern "C" fn dynibo_floating_robot_generalized_count(
     p: *const DyniboFloatingRobot,
 ) -> usize {
-    unsafe { p.as_ref() }.map_or(0, |x| x.inner.generalized_count())
+    unsafe { p.as_ref() }.map_or(0, |x| x.inner.joint_count() + 6)
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_floating_robot_link_count(p: *const DyniboFloatingRobot) -> usize {
@@ -587,7 +593,7 @@ pub unsafe extern "C" fn dynibo_workspace_create(
         let robot = unsafe { required_ref(p, "robot") }?;
         let out = unsafe { required_mut(out, "output") }?;
         *out = Box::into_raw(Box::new(DyniboWorkspace {
-            inner: robot.inner.fork(),
+            inner: robot.inner.robot(),
             poses: vec![Frame::identity(); robot.inner.link_count()].into_boxed_slice(),
             converted_loads: make_loads(&robot.link_ids),
             load_positions: make_load_positions(&robot.link_ids),
@@ -604,7 +610,7 @@ pub unsafe extern "C" fn dynibo_floating_workspace_create(
         let robot = unsafe { required_ref(p, "robot") }?;
         let out = unsafe { required_mut(out, "output") }?;
         *out = Box::into_raw(Box::new(DyniboFloatingWorkspace {
-            inner: robot.inner.fork(),
+            inner: robot.inner.floating_robot().map_err(core_error)?,
             poses: vec![Frame::identity(); robot.inner.link_count()].into_boxed_slice(),
             converted_loads: make_loads(&robot.link_ids),
             load_positions: make_load_positions(&robot.link_ids),

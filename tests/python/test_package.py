@@ -38,6 +38,53 @@ def reference(key: str) -> tuple[float, ...]:
 
 
 class PackageTests(unittest.TestCase):
+    def test_forks_share_models_and_survive_parent_close(self) -> None:
+        for robot_type in (dynibo.Robot, dynibo.FloatingRobot):
+            parent = robot_type(URDF)
+            self.addCleanup(parent.close)
+            q = np.zeros(parent.joint_count)
+            prefix = (motion_base(),) if robot_type is dynibo.FloatingRobot else ()
+            if robot_type is dynibo.Robot:
+                parent.set_base_frame(dynibo.Pose(translation=(0.2, -0.3, 0.4)))
+            target = parent.link_id("test_link_4")
+            loads = parent.load_buffer()
+            loads.set(target, force=(0.3, -0.2, 0.1))
+            expected = parent.gravity(*prefix, q, loads=loads)
+            expected_pose = parent.forward_kinematics(*prefix, q, target)
+            children = [parent.fork() for _ in range(4)]
+            for child in children:
+                self.addCleanup(child.close)
+                self.assertEqual(child.link_id("test_link_4"), target)
+                self.assertEqual(child.forward_kinematics(*prefix, q, target), expected_pose)
+            if robot_type is dynibo.Robot:
+                parent.set_base_frame(dynibo.Pose(translation=(10.0, 20.0, 30.0)))
+                self.assertEqual(children[0].forward_kinematics(q, target), expected_pose)
+            parent.close()
+            with self.assertRaisesRegex(RuntimeError, "closed"):
+                parent.fork()
+            errors = []
+            def calculate(child):
+                try:
+                    out = np.empty(child.generalized_count)
+                    for _ in range(50):
+                        child.gravity(*prefix, q, loads=loads, out=out)
+                        np.testing.assert_allclose(out, expected, atol=1e-12)
+                except Exception as error:
+                    errors.append(error)
+            threads = [threading.Thread(target=calculate, args=(child,)) for child in children]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            self.assertEqual(errors, [])
+            children[0].close()
+            grandchild = children[1].fork()
+            self.addCleanup(grandchild.close)
+            np.testing.assert_allclose(grandchild.gravity(*prefix, q, loads=loads), expected)
+            with robot_type(URDF) as unrelated:
+                with self.assertRaises(ValueError):
+                    unrelated.gravity(*prefix, q, loads=loads)
+
     def test_batch_fk_matches_single_targets_and_reuses_output(self) -> None:
         for robot_type in (dynibo.Robot, dynibo.FloatingRobot):
             with robot_type(URDF) as robot:

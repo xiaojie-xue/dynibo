@@ -44,9 +44,16 @@ def main():
         }
         results = {name: statistics.median(timeit.repeat(call, repeat=7, number=args.number))
                    * 1e9 / args.number for name, call in cases.items()}
+        creation_number = min(args.number, 200)
+        for name, call in {
+            "reload_ns": lambda: cls(args.urdf).close(),
+            "fork_ns": lambda: robot.fork().close(),
+        }.items():
+            results[name] = statistics.median(timeit.repeat(call, repeat=7, number=creation_number)) * 1e9 / creation_number
         print(json.dumps({"python": platform.python_version(), "platform": platform.platform(),
                           "dynibo": dynibo.__version__, "model": robot.name,
-                          "number": args.number, "results": results}, indent=2))
+                          "number": args.number, "creation_number": creation_number,
+                          "results": results}, indent=2))
 
 
 if __name__ == "__main__":

@@ -83,6 +83,7 @@ loads.clear()
 ```
 
 A Python `LoadBuffer` belongs to its creating model.
+It can be shared by `fork()` instances of that model.
 An independently loaded robot rejects it, even when empty. The
 buffer is borrowed during a native call; concurrent mutation is rejected.
 Existing Python lists of `Load` remain supported and are converted per call.

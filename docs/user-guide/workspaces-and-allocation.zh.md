@@ -44,8 +44,14 @@ C++ 返回容器的方法会分配内存；`jacobian_into`、`jacobian_derivativ
 每个 `Robot` 或 `FloatingRobot` 实例持有与其不可变模型绑定的 workspace。`fork()` 会共享模型、创建新的
 计算存储。
 
+Rust 另提供不含 workspace 的只读 `RobotModel`。C 模型句柄采用该表示，只有显式
+创建的 C workspace 分配计算 buffer。Python 的 `robot.fork()` 共享模型和 link-ID
+表，同时创建独立 workspace 和锁。关闭任一实例不影响其他实例；固定基 fork 初始
+复制基座位姿，后续修改任一实例的基座位姿都不会影响另一个。
+
 ## 并行计算
 
 每个 Rust `Robot` 或 `FloatingRobot` 都是可变的，同一时刻只能参与一次计算。并行计算时应为每个任务调用
-`fork()` 创建实例。Python 会串行化同一个 `Robot` 或 `FloatingRobot` 上的调用，需要并行时应使用独立 robot。
+`fork()` 创建实例。Python 会串行化同一个 `Robot` 或 `FloatingRobot` 上的调用，
+需要并行时可使用 `fork()`，避免重复解析 URDF 或复制模型。
 C++ 不提供内部锁，因此每个 worker 应使用独立 `Robot` 或 `FloatingRobot`。

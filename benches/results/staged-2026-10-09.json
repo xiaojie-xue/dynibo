@@ -86,6 +86,93 @@
   "notes": [
     "Local measurements, not cross-machine guarantees.",
     "The original stage0 and stage2 ABA comparisons used Criterion --quick; they do not establish statistically significant speedups.",
-    "Each stage runs ci/test-all.sh with Pinocchio 3.9.0 enabled, including installed native/Python packages."
-  ]
+    "Each stage runs ci/test-all.sh with Pinocchio 3.9.0 enabled, including installed native/Python packages.",
+    "Franka single-call ABA measured about 6.7% higher than the initial quick baseline after added validation; differing sample protocols do not establish a precise regression size. The batch/individual comparisons use the same stage3 protocol."
+  ],
+  "stage4_python": {
+    "python": "3.10.12",
+    "platform": "Linux-6.8.0-138-generic-x86_64-with-glibc2.35",
+    "dynibo": "0.5.1",
+    "model": "g1_29dof_mode_11",
+    "number": 3000,
+    "creation_number": 200,
+    "results": {
+      "gravity_list_ns": 1630.4040000250097,
+      "gravity_buffer_ns": 1109.525666834088,
+      "fk_individual_ns": 11007.845666730038,
+      "fk_batch_ns": 977.1769994889231,
+      "reload_ns": 1157544.589996178,
+      "fork_ns": 1216.1199992988259
+    }
+  },
+  "validation": {
+    "1": {
+      "command": "bash ci/test-all.sh",
+      "pinocchio": "3.9.0, required via DYNIBO_REQUIRE_PINOCCHIO=1",
+      "rust_clippy_and_tests": "passed",
+      "extracted_crate_and_rustdoc": "passed",
+      "installed_c_and_cpp": "passed",
+      "python_tests": 21,
+      "status": "passed"
+    },
+    "2": {
+      "command": "bash ci/test-all.sh",
+      "pinocchio": "3.9.0, required via DYNIBO_REQUIRE_PINOCCHIO=1",
+      "rust_clippy_and_tests": "passed",
+      "extracted_crate_and_rustdoc": "passed",
+      "installed_c_and_cpp": "passed",
+      "python_tests": 21,
+      "status": "passed"
+    },
+    "3": {
+      "command": "bash ci/test-all.sh",
+      "pinocchio": "3.9.0, required via DYNIBO_REQUIRE_PINOCCHIO=1",
+      "rust_clippy_and_tests": "passed",
+      "extracted_crate_and_rustdoc": "passed",
+      "installed_c_and_cpp": "passed",
+      "python_tests": 23,
+      "status": "passed"
+    },
+    "4": {
+      "command": "bash ci/test-all.sh",
+      "pinocchio": "3.9.0, required via DYNIBO_REQUIRE_PINOCCHIO=1",
+      "rust_clippy_and_tests": "passed",
+      "extracted_crate_and_rustdoc": "passed",
+      "installed_c_and_cpp": "passed",
+      "python_tests": 24,
+      "status": "passed"
+    }
+  },
+  "single_operation_comparison_ns": {
+    "franka_fixed/jacobian": {
+      "stage0_quick_mean": 153.56695938110352,
+      "stage3_mean": 152.85728453150466,
+      "change_percent": -0.4621273042449636
+    },
+    "franka_fixed/rnea": {
+      "stage0_quick_mean": 305.4521484375,
+      "stage3_mean": 307.9761413441605,
+      "change_percent": 0.8263136859804954
+    },
+    "franka_fixed/aba": {
+      "stage0_quick_mean": 1008.0634689331055,
+      "stage3_mean": 1075.9844285296929,
+      "change_percent": 6.73776619129669
+    },
+    "g1_floating/jacobian": {
+      "stage0_quick_mean": 218.73281288146973,
+      "stage3_mean": 215.2227803947976,
+      "change_percent": -1.6047123613658232
+    },
+    "g1_floating/rnea": {
+      "stage0_quick_mean": 1303.7667083740234,
+      "stage3_mean": 1281.8926759835915,
+      "change_percent": -1.6777566300731683
+    },
+    "g1_floating/aba": {
+      "stage0_quick_mean": 5106.3116455078125,
+      "stage3_mean": 4973.681361250016,
+      "change_percent": -2.597379350601825
+    }
+  }
 }

@@ -21,12 +21,14 @@ Python 提供异常类型，C++ 的 `Error::status()` 会保留 C 状态。
 
 ## 线程安全规则
 
+- Rust `RobotModel` 不可变，可在线程间共享，无需加锁。
 - 没有线程修改固定 `Robot` 的 base frame 时，可以读取不可变模型信息。
 - 每个 Rust `Robot` 或 `FloatingRobot` 都拥有一个可变 workspace，计算方法需要可变访问；
   每个并发计算应通过 `fork()` 创建独立实例。
 - C 的每个并发计算需要独立的 typed workspace：固定基使用 `DyniboWorkspace`，浮动基使用
   `DyniboFloatingWorkspace`。
-- Python 会串行化同一 `Robot` 或 `FloatingRobot` 的方法；独立实例可以执行并行原生调用。
+- Python 会串行化同一 `Robot` 或 `FloatingRobot` 的方法；`fork()` 共享模型数据并创建
+  独立实例，可执行并行原生调用。
 - C++ wrapper 没有内部锁；每个 worker 应使用独立 `dynibo::Robot` 或
   `dynibo::FloatingRobot`。
 - 其他线程使用 handle 时，绝不能销毁或移动所属对象。

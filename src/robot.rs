@@ -16,9 +16,11 @@ use crate::{
 mod dynamics;
 mod kinematics;
 mod loads;
+mod model_handle;
 mod workspace;
 
 pub use loads::LoadBuffer;
+pub use model_handle::RobotModel;
 
 pub use kinematics::InverseKinematicsOptions;
 use workspace::Workspace;
@@ -210,13 +212,7 @@ impl Robot {
     ///
     /// Returns an error if the file cannot be parsed or its graph is invalid.
     pub fn from_urdf(path: impl AsRef<Path>) -> Result<Self> {
-        let model = load_model(path)?;
-        let workspace = Workspace::new(model.as_ref());
-        Ok(Self {
-            model,
-            workspace,
-            world_from_root: Frame::identity(),
-        })
+        Ok(RobotModel::from_urdf(path)?.robot())
     }
 
     /// Returns the fixed root-link pose in the world frame.
@@ -229,6 +225,13 @@ impl Robot {
         crate::base::validate_frame(&frame)?;
         self.world_from_root = frame;
         Ok(())
+    }
+
+    /// Shares the immutable model without allocating calculation storage.
+    pub fn model(&self) -> RobotModel {
+        RobotModel {
+            model: Arc::clone(&self.model),
+        }
     }
 
     /// Creates another calculation instance sharing this robot's immutable model.
@@ -245,50 +248,6 @@ impl Robot {
         }
     }
 
-    /// Returns the robot name declared in the URDF.
-    pub fn name(&self) -> &str {
-        &self.model.name
-    }
-
-    /// Finds a model-scoped link identifier by URDF name.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::UnknownLink`] if the name is absent.
-    pub fn link_id(&self, name: &str) -> Result<LinkId> {
-        self.model
-            .links
-            .iter()
-            .position(|link| link.name() == name)
-            .map(|index| LinkId::new(self.model.model_id, index))
-            .ok_or_else(|| Error::UnknownLink {
-                name: name.to_owned(),
-            })
-    }
-
-    /// Returns the model-scoped identifier at a link enumeration index.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidLinkId`] if `index >= self.link_count()`.
-    pub fn link_id_at(&self, index: usize) -> Result<LinkId> {
-        if index < self.model.link_count() {
-            Ok(LinkId::new(self.model.model_id, index))
-        } else {
-            Err(Error::InvalidLinkId)
-        }
-    }
-
-    /// Returns the number of links, including the root link.
-    pub fn link_count(&self) -> usize {
-        self.model.link_count()
-    }
-
-    /// Returns the number of non-fixed joints in the model.
-    pub fn joint_count(&self) -> usize {
-        self.model.joint_count()
-    }
-
     /// Returns the runtime generalized-vector size for this robot.
     ///
     /// Floating-base generalized vectors are ordered `[base angular, base
@@ -296,101 +255,19 @@ impl Robot {
     pub fn generalized_count(&self) -> usize {
         self.model.joint_count()
     }
-
-    /// Returns the name of the joint at an active-DOF index.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidJointIndex`] when `dof_index` is out of range.
-    pub fn joint_name(&self, dof_index: usize) -> Result<&str> {
-        Ok(self.model.active_joint(dof_index)?.name())
-    }
-
-    /// Returns the motion type of the joint at an active-DOF index.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidJointIndex`] when `dof_index` is out of range.
-    pub fn joint_type(&self, dof_index: usize) -> Result<JointType> {
-        Ok(self.model.active_joint(dof_index)?.joint_type())
-    }
-
-    /// Returns the lower position limit of the joint at an active-DOF index.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidJointIndex`] when `dof_index` is out of range.
-    pub fn joint_lower_limit(&self, dof_index: usize) -> Result<f64> {
-        Ok(self.model.active_joint(dof_index)?.lower_limit())
-    }
-
-    /// Returns the upper position limit of the joint at an active-DOF index.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidJointIndex`] when `dof_index` is out of range.
-    pub fn joint_upper_limit(&self, dof_index: usize) -> Result<f64> {
-        Ok(self.model.active_joint(dof_index)?.upper_limit())
-    }
-
-    /// Returns the velocity limit of the joint at an active-DOF index.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidJointIndex`] when `dof_index` is out of range.
-    pub fn joint_velocity_limit(&self, dof_index: usize) -> Result<f64> {
-        Ok(self.model.active_joint(dof_index)?.velocity_limit())
-    }
-
-    /// Returns the root link identifier.
-    pub fn root_link_id(&self) -> LinkId {
-        LinkId::new(self.model.model_id, 0)
-    }
-
-    /// Returns the name of a model-scoped link.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidLinkId`] if `link` belongs to another model.
-    pub fn link_name(&self, link: LinkId) -> Result<&str> {
-        Ok(self.model.link_by_id(link)?.name())
-    }
-
-    /// Returns a link's mass in kilograms.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidLinkId`] if `link` belongs to another model.
-    pub fn link_mass(&self, link: LinkId) -> Result<f64> {
-        Ok(self.model.link_by_id(link)?.mass())
-    }
-
-    /// Returns a link's center of mass expressed in its link frame.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidLinkId`] if `link` belongs to another model.
-    pub fn link_center_of_mass(&self, link: LinkId) -> Result<Vector3<f64>> {
-        Ok(*self.model.link_by_id(link)?.center_of_mass())
-    }
-
-    /// Returns a link's rotational inertia about its center of mass.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidLinkId`] if `link` belongs to another model.
-    pub fn link_inertia(&self, link: LinkId) -> Result<Matrix3<f64>> {
-        Ok(*self.model.link_by_id(link)?.inertia())
-    }
 }
 
 impl FloatingRobot {
     /// Loads a tree robot model with a six-degree-of-freedom floating root.
     pub fn from_urdf(path: impl AsRef<Path>) -> Result<Self> {
-        let model = load_model(path)?;
-        validate_floating_model(model.as_ref())?;
-        let workspace = Workspace::new(model.as_ref());
-        Ok(Self { model, workspace })
+        RobotModel::from_urdf(path)?.floating_robot()
+    }
+
+    /// Shares the immutable model without allocating calculation storage.
+    pub fn model(&self) -> RobotModel {
+        RobotModel {
+            model: Arc::clone(&self.model),
+        }
     }
 
     /// Creates another calculation instance sharing this robot's immutable model.
@@ -400,97 +277,152 @@ impl FloatingRobot {
         Self { model, workspace }
     }
 
-    /// Returns the robot name declared in the URDF.
-    pub fn name(&self) -> &str {
-        &self.model.name
-    }
-
-    /// Finds a model-scoped link identifier by URDF name.
-    pub fn link_id(&self, name: &str) -> Result<LinkId> {
-        self.model
-            .links
-            .iter()
-            .position(|link| link.name() == name)
-            .map(|index| LinkId::new(self.model.model_id, index))
-            .ok_or_else(|| Error::UnknownLink {
-                name: name.to_owned(),
-            })
-    }
-
-    /// Returns a model-scoped link identifier by enumeration index.
-    pub fn link_id_at(&self, index: usize) -> Result<LinkId> {
-        if index < self.model.link_count() {
-            Ok(LinkId::new(self.model.model_id, index))
-        } else {
-            Err(Error::InvalidLinkId)
-        }
-    }
-
-    /// Returns the number of links, including the root link.
-    pub fn link_count(&self) -> usize {
-        self.model.link_count()
-    }
-
-    /// Returns the number of non-fixed joints in the model.
-    pub fn joint_count(&self) -> usize {
-        self.model.joint_count()
-    }
-
-    /// Returns the runtime generalized-vector size.
+    /// Returns the runtime generalized-vector size (six base coordinates plus joints).
     pub fn generalized_count(&self) -> usize {
         generalized_count(self.model.as_ref(), RootMode::Floating)
     }
-
-    /// Returns the name of an active joint.
-    pub fn joint_name(&self, dof_index: usize) -> Result<&str> {
-        Ok(self.model.active_joint(dof_index)?.name())
-    }
-
-    /// Returns the motion type of an active joint.
-    pub fn joint_type(&self, dof_index: usize) -> Result<JointType> {
-        Ok(self.model.active_joint(dof_index)?.joint_type())
-    }
-
-    /// Returns the lower position limit of an active joint.
-    pub fn joint_lower_limit(&self, dof_index: usize) -> Result<f64> {
-        Ok(self.model.active_joint(dof_index)?.lower_limit())
-    }
-
-    /// Returns the upper position limit of an active joint.
-    pub fn joint_upper_limit(&self, dof_index: usize) -> Result<f64> {
-        Ok(self.model.active_joint(dof_index)?.upper_limit())
-    }
-
-    /// Returns the velocity limit of an active joint.
-    pub fn joint_velocity_limit(&self, dof_index: usize) -> Result<f64> {
-        Ok(self.model.active_joint(dof_index)?.velocity_limit())
-    }
-
-    /// Returns the root link identifier.
-    pub fn root_link_id(&self) -> LinkId {
-        LinkId::new(self.model.model_id, 0)
-    }
-
-    /// Returns the name of a model-scoped link.
-    pub fn link_name(&self, link: LinkId) -> Result<&str> {
-        Ok(self.model.link_by_id(link)?.name())
-    }
-
-    /// Returns a link's mass in kilograms.
-    pub fn link_mass(&self, link: LinkId) -> Result<f64> {
-        Ok(self.model.link_by_id(link)?.mass())
-    }
-
-    /// Returns a link's center of mass expressed in its link frame.
-    pub fn link_center_of_mass(&self, link: LinkId) -> Result<Vector3<f64>> {
-        Ok(*self.model.link_by_id(link)?.center_of_mass())
-    }
-
-    /// Returns a link's rotational inertia about its center of mass.
-    pub fn link_inertia(&self, link: LinkId) -> Result<Matrix3<f64>> {
-        Ok(*self.model.link_by_id(link)?.inertia())
-    }
 }
+
+// All three handles expose the same immutable metadata without cloning an Arc
+// for every query. Base-mode-dependent methods remain on calculation instances.
+macro_rules! model_queries {
+    ($handle:ty) => {
+        impl $handle {
+            /// Returns the robot name declared in the URDF.
+            pub fn name(&self) -> &str {
+                &self.model.name
+            }
+
+            /// Finds a model-scoped link identifier by URDF name.
+            ///
+            /// # Errors
+            ///
+            /// Returns [`Error::UnknownLink`] if the name is absent.
+            pub fn link_id(&self, name: &str) -> Result<LinkId> {
+                self.model
+                    .links
+                    .iter()
+                    .position(|link| link.name() == name)
+                    .map(|index| LinkId::new(self.model.model_id, index))
+                    .ok_or_else(|| Error::UnknownLink {
+                        name: name.to_owned(),
+                    })
+            }
+
+            /// Returns the model-scoped identifier at a link enumeration index.
+            ///
+            /// # Errors
+            ///
+            /// Returns [`Error::InvalidLinkId`] if `index >= self.link_count()`.
+            pub fn link_id_at(&self, index: usize) -> Result<LinkId> {
+                if index < self.model.link_count() {
+                    Ok(LinkId::new(self.model.model_id, index))
+                } else {
+                    Err(Error::InvalidLinkId)
+                }
+            }
+
+            /// Returns the number of links, including the root link.
+            pub fn link_count(&self) -> usize {
+                self.model.link_count()
+            }
+
+            /// Returns the number of non-fixed joints in the model.
+            pub fn joint_count(&self) -> usize {
+                self.model.joint_count()
+            }
+
+            /// Returns the name of the joint at an active-DOF index.
+            ///
+            /// # Errors
+            ///
+            /// Returns [`Error::InvalidJointIndex`] when `dof_index` is out of range.
+            pub fn joint_name(&self, dof_index: usize) -> Result<&str> {
+                Ok(self.model.active_joint(dof_index)?.name())
+            }
+
+            /// Returns the motion type of the joint at an active-DOF index.
+            ///
+            /// # Errors
+            ///
+            /// Returns [`Error::InvalidJointIndex`] when `dof_index` is out of range.
+            pub fn joint_type(&self, dof_index: usize) -> Result<JointType> {
+                Ok(self.model.active_joint(dof_index)?.joint_type())
+            }
+
+            /// Returns the lower position limit of the joint at an active-DOF index.
+            ///
+            /// # Errors
+            ///
+            /// Returns [`Error::InvalidJointIndex`] when `dof_index` is out of range.
+            pub fn joint_lower_limit(&self, dof_index: usize) -> Result<f64> {
+                Ok(self.model.active_joint(dof_index)?.lower_limit())
+            }
+
+            /// Returns the upper position limit of the joint at an active-DOF index.
+            ///
+            /// # Errors
+            ///
+            /// Returns [`Error::InvalidJointIndex`] when `dof_index` is out of range.
+            pub fn joint_upper_limit(&self, dof_index: usize) -> Result<f64> {
+                Ok(self.model.active_joint(dof_index)?.upper_limit())
+            }
+
+            /// Returns the velocity limit of the joint at an active-DOF index.
+            ///
+            /// # Errors
+            ///
+            /// Returns [`Error::InvalidJointIndex`] when `dof_index` is out of range.
+            pub fn joint_velocity_limit(&self, dof_index: usize) -> Result<f64> {
+                Ok(self.model.active_joint(dof_index)?.velocity_limit())
+            }
+
+            /// Returns the root link identifier.
+            pub fn root_link_id(&self) -> LinkId {
+                LinkId::new(self.model.model_id, 0)
+            }
+
+            /// Returns the name of a model-scoped link.
+            ///
+            /// # Errors
+            ///
+            /// Returns [`Error::InvalidLinkId`] if `link` belongs to another model.
+            pub fn link_name(&self, link: LinkId) -> Result<&str> {
+                Ok(self.model.link_by_id(link)?.name())
+            }
+
+            /// Returns a link's mass in kilograms.
+            ///
+            /// # Errors
+            ///
+            /// Returns [`Error::InvalidLinkId`] if `link` belongs to another model.
+            pub fn link_mass(&self, link: LinkId) -> Result<f64> {
+                Ok(self.model.link_by_id(link)?.mass())
+            }
+
+            /// Returns a link's center of mass expressed in its link frame.
+            ///
+            /// # Errors
+            ///
+            /// Returns [`Error::InvalidLinkId`] if `link` belongs to another model.
+            pub fn link_center_of_mass(&self, link: LinkId) -> Result<Vector3<f64>> {
+                Ok(*self.model.link_by_id(link)?.center_of_mass())
+            }
+
+            /// Returns a link's rotational inertia about its center of mass.
+            ///
+            /// # Errors
+            ///
+            /// Returns [`Error::InvalidLinkId`] if `link` belongs to another model.
+            pub fn link_inertia(&self, link: LinkId) -> Result<Matrix3<f64>> {
+                Ok(*self.model.link_by_id(link)?.inertia())
+            }
+        }
+    };
+}
+model_queries!(RobotModel);
+model_queries!(Robot);
+model_queries!(FloatingRobot);
 
 #[cfg(test)]
 mod tests {

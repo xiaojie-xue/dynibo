@@ -47,9 +47,17 @@ for example `robot.inverse_dynamics_into(q, qd, qdd, output, loads)`.
 Each `Robot` or `FloatingRobot` instance owns a workspace scoped to its immutable model. `fork()`
 creates fresh calculation storage while sharing that model.
 
+Rust also exposes a read-only `RobotModel` without workspace storage. The C
+model handles use this representation; only explicit C workspaces allocate
+calculation buffers. Python `robot.fork()` shares the model and link-ID table,
+allocating a fresh workspace and lock. Closing either Python instance leaves
+the others usable. Fixed-base forks initially copy the base pose, and later
+changes to either instance's pose are independent.
+
 ## Parallel calculations
 
 Each Rust `Robot` or `FloatingRobot` is mutable and may participate in only one
 calculation at a time. Use `fork()` to create an instance per concurrent calculation. Python
-serializes calls on one `Robot` or `FloatingRobot`; use separate robot instances for parallel work.
+serializes calls on one `Robot` or `FloatingRobot`; use `fork()` for parallel work
+without reparsing URDF or duplicating the model.
 C++ performs no internal locking, so use a separate `Robot` or `FloatingRobot` per worker.

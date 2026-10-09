@@ -78,7 +78,7 @@ robot.gravity(q, loads=loads, out=output)
 loads.clear()
 ```
 
-Python `LoadBuffer` 属于创建它的模型。独立加载的 robot
+Python `LoadBuffer` 属于创建它的模型，可供该模型的 `fork()` 实例共享。独立加载的 robot
 会拒绝它，即使 buffer 为空。原生计算期间会借用 buffer，并拒绝并发修改。
 原有 `Load` 列表接口仍然支持，列表会在每次调用时转换。
 

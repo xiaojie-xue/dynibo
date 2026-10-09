@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     panic::{AssertUnwindSafe, catch_unwind},
     path::PathBuf,
-    sync::{Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use dynibo::{
@@ -414,7 +414,7 @@ fn target_link(links: &[LinkId], target: usize) -> PyResult<LinkId> {
 #[pyclass(name = "LoadBuffer", module = "dynibo")]
 struct PyLoadBuffer {
     inner: CoreLoadBuffer,
-    links: Vec<LinkId>,
+    links: Arc<[LinkId]>,
 }
 
 #[pymethods]
@@ -517,13 +517,13 @@ struct PyRobot {
     joint_count: usize,
     generalized_count: usize,
     link_count: usize,
-    links: Vec<LinkId>,
+    links: Arc<[LinkId]>,
 }
 
 impl PyRobot {
     fn load(path: PathBuf) -> PyResult<Self> {
         let robot = CoreRobot::from_urdf(path).map_err(core_error)?;
-        let links = collect_links(&robot);
+        let links = collect_links(&robot).into();
         Ok(Self {
             name: robot.name().to_owned(),
             joint_count: robot.joint_count(),
@@ -566,6 +566,22 @@ impl PyRobot {
     #[classmethod]
     fn from_urdf(_class: &Bound<'_, PyType>, path: PathBuf) -> PyResult<Self> {
         Self::load(path)
+    }
+
+    fn fork(&self, py: Python<'_>) -> PyResult<Self> {
+        self.with_robot(py, |robot| {
+            Ok(Self {
+                inner: Mutex::new(Some(Calculation {
+                    robot: robot.fork(),
+                    poses: vec![Frame::identity(); self.link_count],
+                })),
+                name: self.name.clone(),
+                joint_count: self.joint_count,
+                generalized_count: self.generalized_count,
+                link_count: self.link_count,
+                links: Arc::clone(&self.links),
+            })
+        })
     }
 
     fn load_buffer(&self, py: Python<'_>) -> PyResult<PyLoadBuffer> {
@@ -882,13 +898,13 @@ struct PyFloatingRobot {
     joint_count: usize,
     generalized_count: usize,
     link_count: usize,
-    links: Vec<LinkId>,
+    links: Arc<[LinkId]>,
 }
 
 impl PyFloatingRobot {
     fn load(path: PathBuf) -> PyResult<Self> {
         let robot = CoreFloatingRobot::from_urdf(path).map_err(core_error)?;
-        let links = collect_floating_links(&robot);
+        let links = collect_floating_links(&robot).into();
         Ok(Self {
             name: robot.name().to_owned(),
             joint_count: robot.joint_count(),
@@ -934,6 +950,22 @@ impl PyFloatingRobot {
     #[classmethod]
     fn from_urdf(_class: &Bound<'_, PyType>, path: PathBuf) -> PyResult<Self> {
         Self::load(path)
+    }
+
+    fn fork(&self, py: Python<'_>) -> PyResult<Self> {
+        self.with_robot(py, |robot| {
+            Ok(Self {
+                inner: Mutex::new(Some(Calculation {
+                    robot: robot.fork(),
+                    poses: vec![Frame::identity(); self.link_count],
+                })),
+                name: self.name.clone(),
+                joint_count: self.joint_count,
+                generalized_count: self.generalized_count,
+                link_count: self.link_count,
+                links: Arc::clone(&self.links),
+            })
+        })
     }
 
     fn load_buffer(&self, py: Python<'_>) -> PyResult<PyLoadBuffer> {

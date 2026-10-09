@@ -129,6 +129,27 @@ fn floating_calculations_do_not_allocate_after_robot_creation() {
 static ALLOCATOR: CountingAllocator = CountingAllocator;
 
 #[test]
+fn shared_model_handles_and_metadata_do_not_allocate() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_arm.urdf");
+    let model = dynibo::RobotModel::from_urdf(path).unwrap();
+    let fixed = model.robot();
+    let floating = model.floating_robot().unwrap();
+    reset_allocation_count();
+    set_counting(true);
+    for _ in 0..10 {
+        let shared = black_box(model.clone());
+        black_box(fixed.model());
+        black_box(floating.model());
+        shared.validate_floating_base().unwrap();
+        black_box(shared.name());
+        black_box(shared.joint_name(0).unwrap());
+        black_box(shared.link_mass(shared.root_link_id()).unwrap());
+    }
+    set_counting(false);
+    assert_eq!(allocation_count(), 0);
+}
+
+#[test]
 fn dynamic_calculations_do_not_allocate_after_robot_creation() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_arm.urdf");
     let mut robot = Robot::from_urdf(path).unwrap();
