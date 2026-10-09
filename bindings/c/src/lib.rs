@@ -146,12 +146,22 @@ fn call(f: impl FnOnce() -> CResult<()>) -> DyniboStatus {
         }
     }
 }
+/// # Safety
+/// A non-null pointer must be aligned and point to an initialized `T` that is
+/// readable and not mutated for the entire returned lifetime `'a`.
 unsafe fn required_ref<'a, T>(p: *const T, n: &str) -> CResult<&'a T> {
     unsafe { p.as_ref() }.ok_or_else(|| invalid(format!("{n} must not be null")))
 }
+/// # Safety
+/// A non-null pointer must be aligned and point to an initialized `T` that is
+/// exclusively accessible for the entire returned lifetime `'a`.
 unsafe fn required_mut<'a, T>(p: *mut T, n: &str) -> CResult<&'a mut T> {
     unsafe { p.as_mut() }.ok_or_else(|| invalid(format!("{n} must not be null")))
 }
+/// # Safety
+/// For nonzero `n`, a non-null pointer must describe `n` initialized, aligned
+/// values in one allocation, readable without mutation for `'a`. The byte size
+/// must fit in `isize`. Overlap with mutable outputs must be rejected first.
 unsafe fn input_slice<'a>(p: *const f64, n: usize, name: &str) -> CResult<&'a [f64]> {
     if n == 0 {
         Ok(&[])
@@ -161,6 +171,10 @@ unsafe fn input_slice<'a>(p: *const f64, n: usize, name: &str) -> CResult<&'a [f
         Ok(unsafe { std::slice::from_raw_parts(p, n) })
     }
 }
+/// # Safety
+/// For nonzero `n`, a non-null pointer must describe `n` aligned, writable values
+/// in one allocation, exclusively accessible for `'a`. The byte size must fit
+/// in `isize`. Reject overlap before creating this mutable slice.
 unsafe fn output_slice<'a>(p: *mut f64, n: usize, name: &str) -> CResult<&'a mut [f64]> {
     if n == 0 {
         Ok(&mut [])
@@ -288,7 +302,13 @@ fn base_from_c(b: &DyniboBaseState) -> CResult<BaseState> {
     )
     .map_err(core_error)
 }
-fn loads<'a>(
+/// Converts and aggregates C loads using preallocated workspace buffers.
+///
+/// # Safety
+/// For nonzero `n`, a non-null `p` must describe `n` initialized, aligned loads
+/// in one allocation of at most `isize::MAX` bytes. It must remain readable and
+/// unmodified during this call, without aliasing `output` or `positions`.
+unsafe fn loads<'a>(
     ids: &[LinkId],
     output: &'a mut [IndexedLoad],
     positions: &mut [usize],
@@ -346,7 +366,13 @@ fn loads<'a>(
     }
     Ok(&output[..used])
 }
-fn fixed_parts<'a>(
+/// Borrows fixed-base handles and synchronizes the instance's base frame.
+///
+/// # Safety
+/// Non-null handles must come from this ABI and remain live for `'a`. The robot
+/// must not be mutated, and the workspace must be exclusively accessible, for
+/// that entire lifetime. Null handles and model mismatches return errors.
+unsafe fn fixed_parts<'a>(
     robot: *const DyniboRobot,
     workspace: *mut DyniboWorkspace,
 ) -> CResult<(&'a DyniboRobot, &'a mut DyniboWorkspace)> {
@@ -361,7 +387,13 @@ fn fixed_parts<'a>(
         .map_err(core_error)?;
     Ok((robot, workspace))
 }
-fn floating_parts<'a>(
+/// Borrows floating-base handles after checking their shared model identity.
+///
+/// # Safety
+/// Non-null handles must come from this ABI and remain live for `'a`. The robot
+/// must not be mutated, and the workspace must be exclusively accessible, for
+/// that entire lifetime. Null handles and model mismatches return errors.
+unsafe fn floating_parts<'a>(
     robot: *const DyniboFloatingRobot,
     workspace: *mut DyniboFloatingWorkspace,
 ) -> CResult<(&'a DyniboFloatingRobot, &'a mut DyniboFloatingWorkspace)> {
@@ -641,7 +673,8 @@ pub unsafe extern "C" fn dynibo_forward_kinematics(
     out: *mut DyniboPose,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = fixed_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { fixed_parts(r, w) }?;
         reject_struct_output_overlap!(out; q, n, "q");
         let q = unsafe { input_slice(q, n, "q") }?;
         let out = unsafe { required_mut(out, "output") }?;
@@ -690,7 +723,8 @@ pub unsafe extern "C" fn dynibo_forward_kinematics_all(
     len: usize,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = fixed_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { fixed_parts(r, w) }?;
         validate_pose_output(q, n, out, len, r.inner.link_count())?;
         let q = unsafe { input_slice(q, n, "q") }?;
         w.inner
@@ -716,7 +750,8 @@ pub unsafe extern "C" fn dynibo_floating_forward_kinematics_all(
     len: usize,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = floating_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { floating_parts(r, w) }?;
         validate_pose_output(q, n, out, len, r.inner.link_count())?;
         let base = base_from_c(unsafe { required_ref(b, "base") }?)?;
         let q = unsafe { input_slice(q, n, "q") }?;
@@ -742,7 +777,8 @@ pub unsafe extern "C" fn dynibo_floating_forward_kinematics(
     out: *mut DyniboPose,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = floating_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { floating_parts(r, w) }?;
         reject_struct_output_overlap!(out; q, n, "q");
         let b = base_from_c(unsafe { required_ref(b, "base") }?)?;
         let q = unsafe { input_slice(q, n, "q") }?;
@@ -767,7 +803,8 @@ pub unsafe extern "C" fn dynibo_jacobian(
     on: usize,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = fixed_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { fixed_parts(r, w) }?;
         reject_output_overlap!(out, on; q, n, "q");
         let q = unsafe { input_slice(q, n, "q") }?;
         let out = unsafe { output_slice(out, on, "output") }?;
@@ -788,7 +825,8 @@ pub unsafe extern "C" fn dynibo_floating_jacobian(
     on: usize,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = floating_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { floating_parts(r, w) }?;
         reject_output_overlap!(out, on; q, n, "q");
         let b = base_from_c(unsafe { required_ref(b, "base") }?)?;
         let q = unsafe { input_slice(q, n, "q") }?;
@@ -810,7 +848,8 @@ pub unsafe extern "C" fn dynibo_jacobian_derivative(
     on: usize,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = fixed_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { fixed_parts(r, w) }?;
         reject_output_overlap!(out, on; q, n, "q"; qd, n, "qd");
         let q = unsafe { input_slice(q, n, "q") }?;
         let qd = unsafe { input_slice(qd, n, "qd") }?;
@@ -833,7 +872,8 @@ pub unsafe extern "C" fn dynibo_floating_jacobian_derivative(
     on: usize,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = floating_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { floating_parts(r, w) }?;
         reject_output_overlap!(out, on; q, n, "q"; qd, n, "qd");
         let b = base_from_c(unsafe { required_ref(b, "base") }?)?;
         let q = unsafe { input_slice(q, n, "q") }?;
@@ -855,7 +895,8 @@ pub unsafe extern "C" fn dynibo_mass_matrix(
     on: usize,
 ) -> DyniboStatus {
     call(|| {
-        let (_, w) = fixed_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (_, w) = unsafe { fixed_parts(r, w) }?;
         reject_output_overlap!(out, on; q, n, "q");
         let q = unsafe { input_slice(q, n, "q") }?;
         let out = unsafe { output_slice(out, on, "output") }?;
@@ -873,7 +914,8 @@ pub unsafe extern "C" fn dynibo_floating_mass_matrix(
     on: usize,
 ) -> DyniboStatus {
     call(|| {
-        let (_, w) = floating_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (_, w) = unsafe { floating_parts(r, w) }?;
         reject_output_overlap!(out, on; q, n, "q");
         let b = base_from_c(unsafe { required_ref(b, "base") }?)?;
         let q = unsafe { input_slice(q, n, "q") }?;
@@ -892,7 +934,8 @@ pub unsafe extern "C" fn dynibo_velocity_product_forces(
     on: usize,
 ) -> DyniboStatus {
     call(|| {
-        let (_, w) = fixed_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (_, w) = unsafe { fixed_parts(r, w) }?;
         reject_output_overlap!(out, on; q, n, "q"; qd, n, "qd");
         let q = unsafe { input_slice(q, n, "q") }?;
         let qd = unsafe { input_slice(qd, n, "qd") }?;
@@ -914,7 +957,8 @@ pub unsafe extern "C" fn dynibo_floating_velocity_product_forces(
     on: usize,
 ) -> DyniboStatus {
     call(|| {
-        let (_, w) = floating_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (_, w) = unsafe { floating_parts(r, w) }?;
         reject_output_overlap!(out, on; q, n, "q"; qd, n, "qd");
         let b = base_from_c(unsafe { required_ref(b, "base") }?)?;
         let q = unsafe { input_slice(q, n, "q") }?;
@@ -938,7 +982,8 @@ pub unsafe extern "C" fn dynibo_forward_velocity_kinematics(
     out: *mut DyniboTwist,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = fixed_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { fixed_parts(r, w) }?;
         reject_struct_output_overlap!(out; q, n, "q"; qd, n, "qd");
         let q = unsafe { input_slice(q, n, "q") }?;
         let qd = unsafe { input_slice(qd, n, "qd") }?;
@@ -965,7 +1010,8 @@ pub unsafe extern "C" fn dynibo_floating_forward_velocity_kinematics(
     out: *mut DyniboTwist,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = floating_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { floating_parts(r, w) }?;
         reject_struct_output_overlap!(out; q, n, "q"; qd, n, "qd");
         let b = base_from_c(unsafe { required_ref(b, "base") }?)?;
         let q = unsafe { input_slice(q, n, "q") }?;
@@ -992,7 +1038,8 @@ pub unsafe extern "C" fn dynibo_forward_acceleration_kinematics(
     out: *mut DyniboTwist,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = fixed_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { fixed_parts(r, w) }?;
         reject_struct_output_overlap!(out; q, n, "q"; qd, n, "qd"; qdd, n, "qdd");
         let q = unsafe { input_slice(q, n, "q") }?;
         let qd = unsafe { input_slice(qd, n, "qd") }?;
@@ -1019,7 +1066,8 @@ pub unsafe extern "C" fn dynibo_floating_forward_acceleration_kinematics(
     out: *mut DyniboTwist,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = floating_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { floating_parts(r, w) }?;
         reject_struct_output_overlap!(out; q, n, "q"; qd, n, "qd"; qdd, n, "qdd");
         let b = base_from_c(unsafe { required_ref(b, "base") }?)?;
         let q = unsafe { input_slice(q, n, "q") }?;
@@ -1047,16 +1095,20 @@ pub unsafe extern "C" fn dynibo_gravity(
     on: usize,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = fixed_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { fixed_parts(r, w) }?;
         reject_output_overlap!(out, on; q, n, "q");
         let q = unsafe { input_slice(q, n, "q") }?;
-        let ls = loads(
-            &r.link_ids,
-            &mut w.converted_loads,
-            &mut w.load_positions,
-            lp,
-            ln,
-        )?;
+        // SAFETY: The C caller supplies a readable load array for this call.
+        let ls = unsafe {
+            loads(
+                &r.link_ids,
+                &mut w.converted_loads,
+                &mut w.load_positions,
+                lp,
+                ln,
+            )
+        }?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner.gravity(q, ls, out).map_err(core_error)
     })
@@ -1074,17 +1126,21 @@ pub unsafe extern "C" fn dynibo_floating_gravity(
     on: usize,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = floating_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { floating_parts(r, w) }?;
         reject_output_overlap!(out, on; q, n, "q");
         let b = base_from_c(unsafe { required_ref(b, "base") }?)?;
         let q = unsafe { input_slice(q, n, "q") }?;
-        let ls = loads(
-            &r.link_ids,
-            &mut w.converted_loads,
-            &mut w.load_positions,
-            lp,
-            ln,
-        )?;
+        // SAFETY: The C caller supplies a readable load array for this call.
+        let ls = unsafe {
+            loads(
+                &r.link_ids,
+                &mut w.converted_loads,
+                &mut w.load_positions,
+                lp,
+                ln,
+            )
+        }?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner.gravity(&b, q, ls, out).map_err(core_error)
     })
@@ -1103,18 +1159,22 @@ pub unsafe extern "C" fn dynibo_inverse_dynamics(
     on: usize,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = fixed_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { fixed_parts(r, w) }?;
         reject_output_overlap!(out, on; q, n, "q"; qd, n, "qd"; qdd, n, "qdd");
         let q = unsafe { input_slice(q, n, "q") }?;
         let qd = unsafe { input_slice(qd, n, "qd") }?;
         let qdd = unsafe { input_slice(qdd, n, "qdd") }?;
-        let ls = loads(
-            &r.link_ids,
-            &mut w.converted_loads,
-            &mut w.load_positions,
-            lp,
-            ln,
-        )?;
+        // SAFETY: The C caller supplies a readable load array for this call.
+        let ls = unsafe {
+            loads(
+                &r.link_ids,
+                &mut w.converted_loads,
+                &mut w.load_positions,
+                lp,
+                ln,
+            )
+        }?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner
             .inverse_dynamics(q, qd, qdd, ls, out)
@@ -1136,19 +1196,23 @@ pub unsafe extern "C" fn dynibo_floating_inverse_dynamics(
     on: usize,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = floating_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { floating_parts(r, w) }?;
         reject_output_overlap!(out, on; q, n, "q"; qd, n, "qd"; qdd, n, "qdd");
         let b = base_from_c(unsafe { required_ref(b, "base") }?)?;
         let q = unsafe { input_slice(q, n, "q") }?;
         let qd = unsafe { input_slice(qd, n, "qd") }?;
         let qdd = unsafe { input_slice(qdd, n, "qdd") }?;
-        let ls = loads(
-            &r.link_ids,
-            &mut w.converted_loads,
-            &mut w.load_positions,
-            lp,
-            ln,
-        )?;
+        // SAFETY: The C caller supplies a readable load array for this call.
+        let ls = unsafe {
+            loads(
+                &r.link_ids,
+                &mut w.converted_loads,
+                &mut w.load_positions,
+                lp,
+                ln,
+            )
+        }?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner
             .inverse_dynamics(&b, q, qd, qdd, ls, out)
@@ -1170,18 +1234,22 @@ pub unsafe extern "C" fn dynibo_forward_dynamics(
     on: usize,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = fixed_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { fixed_parts(r, w) }?;
         reject_output_overlap!(out, on; q, n, "q"; qd, n, "qd"; f, fn_, "generalized_forces");
         let q = unsafe { input_slice(q, n, "q") }?;
         let qd = unsafe { input_slice(qd, n, "qd") }?;
         let f = unsafe { input_slice(f, fn_, "generalized_forces") }?;
-        let ls = loads(
-            &r.link_ids,
-            &mut w.converted_loads,
-            &mut w.load_positions,
-            lp,
-            ln,
-        )?;
+        // SAFETY: The C caller supplies a readable load array for this call.
+        let ls = unsafe {
+            loads(
+                &r.link_ids,
+                &mut w.converted_loads,
+                &mut w.load_positions,
+                lp,
+                ln,
+            )
+        }?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner
             .forward_dynamics(q, qd, f, ls, out)
@@ -1204,19 +1272,23 @@ pub unsafe extern "C" fn dynibo_floating_forward_dynamics(
     on: usize,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = floating_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { floating_parts(r, w) }?;
         reject_output_overlap!(out, on; q, n, "q"; qd, n, "qd"; f, fn_, "generalized_forces");
         let b = base_from_c(unsafe { required_ref(b, "base") }?)?;
         let q = unsafe { input_slice(q, n, "q") }?;
         let qd = unsafe { input_slice(qd, n, "qd") }?;
         let f = unsafe { input_slice(f, fn_, "generalized_forces") }?;
-        let ls = loads(
-            &r.link_ids,
-            &mut w.converted_loads,
-            &mut w.load_positions,
-            lp,
-            ln,
-        )?;
+        // SAFETY: The C caller supplies a readable load array for this call.
+        let ls = unsafe {
+            loads(
+                &r.link_ids,
+                &mut w.converted_loads,
+                &mut w.load_positions,
+                lp,
+                ln,
+            )
+        }?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner
             .forward_dynamics(&b, q, qd, f, ls, out)
@@ -1236,7 +1308,8 @@ pub unsafe extern "C" fn dynibo_inverse_kinematics(
     on: usize,
 ) -> DyniboStatus {
     call(|| {
-        let (r, w) = fixed_parts(r, w)?;
+        // SAFETY: The C caller supplies live handles and exclusive workspace access.
+        let (r, w) = unsafe { fixed_parts(r, w) }?;
         reject_output_overlap!(out, on; q, n, "initial_q");
         let q = unsafe { input_slice(q, n, "initial_q") }?;
         let desired = frame_from_pose(unsafe { required_ref(desired, "desired") }?)?;
