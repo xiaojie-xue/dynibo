@@ -90,6 +90,7 @@ pub struct DyniboRobot {
 /// Fixed-base calculation storage.
 pub struct DyniboWorkspace {
     inner: Robot,
+    poses: Box<[Frame]>,
     converted_loads: Box<[IndexedLoad]>,
     load_positions: Box<[usize]>,
 }
@@ -102,6 +103,7 @@ pub struct DyniboFloatingRobot {
 /// Floating-base calculation storage.
 pub struct DyniboFloatingWorkspace {
     inner: FloatingRobot,
+    poses: Box<[Frame]>,
     converted_loads: Box<[IndexedLoad]>,
     load_positions: Box<[usize]>,
 }
@@ -586,6 +588,7 @@ pub unsafe extern "C" fn dynibo_workspace_create(
         let out = unsafe { required_mut(out, "output") }?;
         *out = Box::into_raw(Box::new(DyniboWorkspace {
             inner: robot.inner.fork(),
+            poses: vec![Frame::identity(); robot.inner.link_count()].into_boxed_slice(),
             converted_loads: make_loads(&robot.link_ids),
             load_positions: make_load_positions(&robot.link_ids),
         }));
@@ -602,6 +605,7 @@ pub unsafe extern "C" fn dynibo_floating_workspace_create(
         let out = unsafe { required_mut(out, "output") }?;
         *out = Box::into_raw(Box::new(DyniboFloatingWorkspace {
             inner: robot.inner.fork(),
+            poses: vec![Frame::identity(); robot.inner.link_count()].into_boxed_slice(),
             converted_loads: make_loads(&robot.link_ids),
             load_positions: make_load_positions(&robot.link_ids),
         }));
@@ -640,6 +644,84 @@ pub unsafe extern "C" fn dynibo_forward_kinematics(
                 .forward_kinematics(q, link(&r.link_ids, target)?)
                 .map_err(core_error)?,
         );
+        Ok(())
+    })
+}
+
+fn validate_pose_output(
+    q: *const f64,
+    n: usize,
+    out: *mut DyniboPose,
+    len: usize,
+    expected: usize,
+) -> CResult<()> {
+    if len != expected {
+        return Err(invalid(format!(
+            "expected {expected} output poses, found {len}"
+        )));
+    }
+    if out.is_null() {
+        return Err(invalid("output must not be null"));
+    }
+    let input_bytes = n
+        .checked_mul(size_of::<f64>())
+        .filter(|n| *n <= isize::MAX as usize)
+        .ok_or_else(|| invalid("q length is too large"))?;
+    let output_bytes = len
+        .checked_mul(size_of::<DyniboPose>())
+        .filter(|n| *n <= isize::MAX as usize)
+        .ok_or_else(|| invalid("output length is too large"))?;
+    reject_byte_overlap(q.cast(), input_bytes, "q", out.cast(), output_bytes)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dynibo_forward_kinematics_all(
+    r: *const DyniboRobot,
+    w: *mut DyniboWorkspace,
+    q: *const f64,
+    n: usize,
+    out: *mut DyniboPose,
+    len: usize,
+) -> DyniboStatus {
+    call(|| {
+        let (r, w) = fixed_parts(r, w)?;
+        validate_pose_output(q, n, out, len, r.inner.link_count())?;
+        let q = unsafe { input_slice(q, n, "q") }?;
+        w.inner
+            .forward_kinematics_all(q, &mut w.poses)
+            .map_err(core_error)?;
+        for (i, frame) in w.poses.iter().enumerate() {
+            unsafe {
+                out.add(i).write(pose_from_frame(frame));
+            }
+        }
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dynibo_floating_forward_kinematics_all(
+    r: *const DyniboFloatingRobot,
+    w: *mut DyniboFloatingWorkspace,
+    b: *const DyniboBaseState,
+    q: *const f64,
+    n: usize,
+    out: *mut DyniboPose,
+    len: usize,
+) -> DyniboStatus {
+    call(|| {
+        let (r, w) = floating_parts(r, w)?;
+        validate_pose_output(q, n, out, len, r.inner.link_count())?;
+        let base = base_from_c(unsafe { required_ref(b, "base") }?)?;
+        let q = unsafe { input_slice(q, n, "q") }?;
+        w.inner
+            .forward_kinematics_all(&base, q, &mut w.poses)
+            .map_err(core_error)?;
+        for (i, frame) in w.poses.iter().enumerate() {
+            unsafe {
+                out.add(i).write(pose_from_frame(frame));
+            }
+        }
         Ok(())
     })
 }

@@ -15,7 +15,10 @@ use crate::{
 
 mod dynamics;
 mod kinematics;
+mod loads;
 mod workspace;
+
+pub use loads::LoadBuffer;
 
 pub use kinematics::InverseKinematicsOptions;
 use workspace::Workspace;

@@ -12,5 +12,5 @@ mod spatial;
 pub use base::BaseState;
 pub use error::{Error, ErrorCategory, Result};
 pub use model::JointType;
-pub use robot::{FloatingRobot, IndexedLoad, InverseKinematicsOptions, LinkId, Robot};
+pub use robot::{FloatingRobot, IndexedLoad, InverseKinematicsOptions, LinkId, LoadBuffer, Robot};
 pub use spatial::{Frame, Twist, Wrench};

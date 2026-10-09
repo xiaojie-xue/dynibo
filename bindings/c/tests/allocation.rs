@@ -103,10 +103,22 @@ fn fixed_base_abi_hot_paths_do_not_allocate() {
         };
         let mut twist = DyniboTwist::default();
         let mut output = [0.0; 4];
+        let mut poses = vec![DyniboPose::default(); dynibo_c::dynibo_robot_link_count(robot)];
 
         reset_allocation_count();
         set_counting(true);
         for _ in 0..10 {
+            assert_eq!(
+                dynibo_c::dynibo_forward_kinematics_all(
+                    robot,
+                    workspace,
+                    q.as_ptr(),
+                    n,
+                    poses.as_mut_ptr(),
+                    poses.len()
+                ),
+                DyniboStatus::Ok
+            );
             assert_eq!(
                 dynibo_forward_velocity_kinematics(
                     robot,
@@ -226,6 +238,8 @@ fn floating_base_abi_forward_dynamics_does_not_allocate() {
         };
         let mut generalized_forces = [0.0; 8];
         let mut recovered = [0.0; 8];
+        let mut poses =
+            vec![DyniboPose::default(); dynibo_c::dynibo_floating_robot_link_count(robot)];
 
         assert_eq!(
             dynibo_floating_inverse_dynamics(
@@ -247,6 +261,18 @@ fn floating_base_abi_forward_dynamics_does_not_allocate() {
         reset_allocation_count();
         set_counting(true);
         for _ in 0..10 {
+            assert_eq!(
+                dynibo_c::dynibo_floating_forward_kinematics_all(
+                    robot,
+                    workspace,
+                    &base,
+                    q.as_ptr(),
+                    n,
+                    poses.as_mut_ptr(),
+                    poses.len()
+                ),
+                DyniboStatus::Ok
+            );
             assert_eq!(
                 dynibo_floating_forward_dynamics(
                     robot,

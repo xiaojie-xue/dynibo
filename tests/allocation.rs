@@ -78,10 +78,21 @@ fn floating_calculations_do_not_allocate_after_robot_creation() {
     let mut matrix = [0.0; 64];
     let mut output = [0.0; 8];
     let mut forward_output = [0.0; 8];
+    let mut poses = vec![Frame::identity(); robot.link_count()];
+    let mut loads = robot.load_buffer();
+    let wrench = dynibo::Wrench::zeros();
 
     reset_allocation_count();
     set_counting(true);
     for _ in 0..10 {
+        loads.set(target, wrench).unwrap();
+        loads.add(target, wrench).unwrap();
+        robot.forward_kinematics_all(&base, &q, &mut poses).unwrap();
+        robot
+            .gravity(&base, &q, loads.as_slice(), &mut output)
+            .unwrap();
+        loads.remove(target).unwrap();
+        loads.clear();
         black_box(robot.forward_kinematics(&base, &q, target).unwrap());
         robot.jacobian(&base, &q, target, &mut jacobian).unwrap();
         robot
@@ -132,6 +143,9 @@ fn dynamic_calculations_do_not_allocate_after_robot_creation() {
     let mut velocity_product = [0.0; 4];
     let mut output = [0.0; 4];
     let mut forward_output = [0.0; 4];
+    let mut poses = vec![Frame::identity(); robot.link_count()];
+    let mut loads = robot.load_buffer();
+    let wrench = dynibo::Wrench::zeros();
     let desired = robot.forward_kinematics(&q, target_id).unwrap();
 
     robot.jacobian(&q, target_id, &mut jacobian).unwrap();
@@ -148,6 +162,12 @@ fn dynamic_calculations_do_not_allocate_after_robot_creation() {
     reset_allocation_count();
     set_counting(true);
     for _ in 0..10 {
+        loads.set(target_id, wrench).unwrap();
+        loads.add(target_id, wrench).unwrap();
+        robot.forward_kinematics_all(&q, &mut poses).unwrap();
+        robot.gravity(&q, loads.as_slice(), &mut output).unwrap();
+        loads.remove(target_id).unwrap();
+        loads.clear();
         black_box(robot.forward_kinematics(&q, target_id).unwrap());
         robot.jacobian(&q, target_id, &mut jacobian).unwrap();
         robot.mass_matrix(&q, &mut mass).unwrap();

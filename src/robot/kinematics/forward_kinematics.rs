@@ -5,6 +5,15 @@ use crate::{BaseState, Frame, JointType, Result, Twist};
 use super::super::{FloatingRobot, LinkId, Model, Robot, Workspace};
 
 impl Robot {
+    /// Writes all world link poses, including the root, in [`Robot::link_id_at`] order.
+    ///
+    /// `output` must contain exactly [`Robot::link_count`] poses. The traversal is
+    /// linear in the number of model links and allocates no memory.
+    pub fn forward_kinematics_all(&mut self, q: &[f64], output: &mut [Frame]) -> Result<()> {
+        self.model
+            .forward_kinematics_all(&self.world_from_root, q, &mut self.workspace, output)
+    }
+
     /// Computes the world frame of a target link.
     ///
     /// # Errors
@@ -66,6 +75,20 @@ impl Robot {
 }
 
 impl FloatingRobot {
+    /// Writes every world link pose, including the root, in link enumeration order.
+    ///
+    /// `output` must contain exactly [`FloatingRobot::link_count`] poses. Only the
+    /// pose component of `base` is used; no memory is allocated.
+    pub fn forward_kinematics_all(
+        &mut self,
+        base: &BaseState,
+        q: &[f64],
+        output: &mut [Frame],
+    ) -> Result<()> {
+        self.model
+            .forward_kinematics_all(base.frame(), q, &mut self.workspace, output)
+    }
+
     /// Computes the world frame of a target link.
     pub fn forward_kinematics(
         &mut self,
@@ -120,6 +143,34 @@ impl FloatingRobot {
 }
 
 impl Model {
+    fn forward_kinematics_all(
+        &self,
+        base: &Frame,
+        q: &[f64],
+        workspace: &mut Workspace,
+        output: &mut [Frame],
+    ) -> Result<()> {
+        self.validate_slice("q", q)?;
+        self.validate_slice_length("all link poses output", output.len(), self.link_count())?;
+        output[0] = *base;
+        // Keep intermediates root-local, as in single-target FK. Adding the
+        // world translation only once avoids accumulating rounding at large
+        // world offsets and preserves the scratch coordinate convention.
+        for index in 0..self.model_joint_count() {
+            let parent = self.parent_link_indices[index];
+            let parent_frame = if parent == 0 {
+                Frame::identity()
+            } else {
+                workspace.frames[parent - 1]
+            };
+            let local =
+                parent_frame * self.joint_kinematics[index].frame(self.joint_value(q, index));
+            workspace.frames[index] = local;
+            output[index + 1] = *base * local;
+        }
+        Ok(())
+    }
+
     /// Computes a target link frame using runtime-sized input and workspace.
     ///
     /// For the joints on the root-to-target path, the returned world pose is

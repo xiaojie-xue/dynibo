@@ -65,6 +65,23 @@ link ID、torque 和 force 分量组成。逆动力学会把该 wrench 加到所
 所有 link ID 必须由参与计算的 robot 生成。多个载荷可以作用于相同或不同 link，
 dynibo 会累加它们的影响。
 
+## 复用载荷存储
+
+Rust 和 Python robot 提供 `load_buffer()`，创建时为每个 link 预留一个载荷的容量。
+`set` 替换载荷，`add` 累加载荷，`remove` 和 `clear` 保留容量。更新失败时原有
+载荷保持不变。Rust 向动力学方法传入 `buffer.as_slice()`；Python 直接传入 buffer：
+
+```python
+loads = robot.load_buffer()
+loads.set(tool, force=(0.0, 0.0, -10.0))
+robot.gravity(q, loads=loads, out=output)
+loads.clear()
+```
+
+Python `LoadBuffer` 属于创建它的模型。独立加载的 robot
+会拒绝它，即使 buffer 为空。原生计算期间会借用 buffer，并拒绝并发修改。
+原有 `Load` 列表接口仍然支持，列表会在每次调用时转换。
+
 ## 无载荷调用
 
 Rust、Python 和 C++ 可以传入空 collection。C 只有在 `load_count` 为零时才可以将

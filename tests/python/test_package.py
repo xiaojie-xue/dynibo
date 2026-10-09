@@ -38,6 +38,63 @@ def reference(key: str) -> tuple[float, ...]:
 
 
 class PackageTests(unittest.TestCase):
+    def test_batch_fk_matches_single_targets_and_reuses_output(self) -> None:
+        for robot_type in (dynibo.Robot, dynibo.FloatingRobot):
+            with robot_type(URDF) as robot:
+                q = np.zeros(robot.joint_count)
+                prefix = (motion_base(),) if robot_type is dynibo.FloatingRobot else ()
+                out = np.empty(7 * robot.link_count)
+                self.assertIs(robot.forward_kinematics_all(*prefix, q, out=out), out)
+                for i, row in enumerate(out.reshape(-1, 7)):
+                    pose = robot.forward_kinematics(*prefix, q, i)
+                    np.testing.assert_allclose(row[:3], pose.translation, atol=1e-12)
+                    np.testing.assert_allclose(row[3:], pose.rotation_xyzw, atol=1e-12)
+                saved = out.copy()
+                for bad in (np.full_like(q, np.nan), q[:-1]):
+                    with self.assertRaises(ValueError):
+                        robot.forward_kinematics_all(*prefix, bad, out=out)
+                    np.testing.assert_array_equal(out, saved)
+                with self.assertRaises(ValueError):
+                    robot.forward_kinematics_all(*prefix, q, out=out[:-1])
+                with self.assertRaises(ValueError):
+                    robot.forward_kinematics_all(*prefix, out[:robot.joint_count], out=out)
+
+    def test_reusable_load_buffer_matches_lists_and_enforces_scope(self) -> None:
+        for robot_type in (dynibo.Robot, dynibo.FloatingRobot):
+            with robot_type(URDF) as robot, robot_type(URDF) as other:
+                prefix = (motion_base(),) if robot_type is dynibo.FloatingRobot else ()
+                q = np.zeros(robot.joint_count)
+                target = robot.link_id("test_link_4")
+                loads = robot.load_buffer()
+                self.assertIsInstance(loads, dynibo.LoadBuffer)
+                self.assertEqual(len(loads), 0)
+                loads.set(target, torque=(0.1, -0.2, 0.3), force=(1.0, 2.0, -3.0))
+                loads.add(target, force=(0.5, 0.0, 0.0))
+                equivalent = [dynibo.Load(target, torque=(0.1, -0.2, 0.3), force=(1.5, 2.0, -3.0))]
+                forces = robot.inverse_dynamics(*prefix, q, q, q, loads=equivalent)
+                out = np.empty(robot.generalized_count)
+                for method, args in ((robot.gravity, (q,)),
+                                     (robot.inverse_dynamics, (q, q, q)),
+                                     (robot.forward_dynamics, (q, q, forces))):
+                    expected = method(*prefix, *args, loads=equivalent)
+                    self.assertIs(method(*prefix, *args, loads=loads, out=out), out)
+                    np.testing.assert_allclose(out, expected, atol=1e-12)
+                with self.assertRaises(ValueError):
+                    other.gravity(*prefix, q, loads=loads)
+                with self.assertRaises(ValueError):
+                    loads.set(target, force=(float("nan"), 0.0, 0.0))
+                with self.assertRaises(ValueError):
+                    loads.remove(robot.link_count)
+                np.testing.assert_allclose(robot.gravity(*prefix, q, loads=loads),
+                                           robot.gravity(*prefix, q, loads=equivalent))
+                loads.remove(target)
+                self.assertEqual(len(loads), 0)
+                loads.set(target, force=(1.0, 0.0, 0.0))
+                loads.clear()
+                np.testing.assert_allclose(robot.gravity(*prefix, q, loads=loads), robot.gravity(*prefix, q))
+                with self.assertRaises(ValueError):
+                    other.gravity(*prefix, q, loads=loads)
+
     def setUp(self) -> None:
         self.robot = dynibo.Robot.from_urdf(URDF)
         self.addCleanup(self.robot.close)

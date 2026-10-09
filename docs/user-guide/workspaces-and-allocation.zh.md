@@ -9,7 +9,7 @@ Dynibo 在模型局部的 workspace 中一次性分配这些 buffer，之后重�
 |---|---|---|
 | Rust | 每个 `Robot` 或 `FloatingRobot` 持有一个 workspace | 矩阵和广义力 buffer 由调用方提供 |
 | Python | 每个 `Robot` 或 `FloatingRobot` 持有一个原生 workspace | 返回 NumPy 数组或值对象；`out=` 可复用调用方存储 |
-| C++ | 每个 `dynibo::Robot` 或 `dynibo::FloatingRobot` 持有一个原生 workspace | 返回 `std::vector` 或值对象 |
+| C++ | 每个 `dynibo::Robot` 或 `dynibo::FloatingRobot` 持有一个原生 workspace | 返回 `std::vector`，或使用 `*_into` 复用输出 vector |
 | C | 显式 `DyniboWorkspace*` 或 `DyniboFloatingWorkspace*` | buffer 和结构体由调用方提供 |
 
 Rust 和 C 可以直接控制输出内存：
@@ -31,8 +31,13 @@ Rust 和 C 可以直接控制输出内存：
     ```
 
 创建 workspace 时会分配全部内部临时 buffer；复用时不会调整这些 buffer 的尺寸。
-Python 可通过 `out=` 复用 NumPy 数组，未提供时才分配结果数组；C++ 会分配语言层的
-返回容器。
+Python 可通过 `out=` 复用 NumPy 数组，未提供时才分配结果数组。`LoadBuffer` 还能避免
+每次调用重建原生载荷 vector，但 Python 对象处理本身不承诺零分配。
+C++ 返回容器的方法会分配内存；`jacobian_into`、`jacobian_derivative_into`、
+`mass_matrix_into`、`velocity_product_forces_into`、`gravity_into`、
+`inverse_dynamics_into`、`forward_dynamics_into` 及固定基的 `inverse_kinematics_into`
+接受尺寸精确匹配的输出 vector，并且不会调整其容量。输出位于必填输入之后、可选载荷
+或 IK 选项之前，例如 `robot.inverse_dynamics_into(q, qd, qdd, output, loads)`。
 
 ## 模型作用域
 
