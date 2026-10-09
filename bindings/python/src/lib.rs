@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     panic::{AssertUnwindSafe, catch_unwind},
     path::PathBuf,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex},
 };
 
 use dynibo::{
@@ -16,9 +16,12 @@ use pyo3::{
     create_exception,
     exceptions::{PyRuntimeError, PyTypeError, PyValueError},
     prelude::*,
-    sync::MutexExt,
     types::{PyAny, PyBool, PyModule, PyType},
 };
+
+mod calculation;
+
+use calculation::{Calculation, close_calculation, lock_calculation, with_calculation, with_robot};
 
 type ArrayInput<'py> = PyArrayLike1<'py, f64, AllowTypeChange>;
 
@@ -498,11 +501,6 @@ fn convert_loads<'py>(
     Ok(LoadInput::List(converted))
 }
 
-struct Calculation<R> {
-    robot: R,
-    poses: Vec<Frame>,
-}
-
 fn write_poses(poses: &[Frame], output: &mut [f64]) {
     for (frame, row) in poses.iter().zip(output.chunks_exact_mut(7)) {
         row[..3].copy_from_slice(frame.translation.vector.as_slice());
@@ -536,24 +534,6 @@ impl PyRobot {
             })),
         })
     }
-
-    fn robot(&self, py: Python<'_>) -> PyResult<MutexGuard<'_, Option<Calculation<CoreRobot>>>> {
-        let guard = self.inner.lock_py_attached(py).map_err(|_| lock_error())?;
-        if guard.is_none() {
-            Err(PyRuntimeError::new_err("robot is closed"))
-        } else {
-            Ok(guard)
-        }
-    }
-
-    fn with_robot<T>(
-        &self,
-        py: Python<'_>,
-        calculate: impl FnOnce(&mut CoreRobot) -> PyResult<T>,
-    ) -> PyResult<T> {
-        let mut guard = self.robot(py)?;
-        catch_panic(|| calculate(&mut guard.as_mut().expect("open robot checked").robot))
-    }
 }
 
 #[pymethods]
@@ -569,7 +549,7 @@ impl PyRobot {
     }
 
     fn fork(&self, py: Python<'_>) -> PyResult<Self> {
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             Ok(Self {
                 inner: Mutex::new(Some(Calculation {
                     robot: robot.fork(),
@@ -585,7 +565,7 @@ impl PyRobot {
     }
 
     fn load_buffer(&self, py: Python<'_>) -> PyResult<PyLoadBuffer> {
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             Ok(PyLoadBuffer {
                 inner: robot.load_buffer(),
                 links: self.links.clone(),
@@ -594,15 +574,11 @@ impl PyRobot {
     }
 
     fn close(&self, py: Python<'_>) -> PyResult<()> {
-        self.inner
-            .lock_py_attached(py)
-            .map_err(|_| lock_error())?
-            .take();
-        Ok(())
+        close_calculation(&self.inner, py)
     }
 
     fn __enter__<'py>(slf: PyRef<'py, Self>, py: Python<'py>) -> PyResult<PyRef<'py, Self>> {
-        drop(slf.robot(py)?);
+        drop(lock_calculation(&slf.inner, py)?);
         Ok(slf)
     }
 
@@ -618,30 +594,30 @@ impl PyRobot {
 
     #[getter]
     fn name(&self, py: Python<'_>) -> PyResult<String> {
-        drop(self.robot(py)?);
+        drop(lock_calculation(&self.inner, py)?);
         Ok(self.name.clone())
     }
 
     #[getter]
     fn joint_count(&self, py: Python<'_>) -> PyResult<usize> {
-        drop(self.robot(py)?);
+        drop(lock_calculation(&self.inner, py)?);
         Ok(self.joint_count)
     }
 
     #[getter]
     fn generalized_count(&self, py: Python<'_>) -> PyResult<usize> {
-        drop(self.robot(py)?);
+        drop(lock_calculation(&self.inner, py)?);
         Ok(self.generalized_count)
     }
 
     #[getter]
     fn link_count(&self, py: Python<'_>) -> PyResult<usize> {
-        drop(self.robot(py)?);
+        drop(lock_calculation(&self.inner, py)?);
         Ok(self.link_count)
     }
 
     fn link_id(&self, py: Python<'_>, name: &str) -> PyResult<usize> {
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             let id = robot.link_id(name).map_err(core_error)?;
             self.links
                 .iter()
@@ -652,7 +628,9 @@ impl PyRobot {
 
     fn set_base_frame(&self, py: Python<'_>, frame: PyRef<'_, PyPose>) -> PyResult<()> {
         let frame = frame.to_frame()?;
-        self.with_robot(py, |robot| robot.set_base_frame(frame).map_err(core_error))
+        with_robot(&self.inner, py, |robot| {
+            robot.set_base_frame(frame).map_err(core_error)
+        })
     }
 
     #[pyo3(signature = (q, out=None))]
@@ -663,9 +641,7 @@ impl PyRobot {
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let q = input_slice(&q);
-        let mut guard = self.robot(py)?;
-        let state = guard.as_mut().expect("open robot checked");
-        catch_panic(|| {
+        with_calculation(&self.inner, py, |state| {
             calculate_output(py, 7 * self.link_count, out, |output| {
                 state.robot.forward_kinematics_all(&q, &mut state.poses)?;
                 write_poses(&state.poses, output);
@@ -682,7 +658,7 @@ impl PyRobot {
     ) -> PyResult<PyPose> {
         let q = input_slice(&q);
         let target = target_link(&self.links, target)?;
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             py.detach(|| robot.forward_kinematics(&q, target))
                 .map(|frame| PyPose::from_frame(&frame))
                 .map_err(core_error)
@@ -699,7 +675,7 @@ impl PyRobot {
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let q = input_slice(&q);
         let target = target_link(&self.links, target)?;
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             calculate_output(py, 6 * self.generalized_count, out, |output| {
                 robot.jacobian(&q, target, output)
             })
@@ -719,7 +695,7 @@ impl PyRobot {
         let qd = input_slice(&qd);
         require_same_length(&q, &qd, "qd")?;
         let target = target_link(&self.links, target)?;
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             calculate_output(py, 6 * self.generalized_count, out, |output| {
                 robot.jacobian_derivative(&q, &qd, target, output)
             })
@@ -740,7 +716,7 @@ impl PyRobot {
         require_same_length(&q, &qd, "qd")?;
         let target = target_link(&self.links, target)?;
         let tool = tool.map_or_else(|| Ok(Frame::identity()), |value| value.to_frame())?;
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             py.detach(|| robot.forward_velocity_kinematics(&q, &qd, target, &tool))
                 .map(PyTwist::from_core)
                 .map_err(core_error)
@@ -761,7 +737,7 @@ impl PyRobot {
         require_same_length(&q, &qd, "qd")?;
         require_same_length(&q, &qdd, "qdd")?;
         let target = target_link(&self.links, target)?;
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             py.detach(|| robot.forward_acceleration_kinematics(&q, &qd, &qdd, target))
                 .map(PyTwist::from_core)
                 .map_err(core_error)
@@ -779,7 +755,7 @@ impl PyRobot {
         let q = input_slice(&q);
         let load_guard = convert_loads(&self.links, loads.as_ref())?;
         let loads = load_guard.as_slice();
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             calculate_output(py, self.generalized_count, out, |output| {
                 robot.gravity(&q, loads, output)
             })
@@ -803,7 +779,7 @@ impl PyRobot {
         require_same_length(&q, &qdd, "qdd")?;
         let load_guard = convert_loads(&self.links, loads.as_ref())?;
         let loads = load_guard.as_slice();
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             calculate_output(py, self.generalized_count, out, |output| {
                 robot.inverse_dynamics(&q, &qd, &qdd, loads, output)
             })
@@ -826,7 +802,7 @@ impl PyRobot {
         require_same_length(&q, &qd, "qd")?;
         let load_guard = convert_loads(&self.links, loads.as_ref())?;
         let loads = load_guard.as_slice();
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             calculate_output(py, self.generalized_count, out, |output| {
                 robot.forward_dynamics(&q, &qd, &forces, loads, output)
             })
@@ -841,7 +817,7 @@ impl PyRobot {
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let q = input_slice(&q);
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             calculate_output(
                 py,
                 self.generalized_count * self.generalized_count,
@@ -862,7 +838,7 @@ impl PyRobot {
         let q = input_slice(&q);
         let qd = input_slice(&qd);
         require_same_length(&q, &qd, "qd")?;
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             calculate_output(py, self.generalized_count, out, |output| {
                 robot.velocity_product_forces(&q, &qd, output)
             })
@@ -883,7 +859,7 @@ impl PyRobot {
         let target = target_link(&self.links, target)?;
         let desired = desired.to_frame()?;
         let options = options.map_or_else(PyIkOptions::default, |value| *value);
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             calculate_output(py, self.joint_count, out, |output| {
                 robot.inverse_kinematics(&q, target, &desired, options.into(), output)
             })
@@ -917,27 +893,6 @@ impl PyFloatingRobot {
             })),
         })
     }
-
-    fn robot(
-        &self,
-        py: Python<'_>,
-    ) -> PyResult<MutexGuard<'_, Option<Calculation<CoreFloatingRobot>>>> {
-        let guard = self.inner.lock_py_attached(py).map_err(|_| lock_error())?;
-        if guard.is_none() {
-            Err(PyRuntimeError::new_err("robot is closed"))
-        } else {
-            Ok(guard)
-        }
-    }
-
-    fn with_robot<T>(
-        &self,
-        py: Python<'_>,
-        calculate: impl FnOnce(&mut CoreFloatingRobot) -> PyResult<T>,
-    ) -> PyResult<T> {
-        let mut guard = self.robot(py)?;
-        catch_panic(|| calculate(&mut guard.as_mut().expect("open robot checked").robot))
-    }
 }
 
 #[pymethods]
@@ -953,7 +908,7 @@ impl PyFloatingRobot {
     }
 
     fn fork(&self, py: Python<'_>) -> PyResult<Self> {
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             Ok(Self {
                 inner: Mutex::new(Some(Calculation {
                     robot: robot.fork(),
@@ -969,7 +924,7 @@ impl PyFloatingRobot {
     }
 
     fn load_buffer(&self, py: Python<'_>) -> PyResult<PyLoadBuffer> {
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             Ok(PyLoadBuffer {
                 inner: robot.load_buffer(),
                 links: self.links.clone(),
@@ -978,15 +933,11 @@ impl PyFloatingRobot {
     }
 
     fn close(&self, py: Python<'_>) -> PyResult<()> {
-        self.inner
-            .lock_py_attached(py)
-            .map_err(|_| lock_error())?
-            .take();
-        Ok(())
+        close_calculation(&self.inner, py)
     }
 
     fn __enter__<'py>(slf: PyRef<'py, Self>, py: Python<'py>) -> PyResult<PyRef<'py, Self>> {
-        drop(slf.robot(py)?);
+        drop(lock_calculation(&slf.inner, py)?);
         Ok(slf)
     }
 
@@ -1002,30 +953,30 @@ impl PyFloatingRobot {
 
     #[getter]
     fn name(&self, py: Python<'_>) -> PyResult<String> {
-        drop(self.robot(py)?);
+        drop(lock_calculation(&self.inner, py)?);
         Ok(self.name.clone())
     }
 
     #[getter]
     fn joint_count(&self, py: Python<'_>) -> PyResult<usize> {
-        drop(self.robot(py)?);
+        drop(lock_calculation(&self.inner, py)?);
         Ok(self.joint_count)
     }
 
     #[getter]
     fn generalized_count(&self, py: Python<'_>) -> PyResult<usize> {
-        drop(self.robot(py)?);
+        drop(lock_calculation(&self.inner, py)?);
         Ok(self.generalized_count)
     }
 
     #[getter]
     fn link_count(&self, py: Python<'_>) -> PyResult<usize> {
-        drop(self.robot(py)?);
+        drop(lock_calculation(&self.inner, py)?);
         Ok(self.link_count)
     }
 
     fn link_id(&self, py: Python<'_>, name: &str) -> PyResult<usize> {
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             let id = robot.link_id(name).map_err(core_error)?;
             self.links
                 .iter()
@@ -1044,9 +995,7 @@ impl PyFloatingRobot {
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let base = base.to_core()?;
         let q = input_slice(&q);
-        let mut guard = self.robot(py)?;
-        let state = guard.as_mut().expect("open robot checked");
-        catch_panic(|| {
+        with_calculation(&self.inner, py, |state| {
             calculate_output(py, 7 * self.link_count, out, |output| {
                 state
                     .robot
@@ -1067,7 +1016,7 @@ impl PyFloatingRobot {
         let base = base.to_core()?;
         let q = input_slice(&q);
         let target = target_link(&self.links, target)?;
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             py.detach(|| robot.forward_kinematics(&base, &q, target))
                 .map(|frame| PyPose::from_frame(&frame))
                 .map_err(core_error)
@@ -1086,7 +1035,7 @@ impl PyFloatingRobot {
         let base = base.to_core()?;
         let q = input_slice(&q);
         let target = target_link(&self.links, target)?;
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             calculate_output(py, 6 * self.generalized_count, out, |output| {
                 robot.jacobian(&base, &q, target, output)
             })
@@ -1108,7 +1057,7 @@ impl PyFloatingRobot {
         let qd = input_slice(&qd);
         require_same_length(&q, &qd, "qd")?;
         let target = target_link(&self.links, target)?;
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             calculate_output(py, 6 * self.generalized_count, out, |output| {
                 robot.jacobian_derivative(&base, &q, &qd, target, output)
             })
@@ -1131,7 +1080,7 @@ impl PyFloatingRobot {
         require_same_length(&q, &qd, "qd")?;
         let target = target_link(&self.links, target)?;
         let tool = tool.map_or_else(|| Ok(Frame::identity()), |value| value.to_frame())?;
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             py.detach(|| robot.forward_velocity_kinematics(&base, &q, &qd, target, &tool))
                 .map(PyTwist::from_core)
                 .map_err(core_error)
@@ -1154,7 +1103,7 @@ impl PyFloatingRobot {
         require_same_length(&q, &qd, "qd")?;
         require_same_length(&q, &qdd, "qdd")?;
         let target = target_link(&self.links, target)?;
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             py.detach(|| robot.forward_acceleration_kinematics(&base, &q, &qd, &qdd, target))
                 .map(PyTwist::from_core)
                 .map_err(core_error)
@@ -1174,7 +1123,7 @@ impl PyFloatingRobot {
         let q = input_slice(&q);
         let load_guard = convert_loads(&self.links, loads.as_ref())?;
         let loads = load_guard.as_slice();
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             calculate_output(py, self.generalized_count, out, |output| {
                 robot.gravity(&base, &q, loads, output)
             })
@@ -1201,7 +1150,7 @@ impl PyFloatingRobot {
         require_same_length(&q, &qdd, "qdd")?;
         let load_guard = convert_loads(&self.links, loads.as_ref())?;
         let loads = load_guard.as_slice();
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             calculate_output(py, self.generalized_count, out, |output| {
                 robot.inverse_dynamics(&base, &q, &qd, &qdd, loads, output)
             })
@@ -1227,7 +1176,7 @@ impl PyFloatingRobot {
         require_same_length(&q, &qd, "qd")?;
         let load_guard = convert_loads(&self.links, loads.as_ref())?;
         let loads = load_guard.as_slice();
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             calculate_output(py, self.generalized_count, out, |output| {
                 robot.forward_dynamics(&base, &q, &qd, &forces, loads, output)
             })
@@ -1244,7 +1193,7 @@ impl PyFloatingRobot {
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let base = base.to_core()?;
         let q = input_slice(&q);
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             calculate_output(
                 py,
                 self.generalized_count * self.generalized_count,
@@ -1267,7 +1216,7 @@ impl PyFloatingRobot {
         let q = input_slice(&q);
         let qd = input_slice(&qd);
         require_same_length(&q, &qd, "qd")?;
-        self.with_robot(py, |robot| {
+        with_robot(&self.inner, py, |robot| {
             calculate_output(py, self.generalized_count, out, |output| {
                 robot.velocity_product_forces(&base, &q, &qd, output)
             })
