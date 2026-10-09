@@ -8,6 +8,19 @@ building blocks:
 - absolute-plus-relative numerical assertions with complete case context;
 - algorithm-matrix and workspace-sequence runners.
 
+The `robot_arm` and `pinocchio_oracle` integration targets retain their root `.rs`
+entry points and group test cases in same-named subdirectories. This keeps each
+suite a single test executable. C ABI unit tests similarly share helpers in
+`bindings/c/src/tests.rs` and group calculations, overlap checks, and ownership
+checks under `bindings/c/src/tests/`.
+
+`support/model_gen/` separates model specifications and validation, seeded
+generation, corpus selection, temporary fixtures, and URDF serialization.
+`support/pinocchio/` separates bridge declarations and calculation wrappers.
+The installed Python suite still runs through `python/test_package.py`, with
+test classes and shared fixtures in `python/package_cases/`. Allocation tests
+remain independent targets with their own global allocators.
+
 The generated pull-request corpus uses 24 reproducible pseudo-random `u64`
 seeds and eight states per model. A versioned `ModelSpec` separates an explicit
 24-case structural coverage plan from random physical parameters. The plan

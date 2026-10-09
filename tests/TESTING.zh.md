@@ -7,6 +7,16 @@
 - 带完整 case 上下文的绝对误差加相对误差数值断言；
 - 算法矩阵与 workspace 序列执行器。
 
+`robot_arm` 和 `pinocchio_oracle` 集成测试保留根目录下的 `.rs` 入口，
+具体用例按职责放在同名子目录中，每套测试仍只生成一个可执行文件。
+C ABI 单元测试在 `bindings/c/src/tests.rs` 中共享辅助函数，计算、缓冲区重叠检查和
+所有权检查分别放在 `bindings/c/src/tests/` 的子模块中。
+
+`support/model_gen/` 分别组织模型规格与校验、确定性生成、语料选择、临时文件和
+URDF 序列化；`support/pinocchio/` 分开桥接声明与计算封装。
+Python 安装包测试仍通过 `python/test_package.py` 运行，测试类与共享 fixture 位于
+`python/package_cases/`。分配测试继续作为独立目标，分别使用自己的全局分配器。
+
 PR 使用的生成模型语料包含 24 个可复现的伪随机 `u64` seed，每个模型配合八组状态。
 带版本号的 `ModelSpec` 将显式的 24-case 结构覆盖计划与随机物理参数分开。该计划让固定基和
 浮动基分别覆盖串联、单分支、平衡、宽树和非平衡树；同时覆盖无 fixed joint、交错 fixed joint、
