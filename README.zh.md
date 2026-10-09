@@ -67,14 +67,9 @@ Dynibo 基于 Rust 实现，并复用每个机器人的内部存储。创建 `Ro
   </tbody>
 </table>
 
-以上数据于 2026-10-09 在提交 `74b4eebc` 上测得，环境为 Linux、Intel Core
-i9-14900K（固定到一个性能核）、Pinocchio 3.9.0、Rust 1.97.1（release），以及
-Python 3.10.12 / NumPy 2.2.6。倍率为 Pinocchio 单次耗时中位数除以 Dynibo 单次
-耗时中位数，大于 1 表示 Dynibo 更快。Rust 使用预分配输出，并通过 C++ 桥接调用
-Pinocchio；Python 使用默认返回数组接口。结果会随硬件和构建配置变化。
-
-复现源码见 [`benches/`](benches/)，[原始采样、环境、数值校验误差及运行命令](benches/results/pinocchio-2026-10-09.json)
-随本次测量一并保存。
+测试基于 `74b4eebc`，环境为 Linux / i9-14900K 单性能核。倍率为两者耗时中位数之比
+（Pinocchio / Dynibo），大于 1 表示 Dynibo 更快。详见[基准源码](benches/)和
+[测量记录](benches/results/pinocchio-2026-10-09.json)。
 
 ### 可靠
 

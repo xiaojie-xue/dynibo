@@ -71,16 +71,10 @@ The table below shows Dynibo's speedup over Pinocchio for each operation.
   </tbody>
 </table>
 
-Measured on 2026-10-09 at commit `74b4eebc`, on Linux with an Intel Core
-i9-14900K pinned to one performance core, using Pinocchio 3.9.0, Rust 1.97.1
-(release), and Python 3.10.12 / NumPy 2.2.6. Each ratio is Pinocchio's median
-time divided by Dynibo's median time; values above 1 mean Dynibo is faster.
-Rust uses preallocated outputs and a C++ bridge for Pinocchio; Python uses
-the default returned-array APIs. Results depend on hardware and build settings.
-
-Reproduction code is in [`benches/`](benches/). The [raw samples, environment,
-validation errors, and commands](benches/results/pinocchio-2026-10-09.json) are
-recorded with these measurements.
+Measured at `74b4eebc` on Linux / i9-14900K, pinned to one performance core.
+Ratios compare median times (Pinocchio / Dynibo); values above 1 mean Dynibo is
+faster. See the [benchmark code](benches/) and
+[measurement record](benches/results/pinocchio-2026-10-09.json).
 
 ### Reliable
 
