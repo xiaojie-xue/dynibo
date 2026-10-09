@@ -5,7 +5,7 @@ use std::sync::{Mutex, MutexGuard};
 use dynibo::Frame;
 use pyo3::{exceptions::PyRuntimeError, prelude::*, sync::MutexExt};
 
-use super::{catch_panic, lock_error};
+use crate::errors::{catch_panic, lock_error};
 
 pub(super) struct Calculation<R> {
     pub(super) robot: R,
