@@ -39,6 +39,11 @@ Copy the string when it must outlive the next call.
 
 ## Recovery
 
+Joint state, generalized forces, loads, and tool poses must contain finite
+values. Rejected inputs leave caller-owned calculation output buffers unchanged.
+Overflow while accumulating otherwise finite loads is a solver error. Outputs
+are unspecified after a solver error and must only be consumed after success.
+
 Argument and solver errors do not invalidate a robot or workspace. Correct the
 input and call again. A caught ABI panic is reported instead of unwinding across
 the foreign-language boundary, but it indicates an unexpected internal failure;

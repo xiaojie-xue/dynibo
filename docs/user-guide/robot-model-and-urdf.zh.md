@@ -12,6 +12,10 @@ Dynibo 在运行时从 URDF 文件加载完整的树形机器人模型。根 lin
 Dynibo 会拒绝无法表示的拓扑，包括不连通结构、环和无效的父子关系。URDF 解析和
 模型验证在加载阶段完成，失败时还不会创建 workspace。
 
+关节 origin 和活动关节轴必须有限。Revolute 和 prismatic 的位置上下限必须有限且
+下限不大于上限；continuous 关节不限制位置。活动关节的速度上限必须有限且非负。
+目前遇到 mimic 约束会返回模型错误，避免将从动关节静默作为独立自由度加载。
+
 ## 名称与 ID
 
 `Robot.name` 来自 URDF 中的 robot 名称，link 名称也保持不变。可以先解析一次名称，

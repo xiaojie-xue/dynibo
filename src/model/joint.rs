@@ -71,9 +71,24 @@ impl Joint {
         let name = name.into();
         let axis = match joint_type {
             JointType::Revolute | JointType::Prismatic => {
-                Unit::try_new(axis, 1.0e-12).ok_or_else(|| Error::InvalidJointAxis {
+                let invalid = || Error::InvalidJointAxis {
                     joint: name.clone(),
-                })?
+                };
+                if !axis.iter().all(|value| value.is_finite()) {
+                    return Err(invalid());
+                }
+                // Scale before taking a norm: finite URDF axes can have a
+                // squared norm that overflows. Preserve the minimum norm rule.
+                let scale = axis.amax();
+                if scale == 0.0 {
+                    return Err(invalid());
+                }
+                let scaled = axis / scale;
+                let norm = scaled.norm();
+                if scale <= 1.0e-12 / norm {
+                    return Err(invalid());
+                }
+                Unit::new_normalize(scaled)
             }
             JointType::Fixed => Vector3::x_axis(),
         };

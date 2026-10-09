@@ -229,11 +229,13 @@ impl Model {
     }
 
     fn validate_inverse_kinematics_solution(&self, q: &[f64]) -> Result<()> {
-        for (&joint_index, &position) in self.active_joint_indices.iter().zip(q) {
+        for (dof_index, (&joint_index, &position)) in
+            self.active_joint_indices.iter().zip(q).enumerate()
+        {
             let joint = &self.joints[joint_index];
             if joint.is_over_limit(position) {
                 return Err(Error::IkJointLimitViolation {
-                    joint_index,
+                    joint_index: dof_index,
                     joint: joint.name().to_owned(),
                     position,
                     lower: joint.lower_limit(),

@@ -130,6 +130,24 @@ fn convert_urdf(robot: &Robot) -> Result<Tree> {
 
 /// Converts one supported URDF joint into the crate's joint representation.
 fn robot_joint(joint: &urdf_rs::Joint) -> Result<Joint> {
+    if joint.mimic.is_some() {
+        return Err(Error::InvalidModel(format!(
+            "joint {} uses an unsupported mimic constraint",
+            joint.name
+        )));
+    }
+    if !joint
+        .origin
+        .xyz
+        .iter()
+        .chain(joint.origin.rpy.iter())
+        .all(|v| v.is_finite())
+    {
+        return Err(Error::InvalidModel(format!(
+            "joint {} origin must contain only finite values",
+            joint.name
+        )));
+    }
     let joint_type = match joint.joint_type {
         UrdfJointType::Revolute | UrdfJointType::Continuous => JointType::Revolute,
         UrdfJointType::Prismatic => JointType::Prismatic,
@@ -141,6 +159,24 @@ fn robot_joint(joint: &urdf_rs::Joint) -> Result<Joint> {
             });
         }
     };
+    if joint_type != JointType::Fixed {
+        if !joint.limit.velocity.is_finite() || joint.limit.velocity < 0.0 {
+            return Err(Error::InvalidModel(format!(
+                "joint {} velocity limit must be finite and non-negative",
+                joint.name
+            )));
+        }
+        if joint.joint_type != UrdfJointType::Continuous
+            && (!joint.limit.lower.is_finite()
+                || !joint.limit.upper.is_finite()
+                || joint.limit.lower > joint.limit.upper)
+        {
+            return Err(Error::InvalidModel(format!(
+                "joint {} position limits must be finite and ordered",
+                joint.name
+            )));
+        }
+    }
     let (lower_limit, upper_limit) = if joint.joint_type == UrdfJointType::Continuous {
         (f64::NEG_INFINITY, f64::INFINITY)
     } else {
@@ -199,7 +235,7 @@ fn robot_link(link: &urdf_rs::Link) -> Result<Link> {
             link.name
         )));
     }
-    let principal_moments = inertia_in_inertial_frame.symmetric_eigen().eigenvalues;
+    let principal_moments = inertia_in_inertial_frame.symmetric_eigenvalues();
     if principal_moments.iter().any(|value| *value < 0.0) {
         return Err(Error::InvalidModel(format!(
             "link {} inertia must be positive semi-definite",
@@ -253,6 +289,63 @@ mod tests {
 
     fn chain() -> urdf_rs::Robot {
         read_from_string(CHAIN).expect("test URDF must parse")
+    }
+
+    #[test]
+    fn joint_parameters_are_validated_before_model_creation() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for axis in 0..3 {
+                let mut robot = chain();
+                robot.joints[0].origin.xyz[axis] = value;
+                invalid_model(&robot, "origin");
+                let mut robot = chain();
+                robot.joints[1].origin.rpy[axis] = value;
+                invalid_model(&robot, "origin");
+                let mut robot = chain();
+                robot.joints[0].axis.xyz[axis] = value;
+                assert!(matches!(
+                    convert_urdf(&robot),
+                    Err(Error::InvalidJointAxis { .. })
+                ));
+            }
+            let mut robot = chain();
+            robot.joints[0].limit.lower = value;
+            invalid_model(&robot, "position limits");
+            let mut robot = chain();
+            robot.joints[0].limit.upper = value;
+            invalid_model(&robot, "position limits");
+            let mut robot = chain();
+            robot.joints[0].limit.velocity = value;
+            invalid_model(&robot, "velocity limit");
+        }
+        let mut robot = chain();
+        robot.joints[0].limit.lower = 2.0;
+        invalid_model(&robot, "position limits");
+        robot.joints[0].limit.lower = -1.0;
+        robot.joints[0].limit.velocity = -1.0;
+        invalid_model(&robot, "velocity limit");
+        robot.joints[0].limit.velocity = 0.0;
+        robot.joints[0].limit.upper = -1.0;
+        assert!(convert_urdf(&robot).is_ok());
+
+        let robot = read_from_string(&CHAIN.replace(
+            "<axis xyz=\"0 0 1\"/>",
+            "<axis xyz=\"0 0 1\"/><mimic joint=\"wrist\" multiplier=\"-1\"/>",
+        ))
+        .unwrap();
+        invalid_model(&robot, "mimic");
+    }
+
+    #[test]
+    fn large_finite_axes_normalize_without_overflow() {
+        let mut robot = chain();
+        robot.joints[0].axis.xyz = urdf_rs::Vec3([1.0e300, -1.0e300, 1.0e300]);
+        let tree = convert_urdf(&robot).unwrap();
+        let expected = nalgebra::Vector3::new(1.0, -1.0, 1.0).normalize();
+        assert_relative_eq!(tree.joints[0].axis().as_ref(), &expected, epsilon = 1.0e-15);
+        let rotation = tree.joints[0].frame(0.7).rotation;
+        assert_relative_eq!(rotation.norm(), 1.0, epsilon = 1.0e-15);
+        assert_relative_eq!(rotation.angle(), 0.7, epsilon = 1.0e-15);
     }
 
     fn invalid_model(robot: &urdf_rs::Robot, expected: &str) {

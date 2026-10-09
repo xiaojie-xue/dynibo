@@ -689,10 +689,19 @@ impl Model {
         let mut root_load = Wrench::zeros();
         for load in loads {
             let link_index = self.validate_link_id(load.link)?;
-            if link_index == 0 {
-                root_load = add_wrench(root_load, load.wrench);
+            if !load.wrench.is_finite() {
+                return Err(crate::Error::NonFiniteInput { input: "load" });
+            }
+            let accumulated = if link_index == 0 {
+                &mut root_load
             } else {
-                output[link_index - 1] = add_wrench(output[link_index - 1], load.wrench);
+                &mut output[link_index - 1]
+            };
+            *accumulated = add_wrench(*accumulated, load.wrench);
+            if !accumulated.is_finite() {
+                return Err(crate::Error::NumericalFailure {
+                    operation: "load aggregation",
+                });
             }
         }
         Ok(root_load)

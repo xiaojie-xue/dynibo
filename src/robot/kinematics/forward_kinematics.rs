@@ -171,6 +171,17 @@ impl Model {
     ) -> Result<Twist> {
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
+        if !tool
+            .translation
+            .vector
+            .iter()
+            .chain(tool.rotation.coords.iter())
+            .all(|v| v.is_finite())
+        {
+            return Err(crate::Error::NonFiniteInput {
+                input: "tool frame",
+            });
+        }
         let target_index = self.validate_link_id(target)?;
         Ok(self.forward_velocity_for_base(
             q,

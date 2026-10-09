@@ -47,6 +47,14 @@ pub struct Wrench {
 }
 
 impl Wrench {
+    /// Checks whether every torque and force component is finite.
+    pub fn is_finite(&self) -> bool {
+        self.torque
+            .iter()
+            .chain(self.force.iter())
+            .all(|v| v.is_finite())
+    }
+
     /// Creates a spatial wrench from its torque and force components.
     pub const fn new(torque: Vector3<f64>, force: Vector3<f64>) -> Self {
         Self { torque, force }

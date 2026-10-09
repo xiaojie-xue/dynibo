@@ -136,6 +136,66 @@ fn load_workspace_aggregates_duplicates_clears_state_and_isolates_links() {
 }
 
 #[test]
+fn invalid_loads_and_overflow_preserve_output_and_reset_aggregation() {
+    let mut fixture = Fixture::tree();
+    let id = fixture.link_id(c"left_tool");
+    let n = unsafe { dynibo_robot_joint_count(fixture.robot) };
+    let q = vec![0.0; n];
+    let expected = fixture.gravity(&q, &[]);
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, f64::MAX] {
+        let load = DyniboLoad {
+            link_id: id,
+            torque: [value; 3],
+            force: [0.0; 3],
+        };
+        let loads = [
+            DyniboLoad {
+                link_id: id,
+                ..Default::default()
+            },
+            load,
+            load,
+        ];
+        let mut out = vec![123.0; n];
+        let status = unsafe {
+            dynibo_gravity(
+                fixture.robot,
+                fixture.workspace,
+                q.as_ptr(),
+                n,
+                loads.as_ptr(),
+                loads.len(),
+                out.as_mut_ptr(),
+                n,
+            )
+        };
+        assert_eq!(
+            status,
+            if value.is_finite() {
+                DyniboStatus::SolverError
+            } else {
+                DyniboStatus::InvalidArgument
+            }
+        );
+        assert!(out.iter().all(|v| *v == 123.0));
+        assert_close(&fixture.gravity(&q, &[]), &expected);
+        let valid = DyniboLoad {
+            link_id: id,
+            torque: [0.1; 3],
+            force: [0.2; 3],
+        };
+        let single = fixture.gravity(&q, &[valid]);
+        let duplicate = fixture.gravity(&q, &[valid, valid]);
+        let doubled: Vec<_> = single
+            .iter()
+            .zip(&expected)
+            .map(|(v, b)| 2.0 * v - b)
+            .collect();
+        assert_close(&duplicate, &doubled);
+    }
+}
+
+#[test]
 fn compact_load_workspace_handles_more_inputs_than_links() {
     let mut fixture = Fixture::tree();
     let left = fixture.link_id(c"left_tool");

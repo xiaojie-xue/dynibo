@@ -306,6 +306,14 @@ fn loads<'a>(
         if load.link_id >= ids.len() {
             return Err(invalid(format!("invalid link id {}", load.link_id)));
         }
+        if !load
+            .torque
+            .iter()
+            .chain(load.force.iter())
+            .all(|v| v.is_finite())
+        {
+            return Err(core_error(dynibo::Error::NonFiniteInput { input: "load" }));
+        }
     }
     let mut used = 0;
     for load in values {
@@ -326,6 +334,13 @@ fn loads<'a>(
     }
     for load in values {
         positions[load.link_id] = usize::MAX;
+    }
+    // Restore the index map before reporting overflow, so a failed conversion
+    // cannot leave stale entries for the next call.
+    if output[..used].iter().any(|load| !load.wrench.is_finite()) {
+        return Err(core_error(dynibo::Error::NumericalFailure {
+            operation: "load aggregation",
+        }));
     }
     Ok(&output[..used])
 }

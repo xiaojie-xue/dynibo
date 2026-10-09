@@ -94,6 +94,11 @@ impl Model {
             generalized_forces,
         )?;
         self.validate_output(base_mode, "forward dynamics output", output)?;
+        if !generalized_forces.iter().all(|value| value.is_finite()) {
+            return Err(Error::NonFiniteInput {
+                input: "generalized forces",
+            });
+        }
 
         let root_load = self.prepare_indexed_loads(loads, &mut workspace.link_loads)?;
         let root_rotation_inverse = base_frame.rotation.inverse();
@@ -223,7 +228,7 @@ impl Model {
                 );
                 let right_hand_side = wrench_vector(sub_wrench(local_base_force, root_bias_force));
                 let symmetric_inertia = (root_inertia + root_inertia.transpose()) * 0.5;
-                let eigenvalues = symmetric_inertia.symmetric_eigen().eigenvalues;
+                let eigenvalues = symmetric_inertia.symmetric_eigenvalues();
                 let minimum_eigenvalue = eigenvalues.min();
                 let maximum_eigenvalue = eigenvalues.max();
                 if !minimum_eigenvalue.is_finite()

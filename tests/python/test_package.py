@@ -721,6 +721,25 @@ class BindingContractTests(unittest.TestCase):
                                         out, expected, atol=1.0e-11, rtol=1.0e-10
                                     )
 
+    def test_nonfinite_forces_and_load_overflow_allow_recovery(self) -> None:
+        for robot_type in (dynibo.Robot, dynibo.FloatingRobot):
+            with robot_type(URDF) as robot:
+                prefix = (motion_base(),) if robot_type is dynibo.FloatingRobot else ()
+                q = np.zeros(robot.joint_count)
+                out = np.full(robot.generalized_count, 123.0)
+                for invalid in (float("nan"), float("inf"), float("-inf")):
+                    with self.assertRaisesRegex(ValueError, "generalized forces"):
+                        robot.forward_dynamics(*prefix, q, q,
+                            np.full(robot.generalized_count, invalid), out=out)
+                    np.testing.assert_array_equal(out, 123.0)
+                huge = dynibo.Load(robot.link_id("test_link_4"), torque=(1.7e308, 0.0, 0.0))
+                with self.assertRaisesRegex(dynibo.SolverError, "load aggregation"):
+                    robot.gravity(*prefix, q, loads=[huge, huge], out=out)
+                np.testing.assert_array_equal(out, 123.0)
+                expected = robot.gravity(*prefix, q)
+                robot.gravity(*prefix, q, out=out)
+                np.testing.assert_array_equal(out, expected)
+
     def test_invalid_frames_base_states_and_ik_options(self) -> None:
         q = reference("q")
         invalid_poses = (

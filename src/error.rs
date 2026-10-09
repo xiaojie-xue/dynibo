@@ -29,6 +29,11 @@ pub enum Error {
         /// Name of the rejected input.
         input: &'static str,
     },
+    /// Finite inputs produced an unrepresentable or inaccurate numerical result.
+    NumericalFailure {
+        /// Calculation that failed.
+        operation: &'static str,
+    },
     /// A joint axis is too small to normalize.
     InvalidJointAxis {
         /// Name of the joint with the invalid axis.
@@ -74,7 +79,7 @@ pub enum Error {
     },
     /// A converged inverse-kinematics solution violates a joint limit.
     IkJointLimitViolation {
-        /// Zero-based index of the joint.
+        /// Zero-based active degree-of-freedom index, matching the joint vector.
         joint_index: usize,
         /// Name of the joint.
         joint: String,
@@ -132,6 +137,7 @@ impl Error {
             | Self::InvalidIkOptions { .. }
             | Self::NonFiniteIkInput { .. } => ErrorCategory::InvalidInput,
             Self::IkNumericalFailure { .. }
+            | Self::NumericalFailure { .. }
             | Self::IkJointLimitViolation { .. }
             | Self::IkNotConverged { .. }
             | Self::ForwardDynamicsSingularJointInertia { .. }
@@ -157,6 +163,7 @@ impl fmt::Display for Error {
             Self::NonFiniteInput { input } => {
                 write!(f, "{input} contains a non-finite value")
             }
+            Self::NumericalFailure { operation } => write!(f, "numerical failure in {operation}"),
             Self::InvalidJointAxis { joint } => write!(f, "joint {joint} has an invalid axis"),
             Self::UnknownLink { name } => write!(f, "link {name} does not exist in the model"),
             Self::InvalidJointIndex { index } => {

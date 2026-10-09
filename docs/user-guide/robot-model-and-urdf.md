@@ -15,6 +15,12 @@ Dynibo rejects topology it cannot represent, including disconnected structures,
 cycles, and invalid parent-child relationships. URDF parse and model validation
 fail while loading, before a workspace is created.
 
+Joint origins and moving-joint axes must be finite. Revolute and prismatic
+position limits must be finite and ordered; continuous joints have unbounded
+position limits. Moving-joint velocity limits must be finite and non-negative.
+Mimic constraints are currently rejected with a model error rather than loaded
+as independent degrees of freedom.
+
 ## Names and IDs
 
 `Robot.name` comes from the URDF robot name. Links retain their URDF names.
