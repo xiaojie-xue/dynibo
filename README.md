@@ -71,10 +71,7 @@ The table below shows Dynibo's speedup over Pinocchio for each operation.
   </tbody>
 </table>
 
-Measured at `74b4eebc` on Linux / i9-14900K, pinned to one performance core.
-Ratios compare median times (Pinocchio / Dynibo); values above 1 mean Dynibo is
-faster. See the [benchmark code](benches/) and
-[measurement record](benches/results/pinocchio-2026-10-09.json).
+Source code to reproduce these results is available in [`benches/`](benches/).
 
 ### Reliable
 
