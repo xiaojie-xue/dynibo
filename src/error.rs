@@ -106,6 +106,8 @@ pub enum Error {
     },
     /// The floating base's articulated inertia cannot be inverted by forward dynamics.
     ForwardDynamicsSingularBaseInertia,
+    /// The scaled floating-base inertia is too ill-conditioned for a reliable solve.
+    ForwardDynamicsIllConditionedBaseInertia,
 }
 
 /// Stable, coarse classification of errors for language bindings and callers.
@@ -141,7 +143,8 @@ impl Error {
             | Self::IkJointLimitViolation { .. }
             | Self::IkNotConverged { .. }
             | Self::ForwardDynamicsSingularJointInertia { .. }
-            | Self::ForwardDynamicsSingularBaseInertia => ErrorCategory::Solver,
+            | Self::ForwardDynamicsSingularBaseInertia
+            | Self::ForwardDynamicsIllConditionedBaseInertia => ErrorCategory::Solver,
         }
     }
 }
@@ -214,6 +217,10 @@ impl fmt::Display for Error {
                 f,
                 "forward dynamics found singular floating-base articulated inertia"
             ),
+            Self::ForwardDynamicsIllConditionedBaseInertia => write!(
+                f,
+                "forward dynamics found ill-conditioned scaled floating-base articulated inertia"
+            ),
         }
     }
 }
@@ -245,6 +252,14 @@ mod tests {
     #[test]
     fn display_describes_each_library_error_and_has_no_source() {
         let cases = [
+            (
+                Error::NumericalFailure { operation: "load aggregation" },
+                "numerical failure in load aggregation".to_owned(),
+            ),
+            (
+                Error::ForwardDynamicsIllConditionedBaseInertia,
+                "forward dynamics found ill-conditioned scaled floating-base articulated inertia".to_owned(),
+            ),
             (
                 Error::InvalidModel("broken tree".to_owned()),
                 "invalid robot model: broken tree".to_owned(),

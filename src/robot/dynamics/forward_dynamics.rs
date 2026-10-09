@@ -159,7 +159,12 @@ impl Model {
                 let articulated_u =
                     inertia_apply_joint(&inertia, joint.joint_type, *joint.axis.as_ref());
                 let articulated_d = motion_force_dot(motion_subspace, articulated_u);
-                if !articulated_d.is_finite() || articulated_d <= 0.0 {
+                if !articulated_d.is_finite() {
+                    return Err(Error::NumericalFailure {
+                        operation: "joint articulated inertia",
+                    });
+                }
+                if articulated_d <= 0.0 {
                     return Err(Error::ForwardDynamicsSingularJointInertia {
                         joint_index: dof_index,
                     });
@@ -227,29 +232,20 @@ impl Model {
                     root_rotation_inverse * world_base_force.force,
                 );
                 let right_hand_side = wrench_vector(sub_wrench(local_base_force, root_bias_force));
-                let symmetric_inertia = (root_inertia + root_inertia.transpose()) * 0.5;
-                let eigenvalues = symmetric_inertia.symmetric_eigenvalues();
-                let minimum_eigenvalue = eigenvalues.min();
-                let maximum_eigenvalue = eigenvalues.max();
-                if !minimum_eigenvalue.is_finite()
-                    || !maximum_eigenvalue.is_finite()
-                    || maximum_eigenvalue <= 0.0
-                    || minimum_eigenvalue <= maximum_eigenvalue * f64::EPSILON.sqrt()
-                {
-                    return Err(Error::ForwardDynamicsSingularBaseInertia);
-                }
-                let Some(factorization) = symmetric_inertia.cholesky() else {
-                    return Err(Error::ForwardDynamicsSingularBaseInertia);
-                };
-                let acceleration = twist_from_vector(factorization.solve(&right_hand_side));
-                if !twist_is_finite(acceleration) {
-                    return Err(Error::ForwardDynamicsSingularBaseInertia);
-                }
+                // Average without overflowing a finite diagonal before scaling.
+                let symmetric_inertia = root_inertia * 0.5 + root_inertia.transpose() * 0.5;
+                let acceleration =
+                    twist_from_vector(solve_base_inertia(symmetric_inertia, right_hand_side)?);
 
                 let physical_linear_local = acceleration.linear - gravity_local
                     + root_velocity.angular.cross(&root_velocity.linear);
                 let world_angular = base_frame.rotation * acceleration.angular;
                 let world_linear = base_frame.rotation * physical_linear_local;
+                if !twist_is_finite(Twist::new(world_angular, world_linear)) {
+                    return Err(Error::NumericalFailure {
+                        operation: "floating-base acceleration",
+                    });
+                }
                 output[..3].copy_from_slice(world_angular.as_slice());
                 output[3..FLOATING_BASE_DOF].copy_from_slice(world_linear.as_slice());
                 acceleration
@@ -273,8 +269,8 @@ impl Model {
                     - motion_force_dot(acceleration, workspace.articulated_u[index]))
                     / workspace.articulated_d[index];
                 if !joint_acceleration.is_finite() {
-                    return Err(Error::ForwardDynamicsSingularJointInertia {
-                        joint_index: dof_index,
+                    return Err(Error::NumericalFailure {
+                        operation: "joint acceleration",
                     });
                 }
                 let motion_subspace = joint_motion_subspace(
@@ -291,6 +287,75 @@ impl Model {
         }
         Ok(())
     }
+}
+
+// Diagonal equilibration removes coordinate-unit and body-scale differences
+// before condition testing. B = D^-1 A D^-1, B y = D^-1 b, x = D^-1 y.
+// All storage is fixed-size; the condition check reuses Cholesky solves without
+// storing a matrix inverse or allocating on the heap.
+fn solve_base_inertia(inertia: Matrix6, rhs: Vector6) -> Result<Vector6> {
+    let numerical_failure = || Error::NumericalFailure {
+        operation: "floating-base inertia solve",
+    };
+    if !inertia.iter().chain(rhs.iter()).all(|v| v.is_finite()) {
+        return Err(numerical_failure());
+    }
+    let diagonal = inertia.diagonal();
+    if diagonal.iter().any(|v| *v <= 0.0) {
+        return Err(Error::ForwardDynamicsSingularBaseInertia);
+    }
+    let scale = diagonal.map(f64::sqrt);
+    // Sequential division avoids overflow/underflow in products of scales.
+    let scaled = Matrix6::from_fn(|row, col| inertia[(row, col)] / scale[row] / scale[col]);
+    let scaled_rhs = rhs.component_div(&scale);
+    if !scaled
+        .iter()
+        .chain(scaled_rhs.iter())
+        .all(|v| v.is_finite())
+    {
+        return Err(numerical_failure());
+    }
+    let factor = scaled
+        .cholesky()
+        .ok_or(Error::ForwardDynamicsSingularBaseInertia)?;
+    let matrix_norm = (0..6)
+        .map(|col| scaled.column(col).iter().map(|v| v.abs()).sum::<f64>())
+        .fold(0.0, f64::max);
+    // At size six, solving for the six basis vectors is cheaper than a second
+    // eigendecomposition. Their absolute column sums give ||B^-1||_1.
+    let mut inverse_norm = 0.0_f64;
+    for column in 0..6 {
+        let inverse_column = factor.solve(&Vector6::ith(column, 1.0));
+        if !inverse_column.iter().all(|v| v.is_finite()) {
+            return Err(Error::ForwardDynamicsIllConditionedBaseInertia);
+        }
+        inverse_norm = inverse_norm.max(inverse_column.iter().map(|v| v.abs()).sum());
+    }
+    let reciprocal_condition = (1.0 / matrix_norm) / inverse_norm;
+    if reciprocal_condition <= f64::EPSILON.sqrt() {
+        return Err(Error::ForwardDynamicsIllConditionedBaseInertia);
+    }
+    let y = factor.solve(&scaled_rhs);
+    let solution = y.component_div(&scale);
+    if !y.iter().chain(solution.iter()).all(|v| v.is_finite()) {
+        return Err(numerical_failure());
+    }
+    // Normwise backward-error check. Rescale y and b together so the check
+    // itself does not overflow for large but representable loads/solutions.
+    let magnitude = y.amax().max(scaled_rhs.amax());
+    if magnitude > 0.0 {
+        let normalized_y = y / magnitude;
+        let normalized_rhs = scaled_rhs / magnitude;
+        let residual = scaled * normalized_y - normalized_rhs;
+        // B is symmetric, so its infinity norm equals its one-norm above.
+        let denominator = matrix_norm * normalized_y.amax() + normalized_rhs.amax();
+        if !residual.iter().all(|v| v.is_finite())
+            || residual.amax() > 128.0 * f64::EPSILON * denominator
+        {
+            return Err(numerical_failure());
+        }
+    }
+    Ok(solution)
 }
 
 fn rigid_body_inertia(mass: f64, moment: Vector3<f64>, inertia: Matrix3<f64>) -> Matrix6 {
@@ -453,6 +518,52 @@ mod tests {
     use super::*;
     use approx::assert_relative_eq;
     use nalgebra::{Translation3, UnitQuaternion};
+
+    #[test]
+    fn scaled_base_solve_is_invariant_to_diagonal_units_and_mass_scale() {
+        let factor = Matrix6::from_fn(|r, c| {
+            if r == c {
+                2.0
+            } else {
+                ((r + c + 1) as f64).sin() * 0.1
+            }
+        });
+        let conditioned = factor * factor.transpose();
+        let expected = Vector6::new(0.2, -0.3, 0.4, -0.5, 0.6, -0.7);
+        for mass_scale in [1e-100_f64, 1e-6, 1.0, 1e6, 1e100] {
+            let scales = Vector6::new(1e-9, 1e-6, 1e-3, 1.0, 1e3, 1e9) * mass_scale.sqrt();
+            let inertia = Matrix6::from_fn(|r, c| scales[r] * conditioned[(r, c)] * scales[c]);
+            let rhs = scales.component_mul(&(conditioned * expected));
+            let result = solve_base_inertia(inertia, rhs).unwrap();
+            assert_relative_eq!(result.component_mul(&scales), expected, epsilon = 1e-13);
+        }
+    }
+
+    #[test]
+    fn base_solve_distinguishes_singularity_conditioning_and_overflow() {
+        assert!(matches!(
+            solve_base_inertia(Matrix6::zeros(), Vector6::zeros()),
+            Err(Error::ForwardDynamicsSingularBaseInertia)
+        ));
+        let mut ill_conditioned = Matrix6::identity();
+        ill_conditioned[(0, 1)] = 1.0 - 1e-12;
+        ill_conditioned[(1, 0)] = 1.0 - 1e-12;
+        assert!(matches!(
+            solve_base_inertia(ill_conditioned, Vector6::repeat(1.0)),
+            Err(Error::ForwardDynamicsIllConditionedBaseInertia)
+        ));
+        assert!(matches!(
+            solve_base_inertia(Matrix6::identity() * 1e-300, Vector6::repeat(1e300)),
+            Err(Error::NumericalFailure { .. })
+        ));
+        let mut singular = Matrix6::identity();
+        singular[(0, 1)] = 1.0;
+        singular[(1, 0)] = 1.0;
+        assert!(matches!(
+            solve_base_inertia(singular, Vector6::zeros()),
+            Err(Error::ForwardDynamicsSingularBaseInertia)
+        ));
+    }
 
     #[test]
     fn block_inertia_transform_matches_dense_spatial_congruence() {

@@ -53,6 +53,14 @@ and velocity participate in the calculation; its acceleration is ignored
 because acceleration is the result. A singular joint or floating-base articulated
 inertia produces a solver error rather than non-finite acceleration.
 
+The floating-base solve equilibrates the six inertia coordinates by their
+diagonal scales before Cholesky factorization. Cholesky solves also estimate
+the scaled reciprocal one-norm condition number, which must exceed
+`sqrt(f64::EPSILON)`; an ill-conditioned scaled matrix has a distinct
+Rust error from a singular matrix. A normalized residual check rejects
+inaccurate solves, and non-finite intermediate results are numerical errors.
+Small rotational inertia relative to mass alone does not imply singularity.
+
 ## Calling the operations
 
 === "Rust"
