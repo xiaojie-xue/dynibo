@@ -1,6 +1,15 @@
 use crate::{Error, Result, Wrench};
 
-use super::{FloatingRobot, IndexedLoad, LinkId, Model, Robot};
+use super::{FloatingRobot, LinkId, Model, Robot};
+
+/// A resisting wrench associated with a model-scoped link identifier.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct IndexedLoad {
+    /// Link at whose origin the wrench is applied.
+    pub link: LinkId,
+    /// Resisting wrench expressed in the selected link's coordinate frame.
+    pub wrench: Wrench,
+}
 
 /// Model-scoped, reusable storage for at most one resisting wrench per link.
 ///

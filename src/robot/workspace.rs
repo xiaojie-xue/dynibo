@@ -4,32 +4,6 @@ use crate::{Frame, Twist, Wrench};
 
 use super::Model;
 
-/// An opaque, model-scoped identifier for a link.
-///
-/// A `LinkId` is valid for the robot model from which it was obtained, including
-/// instances created with [`crate::Robot::fork`]. It is a process-local handle
-/// and is not intended for persistence or serialization.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct LinkId {
-    pub(super) model_id: u64,
-    pub(super) index: usize,
-}
-
-impl LinkId {
-    pub(super) const fn new(model_id: u64, index: usize) -> Self {
-        Self { model_id, index }
-    }
-}
-
-/// A resisting wrench associated with a model-scoped link identifier.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct IndexedLoad {
-    /// Link at whose origin the wrench is applied.
-    pub link: LinkId,
-    /// Resisting wrench expressed in the selected link's coordinate frame.
-    pub wrench: Wrench,
-}
-
 /// Instance-local reusable storage for runtime-sized calculations.
 ///
 /// Per-body arrays use model joint indices: slot `j` belongs to child link
