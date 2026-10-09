@@ -20,6 +20,12 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked
 ```
 
+For changes to the C++ wrapper, use the repository's `.clang-format` settings:
+
+```bash
+clang-format -i bindings/c/include/dynibo/dynibo.hpp
+```
+
 For changes that affect packaging or language bindings, run the complete local
 suite. Pinocchio reference tests are included when Pinocchio is available
 through `pkg-config`.
