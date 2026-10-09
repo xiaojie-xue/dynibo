@@ -3,6 +3,9 @@
 **/*.rs.bk
 *.profraw
 
+# Local benchmark results
+/benches/results/
+
 # Python build and test output
 __pycache__/
 *.py[cod]
