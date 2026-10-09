@@ -2,6 +2,7 @@ use nalgebra::{Matrix3, SMatrix, SVector, Vector3};
 
 use crate::{BaseState, Error, Frame, JointType, Result, Twist, Wrench};
 
+use super::super::topology::{child_link_index, incoming_joint_index};
 use super::super::{
     FLOATING_BASE_DOF, FloatingRobot, IndexedLoad, Model, Robot, RootMode, Workspace,
     base_dof_count,
@@ -74,6 +75,10 @@ impl FloatingRobot {
 
 impl Model {
     #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::needless_range_loop,
+        reason = "joint indices address parallel model and workspace arrays in tree order"
+    )]
     fn forward_dynamics(
         &self,
         base_mode: RootMode,
@@ -101,6 +106,7 @@ impl Model {
         }
 
         let root_load = self.prepare_indexed_loads(loads, &mut workspace.link_loads)?;
+        let parent_from_child = &mut workspace.frames;
         let root_rotation_inverse = base_frame.rotation.inverse();
         let root_velocity = Twist::new(
             root_rotation_inverse * base_velocity.angular,
@@ -117,43 +123,46 @@ impl Model {
         let mut root_bias_force = add_wrench(force_cross(root_velocity, root_momentum), root_load);
 
         // First pass: transforms, velocities, velocity bias, body inertia, and bias force.
-        for index in 0..self.model_joint_count() {
-            let joint = self.joint_kinematics[index];
-            let transform = joint.frame(self.joint_value(q, index));
-            let parent = self.parent_link_indices[index];
-            let parent_velocity = if parent == 0 {
+        for joint_index in 0..self.model_joint_count() {
+            let joint = self.joint_kinematics[joint_index];
+            let transform = joint.frame(self.joint_value(q, joint_index));
+            let parent_link_index = self.parent_link_indices[joint_index];
+            let parent_velocity = if parent_link_index == 0 {
                 root_velocity
             } else {
-                workspace.spatial_velocities[parent - 1]
+                workspace.spatial_velocities[incoming_joint_index(parent_link_index)]
             };
             let motion_subspace = joint_motion_subspace(joint.joint_type, *joint.axis.as_ref());
-            let joint_velocity = scale_twist(motion_subspace, self.joint_value(qd, index));
+            let joint_velocity = scale_twist(motion_subspace, self.joint_value(qd, joint_index));
             let velocity = add_twist(motion_to_child(&transform, parent_velocity), joint_velocity);
-            let link = self.link_dynamics[index + 1];
+            let link = self.link_dynamics[child_link_index(joint_index)];
             let inertia = rigid_body_inertia(link.mass, link.first_moment, link.origin_inertia);
             let momentum = inertia_apply(&inertia, velocity);
 
-            workspace.frames[index] = transform;
-            workspace.spatial_velocities[index] = velocity;
-            workspace.bias_accelerations[index] = motion_cross(velocity, joint_velocity);
-            workspace.articulated_inertias[index] = inertia;
-            workspace.articulated_bias_forces[index] =
-                add_wrench(force_cross(velocity, momentum), workspace.link_loads[index]);
+            parent_from_child[joint_index] = transform;
+            workspace.spatial_velocities[joint_index] = velocity;
+            workspace.bias_accelerations[joint_index] = motion_cross(velocity, joint_velocity);
+            workspace.articulated_inertias[joint_index] = inertia;
+            workspace.articulated_bias_forces[joint_index] = add_wrench(
+                force_cross(velocity, momentum),
+                workspace.link_loads[joint_index],
+            );
         }
 
         let joint_offset = base_dof_count(base_mode);
 
         // Second pass: eliminate active joint accelerations and propagate each
         // articulated subtree into its parent.
-        for index in (0..self.model_joint_count()).rev() {
-            let joint = self.joint_kinematics[index];
-            let parent = self.parent_link_indices[index];
-            let skip_root_propagation = parent == 0 && matches!(base_mode, RootMode::Fixed);
-            let inertia = workspace.articulated_inertias[index];
-            let bias_force = workspace.articulated_bias_forces[index];
-            let bias_acceleration = workspace.bias_accelerations[index];
+        for joint_index in (0..self.model_joint_count()).rev() {
+            let joint = self.joint_kinematics[joint_index];
+            let parent_link_index = self.parent_link_indices[joint_index];
+            let skip_root_propagation =
+                parent_link_index == 0 && matches!(base_mode, RootMode::Fixed);
+            let inertia = workspace.articulated_inertias[joint_index];
+            let bias_force = workspace.articulated_bias_forces[joint_index];
+            let bias_acceleration = workspace.bias_accelerations[joint_index];
             let (reduced_inertia, reduced_bias_force) = if let Some(dof_index) =
-                self.joint_dof_indices[index]
+                self.joint_dof_indices[joint_index]
             {
                 let motion_subspace = joint_motion_subspace(joint.joint_type, *joint.axis.as_ref());
                 let articulated_u =
@@ -171,9 +180,9 @@ impl Model {
                 }
                 let joint_bias = generalized_forces[joint_offset + dof_index]
                     - motion_force_dot(motion_subspace, bias_force);
-                workspace.articulated_u[index] = articulated_u;
-                workspace.articulated_d[index] = articulated_d;
-                workspace.articulated_joint_bias[index] = joint_bias;
+                workspace.articulated_u[joint_index] = articulated_u;
+                workspace.articulated_d[joint_index] = articulated_d;
+                workspace.articulated_joint_bias[joint_index] = joint_bias;
 
                 // A fixed root has prescribed acceleration and no inertia solve.
                 // Keep the validated joint terms needed by the third pass, but
@@ -203,16 +212,17 @@ impl Model {
             };
 
             let parent_inertia =
-                transform_inertia_to_parent(&workspace.frames[index], &reduced_inertia);
+                transform_inertia_to_parent(&parent_from_child[joint_index], &reduced_inertia);
             let parent_bias_force =
-                super::wrench_to_parent(&workspace.frames[index], reduced_bias_force);
-            if parent == 0 {
+                super::wrench_to_parent(&parent_from_child[joint_index], reduced_bias_force);
+            if parent_link_index == 0 {
                 root_inertia += parent_inertia;
                 root_bias_force = add_wrench(root_bias_force, parent_bias_force);
             } else {
-                workspace.articulated_inertias[parent - 1] += parent_inertia;
-                workspace.articulated_bias_forces[parent - 1] = add_wrench(
-                    workspace.articulated_bias_forces[parent - 1],
+                let parent_joint_index = incoming_joint_index(parent_link_index);
+                workspace.articulated_inertias[parent_joint_index] += parent_inertia;
+                workspace.articulated_bias_forces[parent_joint_index] = add_wrench(
+                    workspace.articulated_bias_forces[parent_joint_index],
                     parent_bias_force,
                 );
             }
@@ -253,29 +263,29 @@ impl Model {
         };
 
         // Third pass: recover joint accelerations and complete link accelerations.
-        for index in 0..self.model_joint_count() {
-            let parent = self.parent_link_indices[index];
-            let parent_acceleration = if parent == 0 {
+        for joint_index in 0..self.model_joint_count() {
+            let parent_link_index = self.parent_link_indices[joint_index];
+            let parent_acceleration = if parent_link_index == 0 {
                 root_acceleration
             } else {
-                workspace.spatial_accelerations[parent - 1]
+                workspace.spatial_accelerations[incoming_joint_index(parent_link_index)]
             };
             let mut acceleration = add_twist(
-                motion_to_child(&workspace.frames[index], parent_acceleration),
-                workspace.bias_accelerations[index],
+                motion_to_child(&parent_from_child[joint_index], parent_acceleration),
+                workspace.bias_accelerations[joint_index],
             );
-            if let Some(dof_index) = self.joint_dof_indices[index] {
-                let joint_acceleration = (workspace.articulated_joint_bias[index]
-                    - motion_force_dot(acceleration, workspace.articulated_u[index]))
-                    / workspace.articulated_d[index];
+            if let Some(dof_index) = self.joint_dof_indices[joint_index] {
+                let joint_acceleration = (workspace.articulated_joint_bias[joint_index]
+                    - motion_force_dot(acceleration, workspace.articulated_u[joint_index]))
+                    / workspace.articulated_d[joint_index];
                 if !joint_acceleration.is_finite() {
                     return Err(Error::NumericalFailure {
                         operation: "joint acceleration",
                     });
                 }
                 let motion_subspace = joint_motion_subspace(
-                    self.joint_kinematics[index].joint_type,
-                    *self.joint_kinematics[index].axis.as_ref(),
+                    self.joint_kinematics[joint_index].joint_type,
+                    *self.joint_kinematics[joint_index].axis.as_ref(),
                 );
                 acceleration = add_twist(
                     acceleration,
@@ -283,7 +293,7 @@ impl Model {
                 );
                 output[joint_offset + dof_index] = joint_acceleration;
             }
-            workspace.spatial_accelerations[index] = acceleration;
+            workspace.spatial_accelerations[joint_index] = acceleration;
         }
         Ok(())
     }

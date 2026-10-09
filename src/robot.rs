@@ -17,6 +17,7 @@ mod dynamics;
 mod kinematics;
 mod loads;
 mod model_handle;
+mod topology;
 mod workspace;
 
 pub use loads::LoadBuffer;
@@ -46,8 +47,13 @@ struct Model {
     // the cache lines traversed by kinematics and dynamics kernels.
     joint_kinematics: Box<[JointKinematics]>,
     link_dynamics: Box<[LinkDynamics]>,
+    // Joint indices include fixed joints; DOF indices do not. Links have an
+    // additional root at index 0. See topology for the joint/link conversion.
+    // DOF index -> model joint index.
     active_joint_indices: Box<[usize]>,
+    // Model joint index -> optional DOF index.
     joint_dof_indices: Box<[Option<usize>]>,
+    // Model joint index -> parent link index.
     parent_link_indices: Box<[usize]>,
 }
 

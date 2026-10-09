@@ -73,7 +73,7 @@ add_custom_command(
         bindings/c/include/dynibo/version.h.in
         src/lib.rs src/error.rs src/model.rs
         src/model/joint.rs src/model/link.rs src/model/tree.rs
-        src/robot.rs src/robot/workspace.rs src/spatial.rs
+        src/robot.rs src/robot/topology.rs src/robot/workspace.rs src/spatial.rs
     COMMENT "Building dynibo C ABI with Cargo"
     VERBATIM)
 

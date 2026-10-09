@@ -2,6 +2,7 @@ use nalgebra::Vector3;
 
 use crate::{BaseState, Frame, JointType, Result, Twist};
 
+use super::super::topology::{child_link_index, incoming_joint_index};
 use super::super::{FloatingRobot, LinkId, Model, Robot, Workspace};
 
 impl Robot {
@@ -152,21 +153,22 @@ impl Model {
     ) -> Result<()> {
         self.validate_slice("q", q)?;
         self.validate_slice_length("all link poses output", output.len(), self.link_count())?;
+        let root_from_link = &mut workspace.frames;
         output[0] = *base;
         // Keep intermediates root-local, as in single-target FK. Adding the
         // world translation only once avoids accumulating rounding at large
         // world offsets and preserves the scratch coordinate convention.
-        for index in 0..self.model_joint_count() {
-            let parent = self.parent_link_indices[index];
-            let parent_frame = if parent == 0 {
+        for joint_index in 0..self.model_joint_count() {
+            let parent_link_index = self.parent_link_indices[joint_index];
+            let parent_frame = if parent_link_index == 0 {
                 Frame::identity()
             } else {
-                workspace.frames[parent - 1]
+                root_from_link[incoming_joint_index(parent_link_index)]
             };
-            let local =
-                parent_frame * self.joint_kinematics[index].frame(self.joint_value(q, index));
-            workspace.frames[index] = local;
-            output[index + 1] = *base * local;
+            let local = parent_frame
+                * self.joint_kinematics[joint_index].frame(self.joint_value(q, joint_index));
+            root_from_link[joint_index] = local;
+            output[child_link_index(joint_index)] = *base * local;
         }
         Ok(())
     }
