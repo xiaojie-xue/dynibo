@@ -1,5 +1,5 @@
 //! Tree-structured robot kinematics and dynamics with allocation-free calculation APIs.
-
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 

@@ -131,6 +131,7 @@ impl Joint {
     }
 
     /// Returns the fixed transform from the parent link to the joint.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg(test)]
     pub(crate) const fn origin(&self) -> &Frame {
         &self.kinematics.origin
@@ -139,12 +140,14 @@ impl Joint {
     /// Returns the normalized motion axis expressed in the joint frame.
     ///
     /// Fixed joints have no motion axis and return an internal placeholder.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg(test)]
     pub(crate) const fn axis(&self) -> &Unit<Vector3<f64>> {
         &self.kinematics.axis
     }
 
     /// Computes the parent-to-child transform at position `q`.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg(test)]
     pub(crate) fn frame(&self, q: f64) -> Frame {
         self.kinematics.frame(q)
@@ -154,6 +157,7 @@ impl Joint {
     ///
     /// Revolute joints return torque and prismatic joints return force. Fixed
     /// joints always return zero.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg(test)]
     pub(crate) fn active_force(&self, load: Wrench) -> f64 {
         match self.kinematics.joint_type {
@@ -175,6 +179,7 @@ impl Joint {
 
 #[cfg(test)]
 #[allow(clippy::approx_constant)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::f64::consts::{FRAC_PI_2, PI};
 

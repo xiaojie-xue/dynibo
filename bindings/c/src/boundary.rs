@@ -180,3 +180,44 @@ pub(super) use {reject_output_overlap, reject_struct_output_overlap};
 pub extern "C" fn dynibo_last_error_message() -> *const c_char {
     LAST_ERROR.with(|x| x.borrow().as_ptr().cast())
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+    use std::ffi::CStr;
+
+    #[test]
+    fn error_messages_replace_embedded_nuls_and_clear_after_success() {
+        assert_eq!(
+            call(|| Err(invalid("before\0after"))),
+            DyniboStatus::InvalidArgument
+        );
+        assert_eq!(
+            unsafe { CStr::from_ptr(dynibo_last_error_message()) }.to_bytes(),
+            b"before after"
+        );
+        assert_eq!(call(|| Ok(())), DyniboStatus::Ok);
+        assert_eq!(
+            unsafe { CStr::from_ptr(dynibo_last_error_message()) }.to_bytes(),
+            b""
+        );
+    }
+
+    #[test]
+    fn empty_buffer_ranges_do_not_overlap_but_nonempty_aliases_do() {
+        let mut buffer = [0_u8; 8];
+        let input = buffer.as_ptr();
+        let output = buffer.as_mut_ptr();
+        for (input_bytes, output_bytes) in [(0, 8), (8, 0), (0, 0)] {
+            assert!(reject_byte_overlap(input, input_bytes, "input", output, output_bytes).is_ok());
+        }
+        let (status, message) = reject_byte_overlap(input, 8, "input", output, 8).unwrap_err();
+        assert_eq!(status, DyniboStatus::InvalidArgument);
+        assert_eq!(message, "input and output must not overlap");
+        // Adjacent half-open ranges are safe, while one overlapping byte is not.
+        let second_half = unsafe { output.add(4) };
+        assert!(reject_byte_overlap(input, 4, "input", second_half, 4).is_ok());
+        assert!(reject_byte_overlap(input, 5, "input", second_half, 3).is_err());
+    }
+}

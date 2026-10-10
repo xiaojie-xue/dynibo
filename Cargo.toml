@@ -72,3 +72,6 @@ path = "examples/rust/g1.rs"
 [profile.release]
 codegen-units = 1
 lto = "fat"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }

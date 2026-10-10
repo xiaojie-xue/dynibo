@@ -223,3 +223,26 @@ fn forward_dynamics_reports_singular_joint_and_floating_base_inertia() {
         "unexpected result: {result:?}, output: {base_output:?}"
     );
 }
+
+#[test]
+fn fixed_root_mount_does_not_add_mass_to_the_slider_dof() {
+    let mut robot = Robot::from_urdf(fixture_path("fixed_mount_slider.urdf")).unwrap();
+    assert_eq!(robot.joint_count(), 1);
+    let mut mass = [0.0];
+    robot.mass_matrix(&[0.3], &mut mass).unwrap();
+    approx::assert_relative_eq!(mass[0], 2.0, epsilon = 1e-12);
+    for acceleration in [-1.2, 0.0, 0.7] {
+        // Only the 2 kg slider moves; the 3 kg mount is supported by the fixed root.
+        let force = 2.0 * (acceleration + 9.80665);
+        let mut actual = [0.0];
+        robot
+            .forward_dynamics(&[0.3], &[0.4], &[force], &[], &mut actual)
+            .unwrap();
+        approx::assert_relative_eq!(actual[0], acceleration, epsilon = 1e-12);
+        let mut recovered_force = [0.0];
+        robot
+            .inverse_dynamics(&[0.3], &[0.4], &[acceleration], &[], &mut recovered_force)
+            .unwrap();
+        approx::assert_relative_eq!(recovered_force[0], force, epsilon = 1e-12);
+    }
+}

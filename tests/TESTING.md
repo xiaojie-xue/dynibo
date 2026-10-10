@@ -108,3 +108,51 @@ ordering and column-major matrix layout are also checked through kinematic
 identities. Both robot types exercise constructors, lifecycle errors, NumPy
 input layouts, reusable outputs, and recovery after invalid calls. Non-finite
 loads must raise `ValueError` before writing an output buffer.
+
+## Rust implementation joint-test coverage
+
+`ci/collect-coverage.sh` merges profiles from Rust workspace unit/integration
+and executable example tests with calls into the Rust extension from installed
+Python wheel tests. It measures the production Rust core and C/Python bindings,
+not Python source, standalone C/C++ tests, or only Rust unit tests. The separate
+`pinocchio-tests` CI job is not merged into this coverage run.
+
+Test modules and test-only helpers use conditional `coverage(off)` attributes;
+they still execute and contribute coverage to production code. Test files,
+examples, benchmarks, and build scripts are excluded from the reported source
+scope. Production validation, panic handling, and numerical safeguards remain
+in scope. Both LLVM and Codecov exports use the same source filters.
+
+The CI gate uses LLVM line and branch percentages from `coverage.json`.
+`codecov.json` is the Codecov upload format; locally counting fully hit entries
+in that file is neither LLVM branch coverage nor a confirmed Codecov service
+result. Keep these metrics separate. Existing gates remain 85% lines and 75%
+branches; changing the source scope establishes a new baseline, not a test gain.
+
+The coverage job and local script share exact Rust, Python, and cargo-llvm-cov
+versions in `ci/coverage.env`, plus Python dependencies in
+`ci/coverage-requirements.txt`. Other jobs retain their existing toolchains.
+On Linux, prepare and run the same environment as CI:
+
+```bash
+source ci/coverage.env
+rustup toolchain install "$COVERAGE_RUST_TOOLCHAIN" --profile minimal --component llvm-tools-preview
+cargo install cargo-llvm-cov --version "$COVERAGE_LLVM_COV_VERSION" --locked
+# Install the exact Python release from coverage.env (for example using uv).
+uv python install "$COVERAGE_PYTHON_VERSION"
+uv venv --python "$COVERAGE_PYTHON_VERSION" --seed .venv-coverage
+.venv-coverage/bin/python -m pip install -r ci/coverage-requirements.txt
+mkdir -p target/coverage
+PYTHON="$PWD/.venv-coverage/bin/python" bash ci/collect-coverage.sh target/coverage/coverage.json target/coverage/codecov.json
+python3 ci/check-coverage.py target/coverage/coverage.json --min-lines 85 --min-branches 75
+```
+
+The script rejects mismatched Python/dependency/cargo-llvm-cov versions before
+collecting profiles. Update pins deliberately and rebaseline when changing the
+compiler: nightly branch instrumentation can change its measured denominator.
+
+Baseline measured on 2026-10-10 with these pins on Linux x86_64: 117 Rust tests
+and 24 installed-wheel Python tests passed. Production Rust coverage was
+5,046/5,132 lines (98.32%) and 315/334 branch outcomes (94.31%). This baseline
+excludes test implementations and is not directly comparable to older reports
+that included them. It is a local measurement, not a Codecov service result.

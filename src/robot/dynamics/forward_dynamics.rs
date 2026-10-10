@@ -524,6 +524,7 @@ fn twist_is_finite(value: Twist) -> bool {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
@@ -573,6 +574,20 @@ mod tests {
             solve_base_inertia(singular, Vector6::zeros()),
             Err(Error::ForwardDynamicsSingularBaseInertia)
         ));
+    }
+
+    #[test]
+    fn base_solve_rejects_overflow_when_unscaling_a_finite_solution() {
+        // The scaled RHS is 1e200 (finite), but the physical solution is 1e400.
+        assert!(matches!(
+            solve_base_inertia(Matrix6::identity() * 1e-300, Vector6::repeat(1e100)),
+            Err(Error::NumericalFailure {
+                operation: "floating-base inertia solve"
+            })
+        ));
+        let solution =
+            solve_base_inertia(Matrix6::identity() * 1e-300, Vector6::repeat(1e-100)).unwrap();
+        assert_relative_eq!(solution, Vector6::repeat(1e200), max_relative = 1e-14);
     }
 
     #[test]

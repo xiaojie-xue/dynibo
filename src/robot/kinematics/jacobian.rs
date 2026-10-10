@@ -502,6 +502,7 @@ fn frame_for_target(frames: &[Frame], target_index: usize) -> Frame {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::path::PathBuf;
 

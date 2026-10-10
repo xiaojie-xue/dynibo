@@ -1,4 +1,5 @@
 //! Stable, typed C ABI for dynibo.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![allow(clippy::missing_safety_doc, reason = "C contracts are in dynibo.h")]
 
 mod boundary;
@@ -44,4 +45,5 @@ pub extern "C" fn dynibo_version() -> *const c_char {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests;

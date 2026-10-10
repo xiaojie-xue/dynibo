@@ -264,6 +264,7 @@ fn robot_link(link: &urdf_rs::Link) -> Result<Link> {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use approx::assert_relative_eq;
     use nalgebra::Matrix3;

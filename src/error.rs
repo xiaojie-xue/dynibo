@@ -246,6 +246,7 @@ impl From<urdf_rs::UrdfError> for Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{Error, ErrorCategory};
 
