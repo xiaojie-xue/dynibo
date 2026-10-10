@@ -576,6 +576,36 @@ mod tests {
     }
 
     #[test]
+    fn base_solve_rejects_non_finite_matrix_and_rhs_entries() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for index in 0..6 {
+                let mut rhs = Vector6::zeros();
+                rhs[index] = value;
+                assert!(matches!(
+                    solve_base_inertia(Matrix6::identity(), rhs),
+                    Err(Error::NumericalFailure {
+                        operation: "floating-base inertia solve"
+                    })
+                ));
+                for column in 0..6 {
+                    let mut inertia = Matrix6::identity();
+                    inertia[(index, column)] = value;
+                    assert!(matches!(
+                        solve_base_inertia(inertia, Vector6::zeros()),
+                        Err(Error::NumericalFailure {
+                            operation: "floating-base inertia solve"
+                        })
+                    ));
+                }
+            }
+        }
+        assert_eq!(
+            solve_base_inertia(Matrix6::identity(), Vector6::repeat(2.0)).unwrap(),
+            Vector6::repeat(2.0)
+        );
+    }
+
+    #[test]
     fn block_inertia_transform_matches_dense_spatial_congruence() {
         for sample in 0..16 {
             let t = (sample + 1) as f64;

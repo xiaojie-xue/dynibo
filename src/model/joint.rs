@@ -271,6 +271,37 @@ mod tests {
     }
 
     #[test]
+    fn moving_joint_axis_rejects_tiny_nonzero_vectors_at_the_threshold() {
+        for kind in [JointType::Revolute, JointType::Prismatic] {
+            for magnitude in [1e-300, 0.5e-12, 1e-12] {
+                let result = Joint::new(
+                    "tiny",
+                    kind,
+                    Frame::identity(),
+                    Vector3::x() * magnitude,
+                    -1.0,
+                    1.0,
+                    1.0,
+                );
+                assert!(
+                    matches!(result, Err(Error::InvalidJointAxis { joint }) if joint == "tiny")
+                );
+            }
+            let valid = Joint::new(
+                "valid",
+                kind,
+                Frame::identity(),
+                Vector3::x() * 2e-12,
+                -1.0,
+                1.0,
+                1.0,
+            )
+            .unwrap();
+            assert_relative_eq!(valid.axis().as_ref(), &Vector3::x(), epsilon = 1e-12);
+        }
+    }
+
+    #[test]
     fn revolute_and_prismatic_joint_frames_match_urdf_semantics() {
         let revolute = joint(
             "revolute",

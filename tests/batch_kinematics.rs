@@ -118,3 +118,43 @@ fn reusable_load_buffer_preserves_scope_and_recovers_from_failed_updates() {
         .unwrap();
     assert_eq!(actual, expected);
 }
+
+#[test]
+fn load_buffer_add_and_remove_handle_absent_entries_and_non_finite_inputs() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_tree_7.urdf");
+    let robot = Robot::from_urdf(path).unwrap();
+    let mut loads = robot.load_buffer();
+    let left = robot.link_id("left_tool").unwrap();
+    let right = robot.link_id("right_tool").unwrap();
+    let wrench = Wrench::new(Vector3::repeat(0.3), Vector3::repeat(0.2));
+    loads.remove(left).unwrap();
+    assert!(loads.is_empty());
+    loads.add(left, wrench).unwrap();
+    assert_eq!(loads.len(), 1);
+    assert_eq!(loads.as_slice()[0].link, left);
+    assert_eq!(loads.as_slice()[0].wrench, wrench);
+    let saved = loads.as_slice().to_vec();
+    loads.remove(right).unwrap();
+    assert_eq!(loads.as_slice(), saved);
+    for link in [left, right] {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for invalid in [
+                Wrench::new(Vector3::repeat(value), Vector3::zeros()),
+                Wrench::new(Vector3::zeros(), Vector3::repeat(value)),
+            ] {
+                assert!(matches!(
+                    loads.add(link, invalid),
+                    Err(dynibo::Error::NonFiniteInput { input: "load" })
+                ));
+                assert_eq!(loads.as_slice(), saved);
+            }
+        }
+    }
+    loads.add(right, wrench).unwrap();
+    loads.remove(left).unwrap();
+    loads.add(right, wrench).unwrap();
+    assert_eq!(loads.len(), 1);
+    assert_eq!(loads.as_slice()[0].link, right);
+    assert_eq!(loads.as_slice()[0].wrench.torque, wrench.torque * 2.0);
+    assert_eq!(loads.as_slice()[0].wrench.force, wrench.force * 2.0);
+}
