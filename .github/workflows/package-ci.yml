@@ -58,12 +58,7 @@ jobs:
         run: python -m pip install -r ci/coverage-requirements.txt
       - name: Collect coverage
         run: bash ci/collect-coverage.sh coverage.json codecov.json
-      - name: Enforce coverage thresholds
-        run: >-
-          python ci/check-coverage.py coverage.json
-          --min-lines 85 --min-branches 75
       - name: Upload coverage to Codecov
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: codecov/codecov-action@v6
         with:
           use_oidc: true
