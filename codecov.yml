@@ -1,0 +1,12 @@
+coverage:
+  status:
+    project:
+      default:
+        # Require at least 90% overall coverage.
+        target: 90%
+        threshold: 0%
+    patch:
+      default:
+        # Require at least 90% coverage of added and modified lines.
+        target: 90%
+        threshold: 0%

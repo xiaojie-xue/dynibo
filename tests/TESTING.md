@@ -123,11 +123,17 @@ examples, benchmarks, and build scripts are excluded from the reported source
 scope. Production validation, panic handling, and numerical safeguards remain
 in scope. Both LLVM and Codecov exports use the same source filters.
 
-The CI gate uses LLVM line and branch percentages from `coverage.json`.
-`codecov.json` is the Codecov upload format; locally counting fully hit entries
-in that file is neither LLVM branch coverage nor a confirmed Codecov service
-result. Keep these metrics separate. Existing gates remain 85% lines and 75%
-branches; changing the source scope establishes a new baseline, not a test gain.
+CI collects coverage and uploads `codecov.json` on pull requests, main pushes,
+and manual runs. Codecov evaluates overall (`codecov/project`) and changed-code
+(`codecov/patch`) coverage against fixed 90% targets with zero tolerance,
+configured in the root `codecov.yml`. These checks arrive asynchronously;
+successful upload does not mean the coverage checks passed. To enforce them
+before merging, require both Codecov checks in GitHub branch protection.
+
+The LLVM line and branch percentages in `coverage.json` remain available for
+diagnostics, without separate CI thresholds. Locally counting fully hit entries
+in `codecov.json` is neither LLVM branch coverage nor a confirmed Codecov service
+result. Changing the source scope establishes a new baseline, not a test gain.
 
 The coverage job and local script share exact Rust, Python, and cargo-llvm-cov
 versions in `ci/coverage.env`, plus Python dependencies in
@@ -144,7 +150,6 @@ uv venv --python "$COVERAGE_PYTHON_VERSION" --seed .venv-coverage
 .venv-coverage/bin/python -m pip install -r ci/coverage-requirements.txt
 mkdir -p target/coverage
 PYTHON="$PWD/.venv-coverage/bin/python" bash ci/collect-coverage.sh target/coverage/coverage.json target/coverage/codecov.json
-python3 ci/check-coverage.py target/coverage/coverage.json --min-lines 85 --min-branches 75
 ```
 
 The script rejects mismatched Python/dependency/cargo-llvm-cov versions before
