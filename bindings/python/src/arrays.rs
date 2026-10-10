@@ -52,7 +52,7 @@ pub(super) fn calculate_output<'py>(
 }
 
 pub(super) fn write_poses(poses: &[Frame], output: &mut [f64]) {
-    for (frame, row) in poses.iter().zip(output.chunks_exact_mut(7)) {
+    for (frame, row) in poses.iter().zip(output.as_chunks_mut::<7>().0) {
         row[..3].copy_from_slice(frame.translation.vector.as_slice());
         row[3..].copy_from_slice(frame.rotation.coords.as_slice());
     }
