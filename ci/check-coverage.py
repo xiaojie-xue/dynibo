@@ -19,7 +19,7 @@ def main() -> None:
     totals = report["data"][0]["totals"]
     lines = float(totals["lines"]["percent"])
     branches = float(totals["branches"]["percent"])
-    print(f"coverage: lines={lines:.2f}% branches={branches:.2f}%")
+    print(f"Rust implementation joint-test coverage (LLVM): lines={lines:.2f}% branches={branches:.2f}%")
 
     failures = []
     if lines < args.min_lines:

@@ -2,10 +2,11 @@ use nalgebra::Vector3;
 
 use crate::{BaseState, Frame, JointType, Result};
 
+use super::super::topology::incoming_joint_index;
 use super::super::{FLOATING_BASE_DOF, FloatingRobot, LinkId, Model, Robot, Workspace};
 
 struct JacobianDerivativeScratch<'a> {
-    frames: &'a mut [Frame],
+    root_from_link: &'a mut [Frame],
     angular_velocities: &'a mut [Vector3<f64>],
     origin_velocities: &'a mut [Vector3<f64>],
     jacobian: &'a mut [f64],
@@ -114,12 +115,12 @@ impl Model {
             6 * self.joint_count(),
         )?;
         let target_index = self.validate_link_id(target)?;
-        let local_target = self.jacobian_derivative_kernel(
+        self.jacobian_derivative_kernel(
             q,
             qd,
             target_index,
             JacobianDerivativeScratch {
-                frames: &mut workspace.frames,
+                root_from_link: &mut workspace.frames,
                 angular_velocities: &mut workspace.angular_velocities,
                 origin_velocities: &mut workspace.origin_velocities,
                 jacobian: &mut workspace.jacobian,
@@ -133,7 +134,6 @@ impl Model {
             &workspace.jacobian_derivative,
             output,
         );
-        let _ = local_target;
         Ok(())
     }
     /// Writes a runtime-sized `6 x G` geometric Jacobian in column-major order.
@@ -223,7 +223,7 @@ impl Model {
             qd,
             target_index,
             JacobianDerivativeScratch {
-                frames: &mut workspace.frames,
+                root_from_link: &mut workspace.frames,
                 angular_velocities: &mut workspace.angular_velocities,
                 origin_velocities: &mut workspace.origin_velocities,
                 jacobian: &mut workspace.jacobian,
@@ -254,9 +254,10 @@ impl Model {
         workspace: &mut Workspace,
         output: &mut [f64],
     ) -> Result<()> {
+        let world_oriented_from_link = &mut workspace.frames;
         self.validate_slice_length(
             "frame workspace",
-            workspace.frames.len(),
+            world_oriented_from_link.len(),
             self.model_joint_count(),
         )?;
         self.validate_slice_length(
@@ -272,9 +273,9 @@ impl Model {
         frame.rotation = base_frame.rotation;
         for &joint_index in path.iter().rev() {
             frame *= self.joint_kinematics[joint_index].frame(self.joint_value(q, joint_index));
-            workspace.frames[joint_index] = frame;
+            world_oriented_from_link[joint_index] = frame;
         }
-        let target = frame_for_target(&workspace.frames, target_index);
+        let target = frame_for_target(world_oriented_from_link, target_index);
         output.fill(0.0);
         if base_columns != 0 {
             for i in 0..3 {
@@ -285,13 +286,14 @@ impl Model {
             }
         }
         for &joint_index in path {
-            let Some(dof) = self.joint_dof_indices[joint_index] else {
+            let Some(dof_index) = self.joint_dof_indices[joint_index] else {
                 continue;
             };
             let joint = self.joint_kinematics[joint_index];
-            let joint_frame = workspace.frames[joint_index];
+            let joint_frame = world_oriented_from_link[joint_index];
             let axis = joint_frame.rotation * joint.axis.as_ref();
-            let column = &mut output[6 * (base_columns + dof)..6 * (base_columns + dof + 1)];
+            let column =
+                &mut output[6 * (base_columns + dof_index)..6 * (base_columns + dof_index + 1)];
             match joint.joint_type {
                 JointType::Revolute => {
                     column[..3].copy_from_slice(axis.as_slice());
@@ -309,23 +311,27 @@ impl Model {
 
     pub(super) fn jacobian_kernel(
         &self,
-        frames: &[Frame],
+        root_from_link: &[Frame],
         target_index: usize,
         path: &[usize],
         output: &mut [f64],
         clear_output: bool,
     ) -> Result<Frame> {
-        self.validate_slice_length("frame workspace", frames.len(), self.model_joint_count())?;
+        self.validate_slice_length(
+            "frame workspace",
+            root_from_link.len(),
+            self.model_joint_count(),
+        )?;
         self.validate_slice_length("jacobian output", output.len(), 6 * self.joint_count())?;
         if clear_output {
             output.fill(0.0);
         }
-        let target_frame = frame_for_target(frames, target_index);
+        let target_frame = frame_for_target(root_from_link, target_index);
         for &joint_index in path {
             let Some(dof_index) = self.joint_dof_indices[joint_index] else {
                 continue;
             };
-            let joint_frame = frames[joint_index];
+            let joint_frame = root_from_link[joint_index];
             let column = &mut output[6 * dof_index..6 * dof_index + 6];
             let joint = self.joint_kinematics[joint_index];
             match joint.joint_type {
@@ -354,7 +360,7 @@ impl Model {
         scratch: JacobianDerivativeScratch<'_>,
     ) -> Result<Frame> {
         let JacobianDerivativeScratch {
-            frames,
+            root_from_link,
             angular_velocities,
             origin_velocities,
             jacobian,
@@ -368,13 +374,13 @@ impl Model {
         }
         let depth = self.prepare_ancestor_path(target_index, ancestor_path);
         let path = &ancestor_path[..depth];
-        self.target_frames_kernel(q, path, frames)?;
+        self.target_frames_kernel(q, path, root_from_link)?;
         let mut angular = Vector3::zeros();
         let mut linear = Vector3::zeros();
         let mut parent_frame = Frame::identity();
         for &joint_index in path.iter().rev() {
             let joint = self.joint_kinematics[joint_index];
-            let frame = frames[joint_index];
+            let frame = root_from_link[joint_index];
             let offset = frame.translation.vector - parent_frame.translation.vector;
             let axis: Vector3<f64> = frame.rotation * joint.axis.as_ref();
             let mut child_angular = angular;
@@ -391,7 +397,7 @@ impl Model {
             linear = child_linear;
             parent_frame = frame;
         }
-        let target_frame = frame_for_target(frames, target_index);
+        let target_frame = frame_for_target(root_from_link, target_index);
         let end_position = target_frame.translation.vector;
         let end_velocity = linear;
         for &joint_index in path {
@@ -399,7 +405,7 @@ impl Model {
                 continue;
             };
             let joint = self.joint_kinematics[joint_index];
-            let frame = frames[joint_index];
+            let frame = root_from_link[joint_index];
             let axis: Vector3<f64> = frame.rotation * joint.axis.as_ref();
             let axis_rate = angular_velocities[joint_index].cross(&axis);
             let column = &mut jacobian_derivative[6 * dof_index..6 * dof_index + 6];
@@ -416,7 +422,7 @@ impl Model {
                 JointType::Fixed => unreachable!("fixed joints have no DOF index"),
             }
         }
-        self.jacobian_kernel(frames, target_index, path, jacobian, true)
+        self.jacobian_kernel(root_from_link, target_index, path, jacobian, true)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -491,11 +497,12 @@ fn frame_for_target(frames: &[Frame], target_index: usize) -> Frame {
     if target_index == 0 {
         Frame::identity()
     } else {
-        frames[target_index - 1]
+        frames[incoming_joint_index(target_index)]
     }
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::path::PathBuf;
 

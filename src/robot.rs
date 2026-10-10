@@ -1,49 +1,26 @@
-use std::{
-    path::Path,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
-};
-
-use nalgebra::{Matrix3, Vector3};
-
-use crate::{
-    Error, Frame, JointType, Result,
-    model::{Joint, JointKinematics, Link, LinkDynamics, Tree, load_urdf},
-};
+use crate::{Frame, Result};
+use std::{path::Path, sync::Arc};
 
 mod dynamics;
 mod kinematics;
+mod loads;
+mod model;
+mod topology;
 mod workspace;
 
 pub use kinematics::InverseKinematicsOptions;
+pub use loads::{IndexedLoad, LoadBuffer};
+use model::Model;
+pub use model::RobotModel;
+pub use topology::LinkId;
 use workspace::Workspace;
-pub use workspace::{IndexedLoad, LinkId};
 
 const FLOATING_BASE_DOF: usize = 6;
-const UNOWNED_MODEL_ID: u64 = 0;
-static NEXT_MODEL_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RootMode {
     Fixed,
     Floating,
-}
-
-#[derive(Debug)]
-struct Model {
-    model_id: u64,
-    name: String,
-    joints: Box<[Joint]>,
-    links: Box<[Link]>,
-    // Compact copies keep names, limits, and other metadata out of
-    // the cache lines traversed by kinematics and dynamics kernels.
-    joint_kinematics: Box<[JointKinematics]>,
-    link_dynamics: Box<[LinkDynamics]>,
-    active_joint_indices: Box<[usize]>,
-    joint_dof_indices: Box<[Option<usize>]>,
-    parent_link_indices: Box<[usize]>,
 }
 
 /// A fixed-base robot model with reusable, instance-local calculation storage.
@@ -61,116 +38,6 @@ pub struct FloatingRobot {
     workspace: Workspace,
 }
 
-impl Model {
-    fn from_tree(tree: Tree) -> Self {
-        let model_id = NEXT_MODEL_ID.fetch_add(1, Ordering::Relaxed);
-        assert_ne!(
-            model_id, UNOWNED_MODEL_ID,
-            "robot model identifier overflow"
-        );
-        let joint_kinematics: Box<[_]> = tree.joints.iter().map(Joint::kinematics).collect();
-        let link_dynamics: Box<[_]> = tree.links.iter().map(Link::dynamics).collect();
-        let active_joint_indices: Box<[_]> = tree
-            .joints
-            .iter()
-            .enumerate()
-            .filter_map(|(index, joint)| (joint.joint_type() != JointType::Fixed).then_some(index))
-            .collect();
-        let mut joint_dof_indices = vec![None; tree.joints.len()];
-        for (dof_index, &joint_index) in active_joint_indices.iter().enumerate() {
-            joint_dof_indices[joint_index] = Some(dof_index);
-        }
-        Self {
-            model_id,
-            name: tree.name,
-            joints: tree.joints.into_boxed_slice(),
-            links: tree.links.into_boxed_slice(),
-            joint_kinematics,
-            link_dynamics,
-            active_joint_indices,
-            joint_dof_indices: joint_dof_indices.into_boxed_slice(),
-            parent_link_indices: tree.parent_link_indices.into_boxed_slice(),
-        }
-    }
-
-    fn link_count(&self) -> usize {
-        self.links.len()
-    }
-
-    fn joint_count(&self) -> usize {
-        self.active_joint_indices.len()
-    }
-
-    fn model_joint_count(&self) -> usize {
-        self.joints.len()
-    }
-
-    fn active_joint(&self, dof_index: usize) -> Result<&Joint> {
-        let &joint_index = self
-            .active_joint_indices
-            .get(dof_index)
-            .ok_or(Error::InvalidJointIndex { index: dof_index })?;
-        Ok(&self.joints[joint_index])
-    }
-
-    fn link_by_id(&self, link: LinkId) -> Result<&Link> {
-        let index = self.validate_link_id(link)?;
-        Ok(&self.links[index])
-    }
-
-    #[inline]
-    fn joint_value(&self, values: &[f64], joint_index: usize) -> f64 {
-        self.joint_dof_indices[joint_index].map_or(0.0, |dof_index| values[dof_index])
-    }
-
-    fn validate_slice(&self, name: &'static str, slice: &[f64]) -> Result<()> {
-        self.validate_slice_length(name, slice.len(), self.joint_count())?;
-        if slice.iter().all(|value| value.is_finite()) {
-            Ok(())
-        } else {
-            Err(Error::NonFiniteInput { input: name })
-        }
-    }
-
-    fn validate_output(
-        &self,
-        base_mode: RootMode,
-        name: &'static str,
-        output: &[f64],
-    ) -> Result<()> {
-        self.validate_slice_length(name, output.len(), generalized_count(self, base_mode))
-    }
-
-    fn validate_joint_output(&self, name: &'static str, output: &[f64]) -> Result<()> {
-        self.validate_slice_length(name, output.len(), self.joint_count())
-    }
-
-    fn validate_slice_length(
-        &self,
-        name: &'static str,
-        actual: usize,
-        expected: usize,
-    ) -> Result<()> {
-        if actual == expected {
-            Ok(())
-        } else {
-            Err(Error::WrongSliceLength {
-                slice: name,
-                expected,
-                actual,
-            })
-        }
-    }
-
-    fn validate_link_id(&self, link: LinkId) -> Result<usize> {
-        if link.model_id == self.model_id && link.index < self.links.len() {
-            Ok(link.index)
-        } else {
-            Err(Error::InvalidLinkId)
-        }
-    }
-}
-
 const fn base_dof_count(base_mode: RootMode) -> usize {
     match base_mode {
         RootMode::Fixed => 0,
@@ -182,24 +49,6 @@ fn generalized_count(model: &Model, base_mode: RootMode) -> usize {
     base_dof_count(base_mode) + model.joint_count()
 }
 
-fn load_model(path: impl AsRef<Path>) -> Result<Arc<Model>> {
-    Ok(Arc::new(Model::from_tree(load_urdf(path)?)))
-}
-
-fn validate_floating_model(model: &Model) -> Result<()> {
-    let root = model
-        .links
-        .first()
-        .expect("validated robot tree has one root link");
-    if root.mass() <= 0.0 {
-        return Err(Error::InvalidModel(format!(
-            "floating-base root link {} must have positive mass",
-            root.name()
-        )));
-    }
-    Ok(())
-}
-
 impl Robot {
     /// Loads and validates a tree robot model from a URDF file.
     ///
@@ -207,13 +56,7 @@ impl Robot {
     ///
     /// Returns an error if the file cannot be parsed or its graph is invalid.
     pub fn from_urdf(path: impl AsRef<Path>) -> Result<Self> {
-        let model = load_model(path)?;
-        let workspace = Workspace::new(model.as_ref());
-        Ok(Self {
-            model,
-            workspace,
-            world_from_root: Frame::identity(),
-        })
+        Ok(RobotModel::from_urdf(path)?.robot())
     }
 
     /// Returns the fixed root-link pose in the world frame.
@@ -226,6 +69,13 @@ impl Robot {
         crate::base::validate_frame(&frame)?;
         self.world_from_root = frame;
         Ok(())
+    }
+
+    /// Shares the immutable model without allocating calculation storage.
+    pub fn model(&self) -> RobotModel {
+        RobotModel {
+            model: Arc::clone(&self.model),
+        }
     }
 
     /// Creates another calculation instance sharing this robot's immutable model.
@@ -242,50 +92,6 @@ impl Robot {
         }
     }
 
-    /// Returns the robot name declared in the URDF.
-    pub fn name(&self) -> &str {
-        &self.model.name
-    }
-
-    /// Finds a model-scoped link identifier by URDF name.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::UnknownLink`] if the name is absent.
-    pub fn link_id(&self, name: &str) -> Result<LinkId> {
-        self.model
-            .links
-            .iter()
-            .position(|link| link.name() == name)
-            .map(|index| LinkId::new(self.model.model_id, index))
-            .ok_or_else(|| Error::UnknownLink {
-                name: name.to_owned(),
-            })
-    }
-
-    /// Returns the model-scoped identifier at a link enumeration index.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidLinkId`] if `index >= self.link_count()`.
-    pub fn link_id_at(&self, index: usize) -> Result<LinkId> {
-        if index < self.model.link_count() {
-            Ok(LinkId::new(self.model.model_id, index))
-        } else {
-            Err(Error::InvalidLinkId)
-        }
-    }
-
-    /// Returns the number of links, including the root link.
-    pub fn link_count(&self) -> usize {
-        self.model.link_count()
-    }
-
-    /// Returns the number of non-fixed joints in the model.
-    pub fn joint_count(&self) -> usize {
-        self.model.joint_count()
-    }
-
     /// Returns the runtime generalized-vector size for this robot.
     ///
     /// Floating-base generalized vectors are ordered `[base angular, base
@@ -293,101 +99,19 @@ impl Robot {
     pub fn generalized_count(&self) -> usize {
         self.model.joint_count()
     }
-
-    /// Returns the name of the joint at an active-DOF index.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidJointIndex`] when `dof_index` is out of range.
-    pub fn joint_name(&self, dof_index: usize) -> Result<&str> {
-        Ok(self.model.active_joint(dof_index)?.name())
-    }
-
-    /// Returns the motion type of the joint at an active-DOF index.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidJointIndex`] when `dof_index` is out of range.
-    pub fn joint_type(&self, dof_index: usize) -> Result<JointType> {
-        Ok(self.model.active_joint(dof_index)?.joint_type())
-    }
-
-    /// Returns the lower position limit of the joint at an active-DOF index.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidJointIndex`] when `dof_index` is out of range.
-    pub fn joint_lower_limit(&self, dof_index: usize) -> Result<f64> {
-        Ok(self.model.active_joint(dof_index)?.lower_limit())
-    }
-
-    /// Returns the upper position limit of the joint at an active-DOF index.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidJointIndex`] when `dof_index` is out of range.
-    pub fn joint_upper_limit(&self, dof_index: usize) -> Result<f64> {
-        Ok(self.model.active_joint(dof_index)?.upper_limit())
-    }
-
-    /// Returns the velocity limit of the joint at an active-DOF index.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidJointIndex`] when `dof_index` is out of range.
-    pub fn joint_velocity_limit(&self, dof_index: usize) -> Result<f64> {
-        Ok(self.model.active_joint(dof_index)?.velocity_limit())
-    }
-
-    /// Returns the root link identifier.
-    pub fn root_link_id(&self) -> LinkId {
-        LinkId::new(self.model.model_id, 0)
-    }
-
-    /// Returns the name of a model-scoped link.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidLinkId`] if `link` belongs to another model.
-    pub fn link_name(&self, link: LinkId) -> Result<&str> {
-        Ok(self.model.link_by_id(link)?.name())
-    }
-
-    /// Returns a link's mass in kilograms.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidLinkId`] if `link` belongs to another model.
-    pub fn link_mass(&self, link: LinkId) -> Result<f64> {
-        Ok(self.model.link_by_id(link)?.mass())
-    }
-
-    /// Returns a link's center of mass expressed in its link frame.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidLinkId`] if `link` belongs to another model.
-    pub fn link_center_of_mass(&self, link: LinkId) -> Result<Vector3<f64>> {
-        Ok(*self.model.link_by_id(link)?.center_of_mass())
-    }
-
-    /// Returns a link's rotational inertia about its center of mass.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidLinkId`] if `link` belongs to another model.
-    pub fn link_inertia(&self, link: LinkId) -> Result<Matrix3<f64>> {
-        Ok(*self.model.link_by_id(link)?.inertia())
-    }
 }
 
 impl FloatingRobot {
     /// Loads a tree robot model with a six-degree-of-freedom floating root.
     pub fn from_urdf(path: impl AsRef<Path>) -> Result<Self> {
-        let model = load_model(path)?;
-        validate_floating_model(model.as_ref())?;
-        let workspace = Workspace::new(model.as_ref());
-        Ok(Self { model, workspace })
+        RobotModel::from_urdf(path)?.floating_robot()
+    }
+
+    /// Shares the immutable model without allocating calculation storage.
+    pub fn model(&self) -> RobotModel {
+        RobotModel {
+            model: Arc::clone(&self.model),
+        }
     }
 
     /// Creates another calculation instance sharing this robot's immutable model.
@@ -397,230 +121,12 @@ impl FloatingRobot {
         Self { model, workspace }
     }
 
-    /// Returns the robot name declared in the URDF.
-    pub fn name(&self) -> &str {
-        &self.model.name
-    }
-
-    /// Finds a model-scoped link identifier by URDF name.
-    pub fn link_id(&self, name: &str) -> Result<LinkId> {
-        self.model
-            .links
-            .iter()
-            .position(|link| link.name() == name)
-            .map(|index| LinkId::new(self.model.model_id, index))
-            .ok_or_else(|| Error::UnknownLink {
-                name: name.to_owned(),
-            })
-    }
-
-    /// Returns a model-scoped link identifier by enumeration index.
-    pub fn link_id_at(&self, index: usize) -> Result<LinkId> {
-        if index < self.model.link_count() {
-            Ok(LinkId::new(self.model.model_id, index))
-        } else {
-            Err(Error::InvalidLinkId)
-        }
-    }
-
-    /// Returns the number of links, including the root link.
-    pub fn link_count(&self) -> usize {
-        self.model.link_count()
-    }
-
-    /// Returns the number of non-fixed joints in the model.
-    pub fn joint_count(&self) -> usize {
-        self.model.joint_count()
-    }
-
-    /// Returns the runtime generalized-vector size.
+    /// Returns the runtime generalized-vector size (six base coordinates plus joints).
     pub fn generalized_count(&self) -> usize {
         generalized_count(self.model.as_ref(), RootMode::Floating)
-    }
-
-    /// Returns the name of an active joint.
-    pub fn joint_name(&self, dof_index: usize) -> Result<&str> {
-        Ok(self.model.active_joint(dof_index)?.name())
-    }
-
-    /// Returns the motion type of an active joint.
-    pub fn joint_type(&self, dof_index: usize) -> Result<JointType> {
-        Ok(self.model.active_joint(dof_index)?.joint_type())
-    }
-
-    /// Returns the lower position limit of an active joint.
-    pub fn joint_lower_limit(&self, dof_index: usize) -> Result<f64> {
-        Ok(self.model.active_joint(dof_index)?.lower_limit())
-    }
-
-    /// Returns the upper position limit of an active joint.
-    pub fn joint_upper_limit(&self, dof_index: usize) -> Result<f64> {
-        Ok(self.model.active_joint(dof_index)?.upper_limit())
-    }
-
-    /// Returns the velocity limit of an active joint.
-    pub fn joint_velocity_limit(&self, dof_index: usize) -> Result<f64> {
-        Ok(self.model.active_joint(dof_index)?.velocity_limit())
-    }
-
-    /// Returns the root link identifier.
-    pub fn root_link_id(&self) -> LinkId {
-        LinkId::new(self.model.model_id, 0)
-    }
-
-    /// Returns the name of a model-scoped link.
-    pub fn link_name(&self, link: LinkId) -> Result<&str> {
-        Ok(self.model.link_by_id(link)?.name())
-    }
-
-    /// Returns a link's mass in kilograms.
-    pub fn link_mass(&self, link: LinkId) -> Result<f64> {
-        Ok(self.model.link_by_id(link)?.mass())
-    }
-
-    /// Returns a link's center of mass expressed in its link frame.
-    pub fn link_center_of_mass(&self, link: LinkId) -> Result<Vector3<f64>> {
-        Ok(*self.model.link_by_id(link)?.center_of_mass())
-    }
-
-    /// Returns a link's rotational inertia about its center of mass.
-    pub fn link_inertia(&self, link: LinkId) -> Result<Matrix3<f64>> {
-        Ok(*self.model.link_by_id(link)?.inertia())
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use super::*;
-
-    fn robot() -> Robot {
-        Robot::from_urdf(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_arm.urdf"))
-            .unwrap()
-    }
-
-    #[test]
-    fn identifiers_queries_and_forks_preserve_model_scope() {
-        let robot = robot();
-        let fork = robot.fork();
-        assert_eq!(
-            robot
-                .model
-                .validate_link_id(LinkId::new(robot.model.model_id, 0))
-                .unwrap(),
-            0
-        );
-        assert!(matches!(
-            robot
-                .model
-                .validate_link_id(LinkId::new(robot.model.model_id.wrapping_add(1), 0)),
-            Err(Error::InvalidLinkId)
-        ));
-        assert!(matches!(
-            robot
-                .model
-                .validate_link_id(LinkId::new(robot.model.model_id, robot.link_count())),
-            Err(Error::InvalidLinkId)
-        ));
-        assert_eq!(robot.root_link_id(), fork.root_link_id());
-        assert_eq!(robot.link_id_at(0).unwrap(), robot.root_link_id());
-        assert!(matches!(
-            robot.link_id_at(robot.link_count()),
-            Err(Error::InvalidLinkId)
-        ));
-        assert_eq!(robot.joint_name(0).unwrap(), "test_joint_1");
-        assert_eq!(robot.joint_type(0).unwrap(), JointType::Revolute);
-        assert_eq!(robot.joint_lower_limit(0).unwrap(), -0.610865238198015);
-        assert_eq!(robot.joint_upper_limit(0).unwrap(), 0.610865238198015);
-        assert_eq!(robot.joint_velocity_limit(0).unwrap(), 180.0);
-        assert!(matches!(
-            robot.joint_name(robot.joint_count()),
-            Err(Error::InvalidJointIndex { .. })
-        ));
-    }
-
-    #[test]
-    fn floating_identifiers_and_metadata_match_the_shared_model() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_arm.urdf");
-        let robot = FloatingRobot::from_urdf(path).unwrap();
-        let fork = robot.fork();
-
-        assert_eq!(robot.name(), "test_arm");
-        assert_eq!(robot.link_count(), 5);
-        assert_eq!(robot.joint_count(), 4);
-        assert_eq!(robot.generalized_count(), 10);
-        assert_eq!(robot.root_link_id(), fork.root_link_id());
-
-        let link = robot.link_id("test_link_4").unwrap();
-        assert_eq!(robot.link_id_at(4).unwrap(), link);
-        assert_eq!(robot.link_name(link).unwrap(), "test_link_4");
-        assert!(robot.link_mass(link).unwrap().is_finite());
-        assert!(
-            robot
-                .link_center_of_mass(link)
-                .unwrap()
-                .iter()
-                .all(|x| x.is_finite())
-        );
-        assert!(
-            robot
-                .link_inertia(link)
-                .unwrap()
-                .iter()
-                .all(|x| x.is_finite())
-        );
-
-        assert_eq!(robot.joint_name(0).unwrap(), "test_joint_1");
-        assert_eq!(robot.joint_type(0).unwrap(), JointType::Revolute);
-        assert_eq!(robot.joint_lower_limit(0).unwrap(), -0.610865238198015);
-        assert_eq!(robot.joint_upper_limit(0).unwrap(), 0.610865238198015);
-        assert_eq!(robot.joint_velocity_limit(0).unwrap(), 180.0);
-
-        assert!(matches!(
-            robot.link_id("missing"),
-            Err(Error::UnknownLink { .. })
-        ));
-        assert!(matches!(
-            robot.link_id_at(robot.link_count()),
-            Err(Error::InvalidLinkId)
-        ));
-        assert!(matches!(
-            robot.joint_name(robot.joint_count()),
-            Err(Error::InvalidJointIndex { .. })
-        ));
-    }
-
-    #[test]
-    fn fixed_base_frame_is_instance_local_and_validated() {
-        let mut robot = robot();
-        let original = *robot.base_frame();
-        let frame = Frame::translation(0.4, -0.2, 0.8);
-        robot.set_base_frame(frame).unwrap();
-        assert_eq!(*robot.base_frame(), frame);
-
-        let fork = robot.fork();
-        assert_eq!(*fork.base_frame(), frame);
-
-        assert!(matches!(
-            robot.set_base_frame(Frame::translation(f64::NAN, 0.0, 0.0)),
-            Err(Error::InvalidBaseState { field: "frame", .. })
-        ));
-        assert_eq!(*robot.base_frame(), frame);
-        assert_ne!(original, frame);
-    }
-
-    #[test]
-    fn joint_inputs_must_be_finite() {
-        let robot = robot();
-        let mut values = vec![0.0; robot.joint_count()];
-
-        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            values[0] = invalid;
-            assert!(matches!(
-                robot.model.validate_slice("q", &values),
-                Err(Error::NonFiniteInput { input: "q" })
-            ));
-        }
-    }
-}
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests;

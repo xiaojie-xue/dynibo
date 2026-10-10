@@ -30,7 +30,7 @@ members = ["bindings/c", "bindings/python"]
 resolver = "3"
 
 [workspace.package]
-version = "0.5.1"
+version = "0.5.2"
 
 [features]
 default = []
@@ -72,3 +72,6 @@ path = "examples/rust/g1.rs"
 [profile.release]
 codegen-units = 1
 lto = "fat"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }

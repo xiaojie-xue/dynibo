@@ -68,6 +68,26 @@ wrench at the link origin. Components use torque-first order.
 Every link ID must come from the robot used for the calculation. Multiple loads
 may target the same or different links; dynibo accumulates their contribution.
 
+## Reusable loads
+
+Rust and Python robots provide `load_buffer()`. It reserves capacity once for
+one load per link. `set` replaces a load, `add` accumulates it, and `remove` or
+`clear` retain capacity. Rejected updates leave existing loads unchanged.
+Rust passes `buffer.as_slice()` to dynamics. Python accepts the buffer directly:
+
+```python
+loads = robot.load_buffer()
+loads.set(tool, force=(0.0, 0.0, -10.0))
+robot.gravity(q, loads=loads, out=output)
+loads.clear()
+```
+
+A Python `LoadBuffer` belongs to its creating model.
+It can be shared by `fork()` instances of that model.
+An independently loaded robot rejects it, even when empty. The
+buffer is borrowed during a native call; concurrent mutation is rejected.
+Existing Python lists of `Load` remain supported and are converted per call.
+
 ## No-load calls
 
 Rust, Python, and C++ accept an empty collection. In C, pass `NULL` only when

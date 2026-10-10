@@ -8,6 +8,13 @@
 `forward_kinematics` 返回目标 link 在世界坐标系下的位姿。只有根节点到目标路径上的
 关节会影响该位姿，其他分支不会参与。
 
+`forward_kinematics_all` 一次遍历计算全部 link 位姿，包含根节点，按 link 枚举顺序
+输出。Rust 写入 `&mut [Frame]`，C 写入长度为 `link_count` 的 `DyniboPose` 数组。
+C++ 可返回 vector，也可通过 `forward_kinematics_all_into(q, output)` 复用预分配的
+vector。Python 返回长度为 `7 * link_count` 的一维 float64 数组并支持 `out=`；
+reshape 为 `(link_count, 7)` 后，每行是 `[x, y, z, qx, qy, qz, qw]`。
+浮动基版本在 `q` 前接收 `base`。
+
 ## 雅可比矩阵及其导数
 
 几何雅可比将广义速度映射为目标 link 原点处、世界坐标系下、角分量在前的 twist：

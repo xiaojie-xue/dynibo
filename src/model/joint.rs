@@ -71,9 +71,24 @@ impl Joint {
         let name = name.into();
         let axis = match joint_type {
             JointType::Revolute | JointType::Prismatic => {
-                Unit::try_new(axis, 1.0e-12).ok_or_else(|| Error::InvalidJointAxis {
+                let invalid = || Error::InvalidJointAxis {
                     joint: name.clone(),
-                })?
+                };
+                if !axis.iter().all(|value| value.is_finite()) {
+                    return Err(invalid());
+                }
+                // Scale before taking a norm: finite URDF axes can have a
+                // squared norm that overflows. Preserve the minimum norm rule.
+                let scale = axis.amax();
+                if scale == 0.0 {
+                    return Err(invalid());
+                }
+                let scaled = axis / scale;
+                let norm = scaled.norm();
+                if scale <= 1.0e-12 / norm {
+                    return Err(invalid());
+                }
+                Unit::new_normalize(scaled)
             }
             JointType::Fixed => Vector3::x_axis(),
         };
@@ -116,6 +131,7 @@ impl Joint {
     }
 
     /// Returns the fixed transform from the parent link to the joint.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg(test)]
     pub(crate) const fn origin(&self) -> &Frame {
         &self.kinematics.origin
@@ -124,12 +140,14 @@ impl Joint {
     /// Returns the normalized motion axis expressed in the joint frame.
     ///
     /// Fixed joints have no motion axis and return an internal placeholder.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg(test)]
     pub(crate) const fn axis(&self) -> &Unit<Vector3<f64>> {
         &self.kinematics.axis
     }
 
     /// Computes the parent-to-child transform at position `q`.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg(test)]
     pub(crate) fn frame(&self, q: f64) -> Frame {
         self.kinematics.frame(q)
@@ -139,6 +157,7 @@ impl Joint {
     ///
     /// Revolute joints return torque and prismatic joints return force. Fixed
     /// joints always return zero.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     #[cfg(test)]
     pub(crate) fn active_force(&self, load: Wrench) -> f64 {
         match self.kinematics.joint_type {
@@ -160,6 +179,7 @@ impl Joint {
 
 #[cfg(test)]
 #[allow(clippy::approx_constant)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::f64::consts::{FRAC_PI_2, PI};
 
@@ -252,6 +272,37 @@ mod tests {
                 error,
                 Error::InvalidJointAxis { ref joint } if joint == "moving"
             ));
+        }
+    }
+
+    #[test]
+    fn moving_joint_axis_rejects_tiny_nonzero_vectors_at_the_threshold() {
+        for kind in [JointType::Revolute, JointType::Prismatic] {
+            for magnitude in [1e-300, 0.5e-12, 1e-12] {
+                let result = Joint::new(
+                    "tiny",
+                    kind,
+                    Frame::identity(),
+                    Vector3::x() * magnitude,
+                    -1.0,
+                    1.0,
+                    1.0,
+                );
+                assert!(
+                    matches!(result, Err(Error::InvalidJointAxis { joint }) if joint == "tiny")
+                );
+            }
+            let valid = Joint::new(
+                "valid",
+                kind,
+                Frame::identity(),
+                Vector3::x() * 2e-12,
+                -1.0,
+                1.0,
+                1.0,
+            )
+            .unwrap();
+            assert_relative_eq!(valid.axis().as_ref(), &Vector3::x(), epsilon = 1e-12);
         }
     }
 

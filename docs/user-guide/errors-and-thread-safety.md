@@ -24,6 +24,7 @@ Copy the string when it must outlive the next call.
 
 ## Thread-safety rules
 
+- Rust `RobotModel` is immutable and can be shared across threads without a lock.
 - Immutable model queries may be read when no thread is changing a fixed
   `Robot` base frame.
 - Each Rust `Robot` or `FloatingRobot` owns one mutable workspace; calculation
@@ -31,13 +32,18 @@ Copy the string when it must outlive the next call.
   instance for each concurrent calculation.
 - C callers create one typed workspace per concurrent calculation:
   `DyniboWorkspace` for fixed and `DyniboFloatingWorkspace` for floating.
-- Python serializes methods on one `Robot` or `FloatingRobot`; separate
-  instances enable parallel native calls.
+- Python serializes methods on one `Robot` or `FloatingRobot`; `fork()` creates
+  independent instances for parallel native calls while sharing model data.
 - The C++ wrapper has no internal lock; use one `dynibo::Robot` or
   `dynibo::FloatingRobot` per worker.
 - Never destroy or move an object while another thread is using its handles.
 
 ## Recovery
+
+Joint state, generalized forces, loads, and tool poses must contain finite
+values. Rejected inputs leave caller-owned calculation output buffers unchanged.
+Overflow while accumulating otherwise finite loads is a solver error. Outputs
+are unspecified after a solver error and must only be consumed after success.
 
 Argument and solver errors do not invalidate a robot or workspace. Correct the
 input and call again. A caught ABI panic is reported instead of unwinding across

@@ -2,6 +2,7 @@ use nalgebra::Vector3;
 
 use crate::{BaseState, Frame, JointType, Result, Twist, Wrench};
 
+use super::super::topology::{child_link_index, incoming_joint_index};
 use super::super::{
     FLOATING_BASE_DOF, FloatingRobot, IndexedLoad, Model, Robot, RootMode, Workspace,
     base_dof_count,
@@ -10,8 +11,9 @@ use super::{add_wrench, wrench_to_parent, write_world_wrench};
 
 const GRAVITY: f64 = 9.80665;
 
+/// Link-local Newton–Euler intermediates, initialized in the outward pass.
 struct DynamicsScratch<'a> {
-    transforms: &'a mut [Frame],
+    parent_from_child: &'a mut [Frame],
     angular_velocities: &'a mut [Vector3<f64>],
     angular_accelerations: &'a mut [Vector3<f64>],
     origin_accelerations: &'a mut [Vector3<f64>],
@@ -19,8 +21,10 @@ struct DynamicsScratch<'a> {
     link_loads: &'a mut [Wrench],
 }
 
+/// Reuses dynamics buffers: the outward pass writes local gravity and transforms,
+/// then the inward pass accumulates the already prepared external loads.
 struct GravityScratch<'a> {
-    transforms: &'a mut [Frame],
+    parent_from_child: &'a mut [Frame],
     gravity_at_link: &'a mut [Vector3<f64>],
     link_loads: &'a mut [Wrench],
 }
@@ -169,7 +173,7 @@ impl Model {
             Vector3::zeros(),
             Wrench::zeros(),
             DynamicsScratch {
-                transforms: &mut workspace.frames,
+                parent_from_child: &mut workspace.frames,
                 angular_velocities: &mut workspace.angular_velocities,
                 angular_accelerations: &mut workspace.angular_accelerations,
                 origin_accelerations: &mut workspace.origin_accelerations,
@@ -249,7 +253,7 @@ impl Model {
             Vector3::zeros(),
             Wrench::zeros(),
             DynamicsScratch {
-                transforms: &mut workspace.frames,
+                parent_from_child: &mut workspace.frames,
                 angular_velocities: &mut workspace.angular_velocities,
                 angular_accelerations: &mut workspace.angular_accelerations,
                 origin_accelerations: &mut workspace.origin_accelerations,
@@ -364,7 +368,7 @@ impl Model {
             Vector3::new(0.0, 0.0, GRAVITY),
             root_load,
             DynamicsScratch {
-                transforms: &mut workspace.frames,
+                parent_from_child: &mut workspace.frames,
                 angular_velocities: &mut workspace.angular_velocities,
                 angular_accelerations: &mut workspace.angular_accelerations,
                 origin_accelerations: &mut workspace.origin_accelerations,
@@ -403,7 +407,7 @@ impl Model {
             Vector3::new(0.0, 0.0, GRAVITY),
             root_load,
             DynamicsScratch {
-                transforms: &mut workspace.frames,
+                parent_from_child: &mut workspace.frames,
                 angular_velocities: &mut workspace.angular_velocities,
                 angular_accelerations: &mut workspace.angular_accelerations,
                 origin_accelerations: &mut workspace.origin_accelerations,
@@ -432,7 +436,7 @@ impl Model {
             base_frame,
             root_load,
             GravityScratch {
-                transforms: &mut workspace.frames,
+                parent_from_child: &mut workspace.frames,
                 gravity_at_link: &mut workspace.angular_accelerations,
                 link_loads: &mut workspace.link_loads,
             },
@@ -459,7 +463,7 @@ impl Model {
             base_frame,
             root_load,
             GravityScratch {
-                transforms: &mut workspace.frames,
+                parent_from_child: &mut workspace.frames,
                 gravity_at_link: &mut workspace.angular_accelerations,
                 link_loads: &mut workspace.link_loads,
             },
@@ -498,26 +502,27 @@ impl Model {
         let base_origin_acceleration =
             base_rotation_inverse * (world_gravity + base_acceleration.linear);
 
-        for i in 0..self.model_joint_count() {
-            let joint = self.joint_kinematics[i];
-            let link = self.link_dynamics[i + 1];
-            let parent = self.parent_link_indices[i];
-            let (parent_omega, parent_alpha, parent_acceleration) = if parent == 0 {
+        for joint_index in 0..self.model_joint_count() {
+            let joint = self.joint_kinematics[joint_index];
+            let link = self.link_dynamics[child_link_index(joint_index)];
+            let parent_link_index = self.parent_link_indices[joint_index];
+            let (parent_omega, parent_alpha, parent_acceleration) = if parent_link_index == 0 {
                 (
                     base_omega,
                     base_angular_acceleration,
                     base_origin_acceleration,
                 )
             } else {
+                let parent_joint_index = incoming_joint_index(parent_link_index);
                 (
-                    scratch.angular_velocities[parent - 1],
-                    scratch.angular_accelerations[parent - 1],
-                    scratch.origin_accelerations[parent - 1],
+                    scratch.angular_velocities[parent_joint_index],
+                    scratch.angular_accelerations[parent_joint_index],
+                    scratch.origin_accelerations[parent_joint_index],
                 )
             };
-            let position = self.joint_value(q, i);
-            let velocity = self.joint_value(qd, i);
-            let acceleration_value = self.joint_value(qdd, i);
+            let position = self.joint_value(q, joint_index);
+            let velocity = self.joint_value(qd, joint_index);
+            let acceleration_value = self.joint_value(qdd, joint_index);
             let transform = joint.frame(position);
             // Reuse one stack-local matrix for the three rotations below.
             let rotation_inverse = transform.rotation.inverse().to_rotation_matrix();
@@ -549,13 +554,13 @@ impl Model {
                 ),
                 JointType::Fixed => (rotated_omega, rotated_alpha, translated_acceleration),
             };
-            scratch.angular_velocities[i] = omega;
-            scratch.angular_accelerations[i] = alpha;
-            scratch.origin_accelerations[i] = acceleration;
+            scratch.angular_velocities[joint_index] = omega;
+            scratch.angular_accelerations[joint_index] = alpha;
+            scratch.origin_accelerations[joint_index] = acceleration;
             let center = &link.center_of_mass;
-            scratch.link_accelerations[i] =
+            scratch.link_accelerations[joint_index] =
                 acceleration + alpha.cross(center) + omega.cross(&omega.cross(center));
-            scratch.transforms[i] = transform;
+            scratch.parent_from_child[joint_index] = transform;
         }
 
         let mut accumulated_root_load = if compute_root_wrench {
@@ -576,34 +581,46 @@ impl Model {
         } else {
             Wrench::zeros()
         };
-        for i in (0..self.model_joint_count()).rev() {
-            let joint = self.joint_kinematics[i];
-            let link = self.link_dynamics[i + 1];
-            let inertial_force = link.mass * scratch.link_accelerations[i];
-            let angular_momentum = link.inertia * scratch.angular_velocities[i];
+        for joint_index in (0..self.model_joint_count()).rev() {
+            let joint = self.joint_kinematics[joint_index];
+            let link = self.link_dynamics[child_link_index(joint_index)];
+            let inertial_force = link.mass * scratch.link_accelerations[joint_index];
+            let angular_momentum = link.inertia * scratch.angular_velocities[joint_index];
             let inertial_load = Wrench::new(
                 link.center_of_mass.cross(&inertial_force)
-                    + link.inertia * scratch.angular_accelerations[i]
-                    + scratch.angular_velocities[i].cross(&angular_momentum),
+                    + link.inertia * scratch.angular_accelerations[joint_index]
+                    + scratch.angular_velocities[joint_index].cross(&angular_momentum),
                 inertial_force,
             );
-            scratch.link_loads[i] = add_wrench(scratch.link_loads[i], inertial_load);
-            if let Some(dof_index) = self.joint_dof_indices[i] {
+            scratch.link_loads[joint_index] =
+                add_wrench(scratch.link_loads[joint_index], inertial_load);
+            if let Some(dof_index) = self.joint_dof_indices[joint_index] {
                 output[dof_index] = match joint.joint_type {
-                    JointType::Revolute => scratch.link_loads[i].torque.dot(joint.axis.as_ref()),
-                    JointType::Prismatic => scratch.link_loads[i].force.dot(joint.axis.as_ref()),
+                    JointType::Revolute => scratch.link_loads[joint_index]
+                        .torque
+                        .dot(joint.axis.as_ref()),
+                    JointType::Prismatic => scratch.link_loads[joint_index]
+                        .force
+                        .dot(joint.axis.as_ref()),
                     JointType::Fixed => unreachable!("fixed joints have no DOF index"),
                 };
             }
-            let parent = self.parent_link_indices[i];
-            if parent != 0 {
-                let parent_load = wrench_to_parent(&scratch.transforms[i], scratch.link_loads[i]);
-                scratch.link_loads[parent - 1] =
-                    add_wrench(scratch.link_loads[parent - 1], parent_load);
+            let parent_link_index = self.parent_link_indices[joint_index];
+            if parent_link_index != 0 {
+                let parent_load = wrench_to_parent(
+                    &scratch.parent_from_child[joint_index],
+                    scratch.link_loads[joint_index],
+                );
+                let parent_joint_index = incoming_joint_index(parent_link_index);
+                scratch.link_loads[parent_joint_index] =
+                    add_wrench(scratch.link_loads[parent_joint_index], parent_load);
             } else if compute_root_wrench {
                 accumulated_root_load = add_wrench(
                     accumulated_root_load,
-                    wrench_to_parent(&scratch.transforms[i], scratch.link_loads[i]),
+                    wrench_to_parent(
+                        &scratch.parent_from_child[joint_index],
+                        scratch.link_loads[joint_index],
+                    ),
                 );
             }
         }
@@ -621,7 +638,7 @@ impl Model {
         self.validate_slice("q", q)?;
         self.validate_slice_length(
             "transform workspace",
-            scratch.transforms.len(),
+            scratch.parent_from_child.len(),
             self.model_joint_count(),
         )?;
         self.validate_slice_length(
@@ -636,15 +653,17 @@ impl Model {
         )?;
         self.validate_joint_output("gravity joint output", output)?;
         let base_gravity = base_frame.rotation.inverse() * Vector3::new(0.0, 0.0, GRAVITY);
-        for i in 0..self.model_joint_count() {
-            scratch.transforms[i] = self.joint_kinematics[i].frame(self.joint_value(q, i));
-            let parent = self.parent_link_indices[i];
-            let parent_gravity = if parent == 0 {
+        for joint_index in 0..self.model_joint_count() {
+            scratch.parent_from_child[joint_index] =
+                self.joint_kinematics[joint_index].frame(self.joint_value(q, joint_index));
+            let parent_link_index = self.parent_link_indices[joint_index];
+            let parent_gravity = if parent_link_index == 0 {
                 base_gravity
             } else {
-                scratch.gravity_at_link[parent - 1]
+                scratch.gravity_at_link[incoming_joint_index(parent_link_index)]
             };
-            scratch.gravity_at_link[i] = scratch.transforms[i].rotation.inverse() * parent_gravity;
+            scratch.gravity_at_link[joint_index] =
+                scratch.parent_from_child[joint_index].rotation.inverse() * parent_gravity;
         }
         let root = self.link_dynamics[0];
         let root_force = root.mass * base_gravity;
@@ -652,28 +671,40 @@ impl Model {
             root_load,
             Wrench::new(root.center_of_mass.cross(&root_force), root_force),
         );
-        for i in (0..self.model_joint_count()).rev() {
-            let joint = self.joint_kinematics[i];
-            let link = self.link_dynamics[i + 1];
-            let force = link.mass * scratch.gravity_at_link[i];
+        for joint_index in (0..self.model_joint_count()).rev() {
+            let joint = self.joint_kinematics[joint_index];
+            let link = self.link_dynamics[child_link_index(joint_index)];
+            let force = link.mass * scratch.gravity_at_link[joint_index];
             let gravity_load = Wrench::new(link.center_of_mass.cross(&force), force);
-            scratch.link_loads[i] = add_wrench(scratch.link_loads[i], gravity_load);
-            if let Some(dof_index) = self.joint_dof_indices[i] {
+            scratch.link_loads[joint_index] =
+                add_wrench(scratch.link_loads[joint_index], gravity_load);
+            if let Some(dof_index) = self.joint_dof_indices[joint_index] {
                 output[dof_index] = match joint.joint_type {
-                    JointType::Revolute => scratch.link_loads[i].torque.dot(joint.axis.as_ref()),
-                    JointType::Prismatic => scratch.link_loads[i].force.dot(joint.axis.as_ref()),
+                    JointType::Revolute => scratch.link_loads[joint_index]
+                        .torque
+                        .dot(joint.axis.as_ref()),
+                    JointType::Prismatic => scratch.link_loads[joint_index]
+                        .force
+                        .dot(joint.axis.as_ref()),
                     JointType::Fixed => unreachable!("fixed joints have no DOF index"),
                 };
             }
-            let parent = self.parent_link_indices[i];
-            if parent != 0 {
-                let parent_load = wrench_to_parent(&scratch.transforms[i], scratch.link_loads[i]);
-                scratch.link_loads[parent - 1] =
-                    add_wrench(scratch.link_loads[parent - 1], parent_load);
+            let parent_link_index = self.parent_link_indices[joint_index];
+            if parent_link_index != 0 {
+                let parent_load = wrench_to_parent(
+                    &scratch.parent_from_child[joint_index],
+                    scratch.link_loads[joint_index],
+                );
+                let parent_joint_index = incoming_joint_index(parent_link_index);
+                scratch.link_loads[parent_joint_index] =
+                    add_wrench(scratch.link_loads[parent_joint_index], parent_load);
             } else {
                 accumulated_root_load = add_wrench(
                     accumulated_root_load,
-                    wrench_to_parent(&scratch.transforms[i], scratch.link_loads[i]),
+                    wrench_to_parent(
+                        &scratch.parent_from_child[joint_index],
+                        scratch.link_loads[joint_index],
+                    ),
                 );
             }
         }
@@ -689,10 +720,19 @@ impl Model {
         let mut root_load = Wrench::zeros();
         for load in loads {
             let link_index = self.validate_link_id(load.link)?;
-            if link_index == 0 {
-                root_load = add_wrench(root_load, load.wrench);
+            if !load.wrench.is_finite() {
+                return Err(crate::Error::NonFiniteInput { input: "load" });
+            }
+            let accumulated = if link_index == 0 {
+                &mut root_load
             } else {
-                output[link_index - 1] = add_wrench(output[link_index - 1], load.wrench);
+                &mut output[incoming_joint_index(link_index)]
+            };
+            *accumulated = add_wrench(*accumulated, load.wrench);
+            if !accumulated.is_finite() {
+                return Err(crate::Error::NumericalFailure {
+                    operation: "load aggregation",
+                });
             }
         }
         Ok(root_load)
@@ -700,7 +740,7 @@ impl Model {
 
     fn validate_dynamics_scratch(&self, scratch: &DynamicsScratch<'_>) -> Result<()> {
         for (name, actual) in [
-            ("transform workspace", scratch.transforms.len()),
+            ("transform workspace", scratch.parent_from_child.len()),
             (
                 "angular velocity workspace",
                 scratch.angular_velocities.len(),
@@ -726,6 +766,7 @@ impl Model {
 }
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::path::PathBuf;
 

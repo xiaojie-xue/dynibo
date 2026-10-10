@@ -78,10 +78,21 @@ fn floating_calculations_do_not_allocate_after_robot_creation() {
     let mut matrix = [0.0; 64];
     let mut output = [0.0; 8];
     let mut forward_output = [0.0; 8];
+    let mut poses = vec![Frame::identity(); robot.link_count()];
+    let mut loads = robot.load_buffer();
+    let wrench = dynibo::Wrench::zeros();
 
     reset_allocation_count();
     set_counting(true);
     for _ in 0..10 {
+        loads.set(target, wrench).unwrap();
+        loads.add(target, wrench).unwrap();
+        robot.forward_kinematics_all(&base, &q, &mut poses).unwrap();
+        robot
+            .gravity(&base, &q, loads.as_slice(), &mut output)
+            .unwrap();
+        loads.remove(target).unwrap();
+        loads.clear();
         black_box(robot.forward_kinematics(&base, &q, target).unwrap());
         robot.jacobian(&base, &q, target, &mut jacobian).unwrap();
         robot
@@ -118,6 +129,27 @@ fn floating_calculations_do_not_allocate_after_robot_creation() {
 static ALLOCATOR: CountingAllocator = CountingAllocator;
 
 #[test]
+fn shared_model_handles_and_metadata_do_not_allocate() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_arm.urdf");
+    let model = dynibo::RobotModel::from_urdf(path).unwrap();
+    let fixed = model.robot();
+    let floating = model.floating_robot().unwrap();
+    reset_allocation_count();
+    set_counting(true);
+    for _ in 0..10 {
+        let shared = black_box(model.clone());
+        black_box(fixed.model());
+        black_box(floating.model());
+        shared.validate_floating_base().unwrap();
+        black_box(shared.name());
+        black_box(shared.joint_name(0).unwrap());
+        black_box(shared.link_mass(shared.root_link_id()).unwrap());
+    }
+    set_counting(false);
+    assert_eq!(allocation_count(), 0);
+}
+
+#[test]
 fn dynamic_calculations_do_not_allocate_after_robot_creation() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_arm.urdf");
     let mut robot = Robot::from_urdf(path).unwrap();
@@ -132,6 +164,9 @@ fn dynamic_calculations_do_not_allocate_after_robot_creation() {
     let mut velocity_product = [0.0; 4];
     let mut output = [0.0; 4];
     let mut forward_output = [0.0; 4];
+    let mut poses = vec![Frame::identity(); robot.link_count()];
+    let mut loads = robot.load_buffer();
+    let wrench = dynibo::Wrench::zeros();
     let desired = robot.forward_kinematics(&q, target_id).unwrap();
 
     robot.jacobian(&q, target_id, &mut jacobian).unwrap();
@@ -148,6 +183,12 @@ fn dynamic_calculations_do_not_allocate_after_robot_creation() {
     reset_allocation_count();
     set_counting(true);
     for _ in 0..10 {
+        loads.set(target_id, wrench).unwrap();
+        loads.add(target_id, wrench).unwrap();
+        robot.forward_kinematics_all(&q, &mut poses).unwrap();
+        robot.gravity(&q, loads.as_slice(), &mut output).unwrap();
+        loads.remove(target_id).unwrap();
+        loads.clear();
         black_box(robot.forward_kinematics(&q, target_id).unwrap());
         robot.jacobian(&q, target_id, &mut jacobian).unwrap();
         robot.mass_matrix(&q, &mut mass).unwrap();

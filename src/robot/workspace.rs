@@ -4,37 +4,25 @@ use crate::{Frame, Twist, Wrench};
 
 use super::Model;
 
-/// An opaque, model-scoped identifier for a link.
-///
-/// A `LinkId` is valid for the robot model from which it was obtained, including
-/// instances created with [`crate::Robot::fork`]. It is a process-local handle
-/// and is not intended for persistence or serialization.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct LinkId {
-    pub(super) model_id: u64,
-    pub(super) index: usize,
-}
-
-impl LinkId {
-    pub(super) const fn new(model_id: u64, index: usize) -> Self {
-        Self { model_id, index }
-    }
-}
-
-/// A resisting wrench associated with a model-scoped link identifier.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct IndexedLoad {
-    /// Link at whose origin the wrench is applied.
-    pub link: LinkId,
-    /// Resisting wrench expressed in the selected link's coordinate frame.
-    pub wrench: Wrench,
-}
-
 /// Instance-local reusable storage for runtime-sized calculations.
+///
+/// Per-body arrays use model joint indices: slot `j` belongs to child link
+/// `j + 1`, includes fixed joints, and excludes the separately handled root.
+/// Joint vectors and Jacobian columns use DOF indices instead.
+///
+/// Contents are scratch, not cached results. Each algorithm initializes every
+/// entry it reads, including after a failed call. Path-based kernels only write
+/// their ancestor path; other entries must not be consumed. Algorithm-specific
+/// borrows name the coordinate convention without allocating another buffer.
 #[derive(Debug)]
 pub(super) struct Workspace {
+    /// Shared by parent-from-child transforms (dynamics), root-from-link poses
+    /// (FK, IK, J-dot), and world-oriented poses relative to the root origin
+    /// (direct Jacobian). Each consumer rebuilds the entries it needs.
     pub(super) frames: Vec<Frame>,
     pub(super) angular_velocities: Vec<Vector3<f64>>,
+    /// Link-local angular acceleration in inverse dynamics; reused as
+    /// link-local gravity by `GravityScratch::gravity_at_link`.
     pub(super) angular_accelerations: Vec<Vector3<f64>>,
     pub(super) origin_accelerations: Vec<Vector3<f64>>,
     pub(super) link_accelerations: Vec<Vector3<f64>>,
@@ -54,6 +42,7 @@ pub(super) struct Workspace {
     pub(super) jacobian: Vec<f64>,
     pub(super) jacobian_derivative: Vec<f64>,
     pub(super) q_work: Vec<f64>,
+    /// IK joint step, or freshly zeroed joint accelerations for velocity products.
     pub(super) step: Vec<f64>,
     pub(super) ancestor_path: Vec<usize>,
 }

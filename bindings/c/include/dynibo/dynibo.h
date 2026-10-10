@@ -122,6 +122,10 @@ DYNIBO_API void dynibo_floating_workspace_destroy(DyniboFloatingWorkspace *works
  */
 /**@{*/
 DYNIBO_API DyniboStatus dynibo_forward_kinematics(const DyniboRobot *robot, DyniboWorkspace *workspace, const double *q, size_t q_len, size_t target, DyniboPose *output);
+/** Writes exactly link_count poses in link-ID order, including the root; no allocation. */
+DYNIBO_API DyniboStatus dynibo_forward_kinematics_all(const DyniboRobot *robot, DyniboWorkspace *workspace, const double *q, size_t q_len, DyniboPose *output, size_t output_len);
+/** Floating-base variant of dynibo_forward_kinematics_all; output_len is a pose count. */
+DYNIBO_API DyniboStatus dynibo_floating_forward_kinematics_all(const DyniboFloatingRobot *robot, DyniboFloatingWorkspace *workspace, const DyniboBaseState *base, const double *q, size_t q_len, DyniboPose *output, size_t output_len);
 DYNIBO_API DyniboStatus dynibo_forward_velocity_kinematics(const DyniboRobot *robot, DyniboWorkspace *workspace, const double *q, const double *qd, size_t state_len, size_t target, const DyniboPose *tool, DyniboTwist *output);
 DYNIBO_API DyniboStatus dynibo_forward_acceleration_kinematics(const DyniboRobot *robot, DyniboWorkspace *workspace, const double *q, const double *qd, const double *qdd, size_t state_len, size_t target, DyniboTwist *output);
 /** Writes a world-frame, target-origin, column-major `6 x G` Jacobian. */

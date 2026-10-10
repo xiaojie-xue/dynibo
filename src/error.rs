@@ -29,6 +29,11 @@ pub enum Error {
         /// Name of the rejected input.
         input: &'static str,
     },
+    /// Finite inputs produced an unrepresentable or inaccurate numerical result.
+    NumericalFailure {
+        /// Calculation that failed.
+        operation: &'static str,
+    },
     /// A joint axis is too small to normalize.
     InvalidJointAxis {
         /// Name of the joint with the invalid axis.
@@ -74,7 +79,7 @@ pub enum Error {
     },
     /// A converged inverse-kinematics solution violates a joint limit.
     IkJointLimitViolation {
-        /// Zero-based index of the joint.
+        /// Zero-based active degree-of-freedom index, matching the joint vector.
         joint_index: usize,
         /// Name of the joint.
         joint: String,
@@ -101,6 +106,8 @@ pub enum Error {
     },
     /// The floating base's articulated inertia cannot be inverted by forward dynamics.
     ForwardDynamicsSingularBaseInertia,
+    /// The scaled floating-base inertia is too ill-conditioned for a reliable solve.
+    ForwardDynamicsIllConditionedBaseInertia,
 }
 
 /// Stable, coarse classification of errors for language bindings and callers.
@@ -132,10 +139,12 @@ impl Error {
             | Self::InvalidIkOptions { .. }
             | Self::NonFiniteIkInput { .. } => ErrorCategory::InvalidInput,
             Self::IkNumericalFailure { .. }
+            | Self::NumericalFailure { .. }
             | Self::IkJointLimitViolation { .. }
             | Self::IkNotConverged { .. }
             | Self::ForwardDynamicsSingularJointInertia { .. }
-            | Self::ForwardDynamicsSingularBaseInertia => ErrorCategory::Solver,
+            | Self::ForwardDynamicsSingularBaseInertia
+            | Self::ForwardDynamicsIllConditionedBaseInertia => ErrorCategory::Solver,
         }
     }
 }
@@ -157,6 +166,7 @@ impl fmt::Display for Error {
             Self::NonFiniteInput { input } => {
                 write!(f, "{input} contains a non-finite value")
             }
+            Self::NumericalFailure { operation } => write!(f, "numerical failure in {operation}"),
             Self::InvalidJointAxis { joint } => write!(f, "joint {joint} has an invalid axis"),
             Self::UnknownLink { name } => write!(f, "link {name} does not exist in the model"),
             Self::InvalidJointIndex { index } => {
@@ -207,6 +217,10 @@ impl fmt::Display for Error {
                 f,
                 "forward dynamics found singular floating-base articulated inertia"
             ),
+            Self::ForwardDynamicsIllConditionedBaseInertia => write!(
+                f,
+                "forward dynamics found ill-conditioned scaled floating-base articulated inertia"
+            ),
         }
     }
 }
@@ -232,12 +246,21 @@ impl From<urdf_rs::UrdfError> for Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::{Error, ErrorCategory};
 
     #[test]
     fn display_describes_each_library_error_and_has_no_source() {
         let cases = [
+            (
+                Error::NumericalFailure { operation: "load aggregation" },
+                "numerical failure in load aggregation".to_owned(),
+            ),
+            (
+                Error::ForwardDynamicsIllConditionedBaseInertia,
+                "forward dynamics found ill-conditioned scaled floating-base articulated inertia".to_owned(),
+            ),
             (
                 Error::InvalidModel("broken tree".to_owned()),
                 "invalid robot model: broken tree".to_owned(),

@@ -51,18 +51,18 @@ Dynibo 基于 Rust 实现，并复用每个机器人的内部存储。创建 `Ro
   <tbody>
     <tr>
       <td>Jacobian</td>
-      <td align="right">1.59×</td><td align="right">1.80×</td>
-      <td align="right">1.28×</td><td align="right">1.38×</td>
+      <td align="right">1.61×</td><td align="right">1.78×</td>
+      <td align="right">1.26×</td><td align="right">1.40×</td>
     </tr>
     <tr>
       <td>RNEA</td>
-      <td align="right">1.74×</td><td align="right">1.81×</td>
-      <td align="right">1.17×</td><td align="right">1.54×</td>
+      <td align="right">1.72×</td><td align="right">1.80×</td>
+      <td align="right">1.19×</td><td align="right">1.56×</td>
     </tr>
     <tr>
       <td>ABA</td>
-      <td align="right">1.20×</td><td align="right">1.14×</td>
-      <td align="right">1.81×</td><td align="right">1.89×</td>
+      <td align="right">1.14×</td><td align="right">1.17×</td>
+      <td align="right">1.76×</td><td align="right">1.94×</td>
     </tr>
   </tbody>
 </table>

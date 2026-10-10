@@ -9,6 +9,14 @@ acceleration. All target IDs are model-scoped values returned by `link_id`.
 joints on the root-to-target path affect the pose; branches outside that path
 do not.
 
+`forward_kinematics_all` computes every link pose in one tree traversal, including
+the root, in link enumeration order. Rust writes to `&mut [Frame]`; C writes to
+an array of `DyniboPose` with `output_len == link_count`. C++ offers both a returned
+vector and `forward_kinematics_all_into(q, output)` for a preallocated vector.
+Python returns a flat float64 array of `7 * link_count` elements and accepts
+`out=`; reshape it to `(link_count, 7)` for rows `[x, y, z, qx, qy, qz, qw]`.
+Floating variants take `base` before `q`.
+
 ## Jacobian and its derivative
 
 The geometric Jacobian maps generalized velocity to an angular-first target

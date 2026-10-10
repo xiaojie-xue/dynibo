@@ -60,6 +60,12 @@ set(DYNIBO_CARGO_LIBRARY
     "${CMAKE_CURRENT_SOURCE_DIR}/target/${DYNIBO_CARGO_TARGET_DIR}/${DYNIBO_LIBRARY_FILE}")
 set(DYNIBO_BUILT_LIBRARY "${CMAKE_CURRENT_BINARY_DIR}/${DYNIBO_LIBRARY_FILE}")
 
+# Track Rust implementation modules as well as the crate entry points. Adding or
+# editing a split module must rebuild the native library on incremental builds.
+file(GLOB_RECURSE DYNIBO_RUST_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.rs"
+    "${CMAKE_CURRENT_SOURCE_DIR}/bindings/c/src/*.rs")
+
 add_custom_command(
     OUTPUT "${DYNIBO_BUILT_LIBRARY}"
     COMMAND "${CARGO_EXECUTABLE}" build -p dynibo-c ${DYNIBO_CARGO_PROFILE_FLAG}
@@ -68,12 +74,9 @@ add_custom_command(
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     DEPENDS
         Cargo.toml Cargo.lock
-        bindings/c/Cargo.toml bindings/c/src/lib.rs
+        bindings/c/Cargo.toml ${DYNIBO_RUST_SOURCES}
         bindings/c/include/dynibo/dynibo.h bindings/c/include/dynibo/dynibo.hpp
         bindings/c/include/dynibo/version.h.in
-        src/lib.rs src/error.rs src/model.rs
-        src/model/joint.rs src/model/link.rs src/model/tree.rs
-        src/robot.rs src/robot/workspace.rs src/spatial.rs
     COMMENT "Building dynibo C ABI with Cargo"
     VERBATIM)
 

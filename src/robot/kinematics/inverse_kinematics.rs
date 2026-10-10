@@ -32,7 +32,7 @@ impl Default for InverseKinematicsOptions {
 }
 
 struct IkScratch<'a> {
-    frames: &'a mut [Frame],
+    root_from_link: &'a mut [Frame],
     jacobian: &'a mut [f64],
     q_work: &'a mut [f64],
     step: &'a mut [f64],
@@ -104,7 +104,7 @@ impl Model {
             &local_desired,
             options,
             IkScratch {
-                frames: &mut workspace.frames,
+                root_from_link: &mut workspace.frames,
                 jacobian: &mut workspace.jacobian,
                 q_work: &mut workspace.q_work,
                 step: &mut workspace.step,
@@ -124,7 +124,7 @@ impl Model {
         scratch: IkScratch<'_>,
     ) -> Result<()> {
         let IkScratch {
-            frames,
+            root_from_link,
             jacobian,
             q_work,
             step,
@@ -151,8 +151,9 @@ impl Model {
         jacobian.fill(0.0);
         let damping_squared = options.damping * options.damping;
         for iteration in 0..=options.max_iterations {
-            self.target_frames_kernel(q_work, path, frames)?;
-            let current = self.jacobian_kernel(frames, target_index, path, jacobian, false)?;
+            self.target_frames_kernel(q_work, path, root_from_link)?;
+            let current =
+                self.jacobian_kernel(root_from_link, target_index, path, jacobian, false)?;
             let translation_error = desired.translation.vector - current.translation.vector;
             let rotation_error = (desired.rotation * current.rotation.inverse()).scaled_axis();
             let translation_error_norm = translation_error.norm();
@@ -229,11 +230,13 @@ impl Model {
     }
 
     fn validate_inverse_kinematics_solution(&self, q: &[f64]) -> Result<()> {
-        for (&joint_index, &position) in self.active_joint_indices.iter().zip(q) {
+        for (dof_index, (&joint_index, &position)) in
+            self.active_joint_indices.iter().zip(q).enumerate()
+        {
             let joint = &self.joints[joint_index];
             if joint.is_over_limit(position) {
                 return Err(Error::IkJointLimitViolation {
-                    joint_index,
+                    joint_index: dof_index,
                     joint: joint.name().to_owned(),
                     position,
                     lower: joint.lower_limit(),

@@ -638,3 +638,167 @@ fn invalid_external_load_ids_are_rejected_and_do_not_poison_the_workspace() {
         assert!(floating_output.iter().all(|value| value.is_finite()));
     }
 }
+
+fn last_error() -> String {
+    unsafe { std::ffi::CStr::from_ptr(dynibo_last_error_message()) }
+        .to_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn factory_diagnostics_version_and_null_destruction_follow_the_c_contract() {
+    unsafe {
+        assert_eq!(
+            std::ffi::CStr::from_ptr(dynibo_version()).to_str().unwrap(),
+            env!("CARGO_PKG_VERSION")
+        );
+        dynibo_robot_destroy(ptr::null_mut());
+        dynibo_workspace_destroy(ptr::null_mut());
+        dynibo_floating_robot_destroy(ptr::null_mut());
+        dynibo_floating_workspace_destroy(ptr::null_mut());
+        let mut robot = ptr::null_mut();
+        assert_eq!(
+            dynibo_floating_robot_from_urdf(ptr::null(), &mut robot),
+            DyniboStatus::InvalidArgument
+        );
+        assert!(robot.is_null());
+        assert_eq!(last_error(), "path must not be null");
+        // An existing non-URDF file exercises model parsing without a temporary fixture.
+        let invalid_path =
+            CString::new(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap();
+        assert_eq!(
+            dynibo_floating_robot_from_urdf(invalid_path.as_ptr(), &mut robot),
+            DyniboStatus::ModelError
+        );
+        assert!(robot.is_null());
+        assert!(!last_error().is_empty());
+        let handles = Handles::new();
+        assert!(last_error().is_empty());
+        assert!(dynibo_floating_robot_link_count(handles.floating) > 0);
+    }
+}
+
+#[test]
+fn floating_workspace_from_another_model_is_rejected_without_writing_output() {
+    let handles = Handles::new();
+    let other = Handles::new();
+    let q = [0.0; 4];
+    let base = DyniboBaseState::default();
+    let mut output = [123.0; 100];
+    unsafe {
+        assert_eq!(
+            dynibo_floating_mass_matrix(
+                handles.floating,
+                other.floating_workspace,
+                &base,
+                q.as_ptr(),
+                q.len(),
+                output.as_mut_ptr(),
+                output.len()
+            ),
+            DyniboStatus::InvalidArgument
+        );
+        assert_eq!(output, [123.0; 100]);
+        assert_eq!(
+            last_error(),
+            "workspace does not belong to this robot model"
+        );
+        assert_eq!(
+            dynibo_floating_mass_matrix(
+                handles.floating,
+                handles.floating_workspace,
+                &base,
+                q.as_ptr(),
+                q.len(),
+                output.as_mut_ptr(),
+                output.len()
+            ),
+            DyniboStatus::Ok
+        );
+        assert!(last_error().is_empty());
+        let mut expected = [0.0; 100];
+        assert_eq!(
+            dynibo_floating_mass_matrix(
+                other.floating,
+                other.floating_workspace,
+                &base,
+                q.as_ptr(),
+                q.len(),
+                expected.as_mut_ptr(),
+                expected.len()
+            ),
+            DyniboStatus::Ok
+        );
+        assert_eq!(output, expected);
+    }
+}
+
+#[test]
+fn invalid_c_poses_preserve_the_base_frame_and_allow_recovery() {
+    let handles = Handles::new();
+    let q = [0.0; 4];
+    let mut expected = DyniboPose::default();
+    unsafe {
+        let original = DyniboPose {
+            translation: [0.3, -0.2, 0.5],
+            ..Default::default()
+        };
+        assert_eq!(
+            dynibo_robot_set_base_frame(handles.fixed, &original),
+            DyniboStatus::Ok
+        );
+        assert_eq!(
+            dynibo_forward_kinematics(
+                handles.fixed,
+                handles.fixed_workspace,
+                q.as_ptr(),
+                q.len(),
+                handles.target,
+                &mut expected
+            ),
+            DyniboStatus::Ok
+        );
+        let mut invalid = vec![DyniboPose {
+            rotation_xyzw: [0.0; 4],
+            ..Default::default()
+        }];
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for index in 0..3 {
+                let mut pose = DyniboPose::default();
+                pose.translation[index] = value;
+                invalid.push(pose);
+            }
+            for index in 0..4 {
+                let mut pose = DyniboPose::default();
+                pose.rotation_xyzw[index] = value;
+                invalid.push(pose);
+            }
+        }
+        for pose in invalid {
+            assert_eq!(
+                dynibo_robot_set_base_frame(handles.fixed, &pose),
+                DyniboStatus::InvalidArgument
+            );
+            assert_eq!(
+                last_error(),
+                "pose contains non-finite values or a zero quaternion"
+            );
+            let mut actual = DyniboPose::default();
+            assert_eq!(
+                dynibo_forward_kinematics(
+                    handles.fixed,
+                    handles.fixed_workspace,
+                    q.as_ptr(),
+                    q.len(),
+                    handles.target,
+                    &mut actual
+                ),
+                DyniboStatus::Ok
+            );
+            assert!(last_error().is_empty());
+            assert_eq!(actual.translation, expected.translation);
+            assert_eq!(actual.rotation_xyzw, expected.rotation_xyzw);
+        }
+    }
+}

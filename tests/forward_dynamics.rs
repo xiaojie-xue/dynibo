@@ -1,5 +1,42 @@
 mod support;
 
+#[test]
+fn small_floating_inertia_supports_free_fall_and_prescribed_acceleration() {
+    let mut robot = FloatingRobot::from_urdf(fixture_path("small_floating_base.urdf")).unwrap();
+    let frame = Frame::from_parts(
+        Translation3::new(0.2, -0.1, 0.3),
+        UnitQuaternion::from_euler_angles(0.2, -0.4, 0.3),
+    );
+    let base = BaseState::stationary(frame).unwrap();
+    let mut output = [0.0; 6];
+    robot
+        .forward_dynamics(&base, &[], &[], &[0.0; 6], &[], &mut output)
+        .unwrap();
+    let expected = [0.0, 0.0, 0.0, 0.0, 0.0, -9.80665];
+    assert_slice_close(
+        &output,
+        &expected,
+        Tolerance::new(1e-12, 1e-12),
+        &TestContext::new("small-inertia-free-fall", "small_floating_base"),
+    );
+    let acceleration = Twist::new(Vector3::new(0.2, -0.3, 0.4), Vector3::new(-0.5, 0.6, -0.7));
+    let velocity = Twist::new(Vector3::new(0.1, 0.2, -0.3), Vector3::new(0.4, -0.2, 0.1));
+    let base = BaseState::new(frame, velocity, acceleration).unwrap();
+    let mut forces = [0.0; 6];
+    robot
+        .inverse_dynamics(&base, &[], &[], &[], &[], &mut forces)
+        .unwrap();
+    robot
+        .forward_dynamics(&base, &[], &[], &forces, &[], &mut output)
+        .unwrap();
+    assert_slice_close(
+        &output,
+        acceleration.to_vector().as_slice(),
+        Tolerance::new(1e-12, 1e-12),
+        &TestContext::new("small-inertia-rnea-aba", "small_floating_base"),
+    );
+}
+
 use support::context::TestRootType as RootType;
 
 use dynibo::{BaseState, Error, FloatingRobot, Frame, IndexedLoad, Robot, Twist, Wrench};
@@ -185,4 +222,27 @@ fn forward_dynamics_reports_singular_joint_and_floating_base_inertia() {
         matches!(result, Err(Error::ForwardDynamicsSingularBaseInertia)),
         "unexpected result: {result:?}, output: {base_output:?}"
     );
+}
+
+#[test]
+fn fixed_root_mount_does_not_add_mass_to_the_slider_dof() {
+    let mut robot = Robot::from_urdf(fixture_path("fixed_mount_slider.urdf")).unwrap();
+    assert_eq!(robot.joint_count(), 1);
+    let mut mass = [0.0];
+    robot.mass_matrix(&[0.3], &mut mass).unwrap();
+    approx::assert_relative_eq!(mass[0], 2.0, epsilon = 1e-12);
+    for acceleration in [-1.2, 0.0, 0.7] {
+        // Only the 2 kg slider moves; the 3 kg mount is supported by the fixed root.
+        let force = 2.0 * (acceleration + 9.80665);
+        let mut actual = [0.0];
+        robot
+            .forward_dynamics(&[0.3], &[0.4], &[force], &[], &mut actual)
+            .unwrap();
+        approx::assert_relative_eq!(actual[0], acceleration, epsilon = 1e-12);
+        let mut recovered_force = [0.0];
+        robot
+            .inverse_dynamics(&[0.3], &[0.4], &[acceleration], &[], &mut recovered_force)
+            .unwrap();
+        approx::assert_relative_eq!(recovered_force[0], force, epsilon = 1e-12);
+    }
 }

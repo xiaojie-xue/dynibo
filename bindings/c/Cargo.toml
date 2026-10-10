@@ -14,3 +14,6 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 [dependencies]
 dynibo = { path = "../.." }
 nalgebra = "0.34.1"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
