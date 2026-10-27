@@ -8,6 +8,64 @@ from .support import URDF, reference, motion_base
 
 
 class BindingContractTests(unittest.TestCase):
+    def test_array_copy_failures_preserve_outputs_and_allow_recovery(self) -> None:
+        class StridedCopy(np.ndarray):
+            def __array_finalize__(self, source):
+                if getattr(source, "strided_copy", False):
+                    self.strides = (0,)
+
+        q, qd, qdd = (np.asarray(reference(key)) for key in ("q", "qd", "qdd"))
+        for robot_type in (dynibo.Robot, dynibo.FloatingRobot):
+            with robot_type(URDF) as robot:
+                prefix = (motion_base(),) if robot_type is dynibo.FloatingRobot else ()
+                target = robot.link_id("test_link_4")
+                forces = robot.inverse_dynamics(*prefix, q, qd, qdd)
+                calls = {
+                    "forward_kinematics_all": (q,),
+                    "forward_kinematics": (q, target),
+                    "forward_velocity_kinematics": (q, qd, target),
+                    "forward_acceleration_kinematics": (q, qd, qdd, target),
+                    "jacobian": (q, target),
+                    "jacobian_derivative": (q, qd, target),
+                    "mass_matrix": (q,),
+                    "gravity": (q,),
+                    "velocity_product_forces": (q, qd),
+                    "inverse_dynamics": (q, qd, qdd),
+                    "forward_dynamics": (q, qd, forces),
+                }
+                if robot_type is dynibo.Robot:
+                    calls["inverse_kinematics"] = (
+                        q, target, robot.forward_kinematics(q, target),
+                    )
+                for name, args in calls.items():
+                    method = getattr(robot, name)
+                    expected = method(*prefix, *args)
+                    for index, value in enumerate(args):
+                        if not isinstance(value, np.ndarray):
+                            continue
+                        with self.subTest(
+                            robot=robot_type.__name__, operation=name, argument=index,
+                        ):
+                            invalid = np.repeat(value, 2)[::2].view(StridedCopy)
+                            invalid.strided_copy = True
+                            adapted = args[:index] + (invalid,) + args[index + 1:]
+                            kwargs = {}
+                            if isinstance(expected, np.ndarray):
+                                out = np.full_like(expected, 123.0)
+                                kwargs["out"] = out
+                            with self.assertRaisesRegex(ValueError, "not contiguous"):
+                                method(*prefix, *adapted, **kwargs)
+                            if kwargs:
+                                np.testing.assert_array_equal(out, 123.0)
+                            recovered = method(*prefix, *args, **kwargs)
+                            if kwargs:
+                                self.assertIs(recovered, out)
+                                np.testing.assert_allclose(
+                                    recovered, expected, atol=1.0e-11, rtol=1.0e-10,
+                                )
+                            else:
+                                self.assertEqual(recovered, expected)
+
     def test_byte_strides_and_unaligned_inputs_match_contiguous_copies(self) -> None:
         def layouts(values):
             for name, stride, offset in (
