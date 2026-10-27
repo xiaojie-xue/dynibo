@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | 无效参数、handle 或长度 | `InvalidInput` 类别的 `Error` | `ValueError` | `dynibo::Error` | `DYNIBO_STATUS_INVALID_ARGUMENT` |
 | URDF/模型失败 | `Model` 类别的 `Error` | `ModelError` | `dynibo::Error` | `DYNIBO_STATUS_MODEL_ERROR` |
-| IK 数值失败或不收敛 | `Solver` 类别的 `Error` | `SolverError` | `dynibo::Error` | `DYNIBO_STATUS_SOLVER_ERROR` |
+| 数值失败或 IK 不收敛 | `Solver` 类别的 `Error` | `SolverError` | `dynibo::Error` | `DYNIBO_STATUS_SOLVER_ERROR` |
 | ABI 边界捕获 panic | 原生 Rust 调用不适用 | `PanicError` | `dynibo::Error` | `DYNIBO_STATUS_PANIC` |
 
 不要根据供人阅读的错误文本进行程序分支。Rust 提供 `ErrorCategory`，C 提供稳定状态值，
@@ -36,7 +36,7 @@ Python 提供异常类型，C++ 的 `Error::status()` 会保留 C 状态。
 ## 错误恢复
 
 关节状态、广义力、外载荷和 tool 位姿必须包含有限值。输入校验失败时，调用方提供的
-计算输出 buffer 保持不变。有限载荷累加溢出属于求解错误；求解错误后的输出不保证有效，
+计算输出 buffer 保持不变。有限载荷累加溢出或有限输入产生非有限计算结果属于求解错误；求解错误后的输出不保证有效，
 只有成功返回后才能使用计算输出。
 
 参数错误和求解器错误不会使 robot 或 workspace 失效，修正输入后可以再次调用。ABI

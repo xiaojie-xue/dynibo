@@ -1,5 +1,7 @@
 use nalgebra::{Matrix3, Vector3};
 
+use crate::{Error, Result};
+
 /// Identity and immutable inertial properties of one URDF link.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Link {
@@ -23,14 +25,36 @@ impl Link {
         mass: f64,
         center_of_mass: Vector3<f64>,
         inertia: Matrix3<f64>,
-    ) -> Self {
+    ) -> Result<Self> {
+        let name = name.into();
         let first_moment = mass * center_of_mass;
+        // Weight before squaring so small masses can offset large distances.
+        let weighted_center = mass.sqrt() * center_of_mass;
+        let (x, y, z) = (weighted_center.x, weighted_center.y, weighted_center.z);
         let origin_inertia = inertia
-            + mass
-                * (center_of_mass.norm_squared() * Matrix3::identity()
-                    - center_of_mass * center_of_mass.transpose());
-        Self {
-            name: name.into(),
+            + Matrix3::new(
+                y * y + z * z,
+                -x * y,
+                -x * z,
+                -x * y,
+                x * x + z * z,
+                -y * z,
+                -x * z,
+                -y * z,
+                x * x + y * y,
+            );
+        if !inertia
+            .iter()
+            .chain(first_moment.iter())
+            .chain(origin_inertia.iter())
+            .all(|value| value.is_finite())
+        {
+            return Err(Error::InvalidModel(format!(
+                "link {name} derived inertial properties must be finite"
+            )));
+        }
+        Ok(Self {
+            name,
             dynamics: LinkDynamics {
                 mass,
                 center_of_mass,
@@ -38,7 +62,7 @@ impl Link {
                 first_moment,
                 origin_inertia,
             },
-        }
+        })
     }
 
     /// Returns the link name loaded from the URDF.
@@ -79,7 +103,7 @@ mod tests {
         let mass = 2.5;
         let center = Vector3::new(0.3, -0.2, 0.4);
         let inertia = Matrix3::new(1.2, 0.1, -0.2, 0.1, 1.5, 0.05, -0.2, 0.05, 1.8);
-        let link = Link::new("body", mass, center, inertia);
+        let link = Link::new("body", mass, center, inertia).unwrap();
         let dynamics = link.dynamics();
 
         let expected_first_moment = mass * center;

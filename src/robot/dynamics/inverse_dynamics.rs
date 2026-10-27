@@ -34,7 +34,7 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error for an invalid input or output length.
+    /// Returns an error for invalid input, an invalid output length, or a non-finite numerical result.
     pub fn velocity_product_forces(
         &mut self,
         q: &[f64],
@@ -54,7 +54,7 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error for an invalid input/output length or load link ID.
+    /// Returns an error for invalid input, an invalid output length or load link ID, or a non-finite result.
     #[allow(clippy::too_many_arguments)]
     pub fn inverse_dynamics(
         &mut self,
@@ -79,7 +79,7 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error for an invalid input/output length or load link ID.
+    /// Returns an error for invalid input, an invalid output length or load link ID, or a non-finite result.
     pub fn gravity(&mut self, q: &[f64], loads: &[IndexedLoad], output: &mut [f64]) -> Result<()> {
         self.model
             .fixed_gravity(&self.world_from_root, q, loads, &mut self.workspace, output)
@@ -182,7 +182,7 @@ impl Model {
             },
             output,
         )?;
-        Ok(())
+        Self::validate_numerical_result("velocity product forces", output.iter())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -265,7 +265,7 @@ impl Model {
         if joint_offset != 0 {
             write_world_wrench(base.frame(), base_load, &mut output[..FLOATING_BASE_DOF]);
         }
-        Ok(())
+        Self::validate_numerical_result("velocity product forces", output.iter())
     }
 
     /// Writes runtime-sized Newton-Euler generalized forces into caller-owned output.
@@ -380,7 +380,7 @@ impl Model {
         if joint_offset != 0 {
             write_world_wrench(base_frame, base_load, &mut output[..FLOATING_BASE_DOF]);
         }
-        Ok(())
+        Self::validate_numerical_result("inverse dynamics", output.iter())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -416,7 +416,7 @@ impl Model {
             },
             output,
         )?;
-        Ok(())
+        Self::validate_numerical_result("inverse dynamics", output.iter())
     }
 
     fn gravity_for_base(
@@ -445,7 +445,7 @@ impl Model {
         if joint_offset != 0 {
             write_world_wrench(base_frame, base_load, &mut output[..FLOATING_BASE_DOF]);
         }
-        Ok(())
+        Self::validate_numerical_result("gravity", output.iter())
     }
 
     fn fixed_gravity_for_base(
@@ -469,7 +469,7 @@ impl Model {
             },
             output,
         )?;
-        Ok(())
+        Self::validate_numerical_result("gravity", output.iter())
     }
 
     // Callers must validate user q/qd/qdd before entering this kernel. The

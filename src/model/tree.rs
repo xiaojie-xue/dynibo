@@ -235,8 +235,17 @@ fn robot_link(link: &urdf_rs::Link) -> Result<Link> {
             link.name
         )));
     }
-    let principal_moments = inertia_in_inertial_frame.symmetric_eigenvalues();
-    if principal_moments.iter().any(|value| *value < 0.0) {
+    let inertia_scale = inertia_in_inertial_frame.amax();
+    let scaled_inertia = if inertia_scale == 0.0 {
+        Matrix3::zeros()
+    } else {
+        inertia_in_inertial_frame / inertia_scale
+    };
+    let principal_moments = scaled_inertia.symmetric_eigenvalues();
+    if principal_moments
+        .iter()
+        .any(|value| !value.is_finite() || *value < -64.0 * f64::EPSILON)
+    {
         return Err(Error::InvalidModel(format!(
             "link {} inertia must be positive semi-definite",
             link.name
@@ -248,10 +257,10 @@ fn robot_link(link: &urdf_rs::Link) -> Result<Link> {
         inertial.origin.rpy[2],
     )
     .to_rotation_matrix();
-    let inertia = inertial_rotation.matrix()
-        * inertia_in_inertial_frame
-        * inertial_rotation.matrix().transpose();
-    Ok(Link::new(
+    let inertia =
+        (inertial_rotation.matrix() * scaled_inertia * inertial_rotation.matrix().transpose())
+            * inertia_scale;
+    Link::new(
         link.name.clone(),
         inertial.mass.value,
         Vector3::new(
@@ -260,7 +269,7 @@ fn robot_link(link: &urdf_rs::Link) -> Result<Link> {
             inertial.origin.xyz[2],
         ),
         inertia,
-    ))
+    )
 }
 
 #[cfg(test)]
@@ -461,6 +470,84 @@ mod tests {
         let mut robot = chain();
         robot.links[1].inertial.inertia.ixx = -1.0;
         invalid_model(&robot, "inertia must be positive semi-definite");
+    }
+
+    #[test]
+    fn accepts_rank_deficient_inertia_across_scales() {
+        for scale in [1.0e-300, 1.0, 1.0e300] {
+            let mut robot = chain();
+            let inertia = &mut robot.links[1].inertial.inertia;
+            inertia.ixx = 2.0 * scale;
+            inertia.iyy = 2.0 * scale;
+            inertia.izz = 2.0 * scale;
+            inertia.ixy = -scale;
+            inertia.ixz = -scale;
+            inertia.iyz = -scale;
+            let tree = convert_urdf(&robot).expect("eigenvalues are exactly [0, 3, 3] times scale");
+            assert!(
+                tree.links[1]
+                    .inertia()
+                    .iter()
+                    .all(|value| value.is_finite())
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_indefinite_inertia_across_scales() {
+        for scale in [1.0e-300, 1.0, 1.0e300] {
+            let mut robot = chain();
+            let inertia = &mut robot.links[1].inertial.inertia;
+            inertia.ixx = scale;
+            inertia.iyy = scale;
+            inertia.izz = -1.0e-6 * scale;
+            invalid_model(&robot, "inertia must be positive semi-definite");
+        }
+    }
+
+    #[test]
+    fn rejects_unrepresentable_derived_link_inertia() {
+        for (mass, center) in [(1.0, 1.0e200), (1.0e308, 10.0)] {
+            let mut robot = chain();
+            robot.links[1].inertial.mass.value = mass;
+            robot.links[1].inertial.origin.xyz[0] = center;
+            invalid_model(&robot, "derived inertial properties must be finite");
+        }
+
+        let mut robot = chain();
+        let inertial = &mut robot.links[1].inertial;
+        inertial.inertia.ixx = 1.6e308;
+        inertial.inertia.iyy = 1.6e308;
+        inertial.inertia.izz = 1.6e308;
+        inertial.inertia.ixy = -8.0e307;
+        inertial.inertia.ixz = -8.0e307;
+        inertial.inertia.iyz = -8.0e307;
+        inertial.origin.rpy[0] = std::f64::consts::FRAC_PI_4;
+        invalid_model(&robot, "derived inertial properties must be finite");
+    }
+
+    #[test]
+    fn accepts_representable_inertia_at_extreme_mass_and_offset_scales() {
+        for mass in [0.0, 1.0e-300] {
+            let mut robot = chain();
+            robot.links[1].inertial.mass.value = mass;
+            robot.links[1].inertial.origin.xyz[0] = 1.0e200;
+            let tree = convert_urdf(&robot).unwrap();
+            let dynamics = tree.links[1].dynamics();
+            assert!(dynamics.first_moment.iter().all(|value| value.is_finite()));
+            assert!(
+                dynamics
+                    .origin_inertia
+                    .iter()
+                    .all(|value| value.is_finite())
+            );
+            let expected = if mass == 0.0 { 0.0 } else { 1.0e100 };
+            assert_relative_eq!(
+                dynamics.origin_inertia[(1, 1)],
+                expected,
+                max_relative = 1.0e-14
+            );
+        }
     }
 
     #[test]

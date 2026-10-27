@@ -14,7 +14,7 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error for an invalid input or output length.
+    /// Returns an error for invalid input, an invalid output length, or a non-finite numerical result.
     pub fn mass_matrix(&mut self, q: &[f64], output: &mut [f64]) -> Result<()> {
         self.model.fixed_mass_matrix(q, &mut self.workspace, output)
     }
@@ -42,7 +42,7 @@ impl Model {
             self.joint_count() * self.joint_count(),
         )?;
         self.mass_matrix_kernel(q, workspace, output);
-        Ok(())
+        Self::validate_numerical_result("mass matrix", output.iter())
     }
 
     /// Writes the runtime-sized `G x G` mass matrix in column-major order.
@@ -76,7 +76,7 @@ impl Model {
             (self.joint_count() + FLOATING_BASE_DOF) * (self.joint_count() + FLOATING_BASE_DOF),
         )?;
         self.floating_mass_matrix_kernel(base, q, workspace, output);
-        Ok(())
+        Self::validate_numerical_result("mass matrix", output.iter())
     }
 
     #[allow(

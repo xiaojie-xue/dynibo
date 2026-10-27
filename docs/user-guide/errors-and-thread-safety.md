@@ -9,7 +9,7 @@ mechanisms.
 |---|---|---|---|---|
 | Invalid argument, handle, or length | `Error` with `InvalidInput` category | `ValueError` | `dynibo::Error` | `DYNIBO_STATUS_INVALID_ARGUMENT` |
 | URDF/model failure | `Error` with `Model` category | `ModelError` | `dynibo::Error` | `DYNIBO_STATUS_MODEL_ERROR` |
-| IK numerical failure/non-convergence | `Error` with `Solver` category | `SolverError` | `dynibo::Error` | `DYNIBO_STATUS_SOLVER_ERROR` |
+| Numerical failure or IK non-convergence | `Error` with `Solver` category | `SolverError` | `dynibo::Error` | `DYNIBO_STATUS_SOLVER_ERROR` |
 | Panic caught at ABI boundary | Not applicable to native Rust calls | `PanicError` | `dynibo::Error` | `DYNIBO_STATUS_PANIC` |
 
 Do not branch on human-readable error text. Rust exposes `ErrorCategory`, C has
@@ -42,8 +42,9 @@ Copy the string when it must outlive the next call.
 
 Joint state, generalized forces, loads, and tool poses must contain finite
 values. Rejected inputs leave caller-owned calculation output buffers unchanged.
-Overflow while accumulating otherwise finite loads is a solver error. Outputs
-are unspecified after a solver error and must only be consumed after success.
+Overflow while accumulating finite loads or calculating a non-finite result from
+finite inputs is a solver error. Outputs are unspecified after a solver error
+and must only be consumed after success.
 
 Argument and solver errors do not invalidate a robot or workspace. Correct the
 input and call again. A caught ABI panic is reported instead of unwinding across

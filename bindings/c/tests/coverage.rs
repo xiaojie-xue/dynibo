@@ -71,6 +71,56 @@ impl Drop for Handles {
 }
 
 #[test]
+fn finite_overflow_reports_solver_error_and_workspace_recovers() {
+    let handles = Handles::new();
+    let base = DyniboBaseState::default();
+    let q = [0.0; 4];
+    let huge_velocity = [1.0e308; 4];
+    for floating in [false, true] {
+        let count = unsafe {
+            if floating {
+                dynibo_floating_robot_generalized_count(handles.floating)
+            } else {
+                dynibo_robot_generalized_count(handles.fixed)
+            }
+        };
+        let mut output = vec![0.0; count];
+        let calculate = |qd: &[f64], output: &mut [f64]| unsafe {
+            if floating {
+                dynibo_floating_velocity_product_forces(
+                    handles.floating,
+                    handles.floating_workspace,
+                    &base,
+                    q.as_ptr(),
+                    qd.as_ptr(),
+                    q.len(),
+                    output.as_mut_ptr(),
+                    output.len(),
+                )
+            } else {
+                dynibo_velocity_product_forces(
+                    handles.fixed,
+                    handles.fixed_workspace,
+                    q.as_ptr(),
+                    qd.as_ptr(),
+                    q.len(),
+                    output.as_mut_ptr(),
+                    output.len(),
+                )
+            }
+        };
+        assert_eq!(
+            calculate(&huge_velocity, &mut output),
+            DyniboStatus::SolverError
+        );
+        assert!(last_error().contains("numerical"));
+        assert_eq!(calculate(&q, &mut output), DyniboStatus::Ok);
+        assert!(output.iter().all(|value| *value == 0.0));
+        assert!(last_error().is_empty());
+    }
+}
+
+#[test]
 fn metadata_and_factory_error_paths_are_reported() {
     let handles = Handles::new();
     unsafe {
