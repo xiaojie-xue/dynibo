@@ -17,12 +17,17 @@ PROJECT = Path(__file__).resolve().parents[1]
 
 
 def run(command: list[str], **kwargs: object) -> None:
-    print("+", " ".join(command), flush=True)
+    print("+", shlex.join(command), flush=True)
     subprocess.run(command, check=True, timeout=600, **kwargs)
 
 
 def test_pkg_config(prefix: Path, work: Path) -> None:
-    if os.name == "nt" or shutil.which("pkg-config") is None:
+    tools = list(dict.fromkeys(
+        str(Path(executable).resolve())
+        for name in ("pkg-config", "pkgconf")
+        if (executable := shutil.which(name)) is not None
+    ))
+    if os.name == "nt" or not tools:
         print("Skipping pkg-config consumer: requires POSIX and pkg-config", flush=True)
         return
     metadata = list(prefix.rglob("dynibo.pc"))
@@ -32,22 +37,24 @@ def test_pkg_config(prefix: Path, work: Path) -> None:
     environment = os.environ.copy()
     environment["PKG_CONFIG_LIBDIR"] = str(metadata[0].parent)
     environment.pop("PKG_CONFIG_PATH", None)
-    flags = subprocess.check_output(
-        ["pkg-config", "--cflags", "--libs", "dynibo"],
-        env=environment, text=True, timeout=30,
-    )
     library_dir = metadata[0].parent.parent
     loader_path = "DYLD_LIBRARY_PATH" if sys.platform == "darwin" else "LD_LIBRARY_PATH"
     environment[loader_path] = str(library_dir)
-    executable = work / "pkg-config-consumer"
-    run([
-        *shlex.split(environment.get("CC", "cc")),
-        str(PROJECT / "tests" / "native" / "test_c.c"),
-        "-o", str(executable), *shlex.split(flags), "-lm",
-    ], env=environment)
-    run([
-        str(executable), str(PROJECT / "tests" / "data" / "test_arm.urdf"),
-    ], env=environment)
+    for index, tool in enumerate(tools):
+        print(f"Testing pkg-config consumer with {tool}", flush=True)
+        flags = subprocess.check_output(
+            [tool, "--cflags", "--libs", "dynibo"],
+            env=environment, text=True, timeout=30,
+        )
+        executable = work / f"pkg-config-consumer-{index}"
+        run([
+            *shlex.split(environment.get("CC", "cc")),
+            str(PROJECT / "tests" / "native" / "test_c.c"),
+            "-o", str(executable), *shlex.split(flags), "-lm",
+        ], env=environment)
+        run([
+            str(executable), str(PROJECT / "tests" / "data" / "test_arm.urdf"),
+        ], env=environment)
 
 
 def test_build(work: Path) -> None:
