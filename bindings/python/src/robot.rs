@@ -156,7 +156,7 @@ impl PyRobot {
         q: ArrayInput<'py>,
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let q = input_slice(&q);
+        let q = input_slice(&q)?;
         with_calculation(&self.inner, py, |state| {
             calculate_output(py, 7 * self.link_count, out, |output| {
                 state.robot.forward_kinematics_all(&q, &mut state.poses)?;
@@ -172,7 +172,7 @@ impl PyRobot {
         q: ArrayInput<'_>,
         target: usize,
     ) -> PyResult<PyPose> {
-        let q = input_slice(&q);
+        let q = input_slice(&q)?;
         let target = target_link(&self.links, target)?;
         with_robot(&self.inner, py, |robot| {
             py.detach(|| robot.forward_kinematics(&q, target))
@@ -189,7 +189,7 @@ impl PyRobot {
         target: usize,
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let q = input_slice(&q);
+        let q = input_slice(&q)?;
         let target = target_link(&self.links, target)?;
         with_robot(&self.inner, py, |robot| {
             calculate_output(py, 6 * self.generalized_count, out, |output| {
@@ -207,8 +207,8 @@ impl PyRobot {
         target: usize,
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let q = input_slice(&q);
-        let qd = input_slice(&qd);
+        let q = input_slice(&q)?;
+        let qd = input_slice(&qd)?;
         require_same_length(&q, &qd, "qd")?;
         let target = target_link(&self.links, target)?;
         with_robot(&self.inner, py, |robot| {
@@ -227,8 +227,8 @@ impl PyRobot {
         target: usize,
         tool: Option<PyRef<'_, PyPose>>,
     ) -> PyResult<PyTwist> {
-        let q = input_slice(&q);
-        let qd = input_slice(&qd);
+        let q = input_slice(&q)?;
+        let qd = input_slice(&qd)?;
         require_same_length(&q, &qd, "qd")?;
         let target = target_link(&self.links, target)?;
         let tool = tool.map_or_else(|| Ok(Frame::identity()), |value| value.to_frame())?;
@@ -247,9 +247,9 @@ impl PyRobot {
         qdd: ArrayInput<'_>,
         target: usize,
     ) -> PyResult<PyTwist> {
-        let q = input_slice(&q);
-        let qd = input_slice(&qd);
-        let qdd = input_slice(&qdd);
+        let q = input_slice(&q)?;
+        let qd = input_slice(&qd)?;
+        let qdd = input_slice(&qdd)?;
         require_same_length(&q, &qd, "qd")?;
         require_same_length(&q, &qdd, "qdd")?;
         let target = target_link(&self.links, target)?;
@@ -268,7 +268,7 @@ impl PyRobot {
         loads: Option<Bound<'py, PyAny>>,
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let q = input_slice(&q);
+        let q = input_slice(&q)?;
         let load_guard = convert_loads(&self.links, loads.as_ref())?;
         let loads = load_guard.as_slice();
         with_robot(&self.inner, py, |robot| {
@@ -288,9 +288,9 @@ impl PyRobot {
         loads: Option<Bound<'py, PyAny>>,
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let q = input_slice(&q);
-        let qd = input_slice(&qd);
-        let qdd = input_slice(&qdd);
+        let q = input_slice(&q)?;
+        let qd = input_slice(&qd)?;
+        let qdd = input_slice(&qdd)?;
         require_same_length(&q, &qd, "qd")?;
         require_same_length(&q, &qdd, "qdd")?;
         let load_guard = convert_loads(&self.links, loads.as_ref())?;
@@ -312,9 +312,9 @@ impl PyRobot {
         loads: Option<Bound<'py, PyAny>>,
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let q = input_slice(&q);
-        let qd = input_slice(&qd);
-        let forces = input_slice(&forces);
+        let q = input_slice(&q)?;
+        let qd = input_slice(&qd)?;
+        let forces = input_slice(&forces)?;
         require_same_length(&q, &qd, "qd")?;
         let load_guard = convert_loads(&self.links, loads.as_ref())?;
         let loads = load_guard.as_slice();
@@ -332,7 +332,7 @@ impl PyRobot {
         q: ArrayInput<'py>,
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let q = input_slice(&q);
+        let q = input_slice(&q)?;
         with_robot(&self.inner, py, |robot| {
             calculate_output(
                 py,
@@ -351,8 +351,8 @@ impl PyRobot {
         qd: ArrayInput<'py>,
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let q = input_slice(&q);
-        let qd = input_slice(&qd);
+        let q = input_slice(&q)?;
+        let qd = input_slice(&qd)?;
         require_same_length(&q, &qd, "qd")?;
         with_robot(&self.inner, py, |robot| {
             calculate_output(py, self.generalized_count, out, |output| {
@@ -371,7 +371,7 @@ impl PyRobot {
         options: Option<PyRef<'py, PyIkOptions>>,
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let q = input_slice(&q);
+        let q = input_slice(&q)?;
         let target = target_link(&self.links, target)?;
         let desired = desired.to_frame()?;
         let options = options.map_or_else(PyIkOptions::default, |value| *value);
