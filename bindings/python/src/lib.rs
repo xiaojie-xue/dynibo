@@ -1,4 +1,5 @@
 //! Python module registration; implementation lives in the responsibility modules.
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 mod arrays;
 mod calculation;
 mod errors;
@@ -6,6 +7,10 @@ mod floating_robot;
 mod loads;
 mod robot;
 mod values;
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests;
 
 use errors::{DyniboError, ModelError, PanicError, SolverError};
 use floating_robot::PyFloatingRobot;
