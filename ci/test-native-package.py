@@ -14,7 +14,7 @@ from pathlib import Path
 
 def run(command: list[str], **kwargs: object) -> None:
     print("+", " ".join(command), flush=True)
-    subprocess.run(command, check=True, **kwargs)
+    subprocess.run(command, check=True, timeout=600, **kwargs)
 
 
 def main() -> None:
@@ -65,6 +65,10 @@ def main() -> None:
         "ctest", "--test-dir", str(build), "--build-config", args.configuration,
         "--output-on-failure",
     ], env=environment)
+    run([
+        sys.executable, str(project / "ci" / "test-native-build.py"),
+        "--prefix", str(prefix),
+    ])
 
 
 if __name__ == "__main__":

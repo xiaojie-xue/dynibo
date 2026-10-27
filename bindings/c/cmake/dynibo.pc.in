@@ -1,4 +1,4 @@
-prefix=@CMAKE_INSTALL_PREFIX@
+prefix=${pcfiledir}/@DYNIBO_PC_PREFIX_RELATIVE@
 exec_prefix=${prefix}
 libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
 includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
@@ -6,5 +6,5 @@ includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
 Name: dynibo
 Description: Tree-structured robot kinematics and dynamics C API
 Version: @PROJECT_VERSION@
-Libs: -L${libdir} -ldynibo_c
-Cflags: -I${includedir}
+Libs: -L"${libdir}" -ldynibo_c
+Cflags: -I"${includedir}"

@@ -37,7 +37,11 @@ if(DYNIBO_CARGO_PROFILE STREQUAL "release")
     set(DYNIBO_CARGO_TARGET_DIR "release")
 else()
     set(DYNIBO_CARGO_PROFILE_FLAG --profile ${DYNIBO_CARGO_PROFILE})
-    set(DYNIBO_CARGO_TARGET_DIR "${DYNIBO_CARGO_PROFILE}")
+    if(DYNIBO_CARGO_PROFILE STREQUAL "dev")
+        set(DYNIBO_CARGO_TARGET_DIR "debug")
+    else()
+        set(DYNIBO_CARGO_TARGET_DIR "${DYNIBO_CARGO_PROFILE}")
+    endif()
 endif()
 
 if(WIN32)
@@ -56,8 +60,9 @@ else()
     set(DYNIBO_LIBRARY_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}")
 endif()
 
+set(DYNIBO_CARGO_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/cargo")
 set(DYNIBO_CARGO_LIBRARY
-    "${CMAKE_CURRENT_SOURCE_DIR}/target/${DYNIBO_CARGO_TARGET_DIR}/${DYNIBO_LIBRARY_FILE}")
+    "${DYNIBO_CARGO_OUTPUT_DIR}/${DYNIBO_CARGO_TARGET_DIR}/${DYNIBO_LIBRARY_FILE}")
 set(DYNIBO_BUILT_LIBRARY "${CMAKE_CURRENT_BINARY_DIR}/${DYNIBO_LIBRARY_FILE}")
 
 # Track Rust implementation modules as well as the crate entry points. Adding or
@@ -69,6 +74,7 @@ file(GLOB_RECURSE DYNIBO_RUST_SOURCES CONFIGURE_DEPENDS
 add_custom_command(
     OUTPUT "${DYNIBO_BUILT_LIBRARY}"
     COMMAND "${CARGO_EXECUTABLE}" build -p dynibo-c ${DYNIBO_CARGO_PROFILE_FLAG}
+            --target-dir "${DYNIBO_CARGO_OUTPUT_DIR}"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${DYNIBO_CARGO_LIBRARY}" "${DYNIBO_BUILT_LIBRARY}"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -88,7 +94,7 @@ set_target_properties(dynibo_c PROPERTIES
         "${DYNIBO_GENERATED_INCLUDE_DIR};${DYNIBO_GENERATED_INCLUDE_DIR}/dynibo;${CMAKE_CURRENT_SOURCE_DIR}/bindings/c/include")
 if(WIN32)
     set(DYNIBO_CARGO_IMPLIB
-        "${CMAKE_CURRENT_SOURCE_DIR}/target/${DYNIBO_CARGO_TARGET_DIR}/${DYNIBO_IMPLIB_FILE}")
+        "${DYNIBO_CARGO_OUTPUT_DIR}/${DYNIBO_CARGO_TARGET_DIR}/${DYNIBO_IMPLIB_FILE}")
     set_target_properties(dynibo_c PROPERTIES IMPORTED_IMPLIB "${DYNIBO_CARGO_IMPLIB}")
 endif()
 add_dependencies(dynibo_c dynibo_c_build)
@@ -113,6 +119,9 @@ write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/dynibo-config-version.cmake"
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMajorVersion)
+file(RELATIVE_PATH DYNIBO_PC_PREFIX_RELATIVE
+    "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/pkgconfig"
+    "${CMAKE_INSTALL_PREFIX}")
 configure_file(bindings/c/cmake/dynibo.pc.in
                "${CMAKE_CURRENT_BINARY_DIR}/dynibo.pc" @ONLY)
 
