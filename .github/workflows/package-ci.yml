@@ -130,6 +130,8 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
+      - name: Test native build profiles and relocation
+        run: python ci/test-native-build.py
       - name: Configure native package
         run: >-
           cmake -S . -B build/native

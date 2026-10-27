@@ -108,6 +108,17 @@ impl Model {
         }
     }
 
+    pub(super) fn validate_numerical_result<'a>(
+        operation: &'static str,
+        values: impl IntoIterator<Item = &'a f64>,
+    ) -> Result<()> {
+        if values.into_iter().all(|value| value.is_finite()) {
+            Ok(())
+        } else {
+            Err(Error::NumericalFailure { operation })
+        }
+    }
+
     pub(super) fn validate_output(
         &self,
         base_mode: RootMode,

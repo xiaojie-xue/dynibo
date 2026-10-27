@@ -8,6 +8,146 @@ from .support import URDF, reference, motion_base
 
 
 class BindingContractTests(unittest.TestCase):
+    def test_array_copy_failures_preserve_outputs_and_allow_recovery(self) -> None:
+        class StridedCopy(np.ndarray):
+            def __array_finalize__(self, source):
+                if getattr(source, "strided_copy", False):
+                    self.strides = (0,)
+
+        q, qd, qdd = (np.asarray(reference(key)) for key in ("q", "qd", "qdd"))
+        for robot_type in (dynibo.Robot, dynibo.FloatingRobot):
+            with robot_type(URDF) as robot:
+                prefix = (motion_base(),) if robot_type is dynibo.FloatingRobot else ()
+                target = robot.link_id("test_link_4")
+                forces = robot.inverse_dynamics(*prefix, q, qd, qdd)
+                calls = {
+                    "forward_kinematics_all": (q,),
+                    "forward_kinematics": (q, target),
+                    "forward_velocity_kinematics": (q, qd, target),
+                    "forward_acceleration_kinematics": (q, qd, qdd, target),
+                    "jacobian": (q, target),
+                    "jacobian_derivative": (q, qd, target),
+                    "mass_matrix": (q,),
+                    "gravity": (q,),
+                    "velocity_product_forces": (q, qd),
+                    "inverse_dynamics": (q, qd, qdd),
+                    "forward_dynamics": (q, qd, forces),
+                }
+                if robot_type is dynibo.Robot:
+                    calls["inverse_kinematics"] = (
+                        q, target, robot.forward_kinematics(q, target),
+                    )
+                for name, args in calls.items():
+                    method = getattr(robot, name)
+                    expected = method(*prefix, *args)
+                    for index, value in enumerate(args):
+                        if not isinstance(value, np.ndarray):
+                            continue
+                        with self.subTest(
+                            robot=robot_type.__name__, operation=name, argument=index,
+                        ):
+                            invalid = np.repeat(value, 2)[::2].view(StridedCopy)
+                            invalid.strided_copy = True
+                            adapted = args[:index] + (invalid,) + args[index + 1:]
+                            kwargs = {}
+                            if isinstance(expected, np.ndarray):
+                                out = np.full_like(expected, 123.0)
+                                kwargs["out"] = out
+                            with self.assertRaisesRegex(ValueError, "not contiguous"):
+                                method(*prefix, *adapted, **kwargs)
+                            if kwargs:
+                                np.testing.assert_array_equal(out, 123.0)
+                            recovered = method(*prefix, *args, **kwargs)
+                            if kwargs:
+                                self.assertIs(recovered, out)
+                                np.testing.assert_allclose(
+                                    recovered, expected, atol=1.0e-11, rtol=1.0e-10,
+                                )
+                            else:
+                                self.assertEqual(recovered, expected)
+
+    def test_byte_strides_and_unaligned_inputs_match_contiguous_copies(self) -> None:
+        def layouts(values):
+            for name, stride, offset in (
+                ("byte_stride", 9, 0),
+                ("negative_byte_stride", -9, 9 * (len(values) - 1)),
+                ("unaligned", 8, 1),
+                ("negative_stride", -8, 8 * (len(values) - 1)),
+            ):
+                size = offset + 8 + max(0, stride * (len(values) - 1))
+                array = np.ndarray(
+                    (len(values),), dtype=np.float64,
+                    buffer=bytearray(size), offset=offset, strides=(stride,),
+                )
+                array[:] = values
+                yield name, array
+
+        def numbers(value):
+            if isinstance(value, dynibo.Pose):
+                return value.translation + value.rotation_xyzw
+            if isinstance(value, dynibo.Twist):
+                return value.angular + value.linear
+            return value
+
+        q, qd, qdd = (np.asarray(reference(key)) for key in ("q", "qd", "qdd"))
+        for robot_type in (dynibo.Robot, dynibo.FloatingRobot):
+            with robot_type(URDF) as robot:
+                prefix = (motion_base(),) if robot_type is dynibo.FloatingRobot else ()
+                target = robot.link_id("test_link_4")
+                forces = robot.inverse_dynamics(*prefix, q, qd, qdd)
+                calls = {
+                    "forward_kinematics_all": (q,),
+                    "forward_kinematics": (q, target),
+                    "forward_velocity_kinematics": (q, qd, target),
+                    "forward_acceleration_kinematics": (q, qd, qdd, target),
+                    "jacobian": (q, target),
+                    "jacobian_derivative": (q, qd, target),
+                    "mass_matrix": (q,),
+                    "gravity": (q,),
+                    "velocity_product_forces": (q, qd),
+                    "inverse_dynamics": (q, qd, qdd),
+                    "forward_dynamics": (q, qd, forces),
+                }
+                if robot_type is dynibo.Robot:
+                    calls["inverse_kinematics"] = (
+                        q, target, robot.forward_kinematics(q, target),
+                    )
+                for name, args in calls.items():
+                    method = getattr(robot, name)
+                    expected = numbers(method(*prefix, *args))
+                    for index, value in enumerate(args):
+                        if not isinstance(value, np.ndarray):
+                            continue
+                        for layout, array in layouts(value):
+                            with self.subTest(
+                                robot=robot_type.__name__, operation=name,
+                                argument=index, layout=layout,
+                            ):
+                                adapted = args[:index] + (array,) + args[index + 1:]
+                                np.testing.assert_allclose(
+                                    numbers(method(*prefix, *adapted)), expected,
+                                    atol=1.0e-11, rtol=1.0e-10,
+                                )
+
+    def test_finite_overflow_reports_solver_error_and_recovers(self) -> None:
+        q = np.zeros(4)
+        huge_velocity = np.full(4, 1.0e308)
+        for robot_type in (dynibo.Robot, dynibo.FloatingRobot):
+            with robot_type(URDF) as robot:
+                prefix = (motion_base(),) if robot_type is dynibo.FloatingRobot else ()
+                out = np.empty(robot.generalized_count)
+                expected = robot.inverse_dynamics(*prefix, q, q, q)
+                for name, args in (
+                    ("velocity_product_forces", (q, huge_velocity)),
+                    ("inverse_dynamics", (q, huge_velocity, q)),
+                    ("forward_dynamics", (q, huge_velocity, np.zeros_like(out))),
+                ):
+                    with self.subTest(robot=robot_type.__name__, operation=name):
+                        with self.assertRaises(dynibo.SolverError):
+                            getattr(robot, name)(*prefix, *args, out=out)
+                        self.assertIs(robot.inverse_dynamics(*prefix, q, q, q, out=out), out)
+                        np.testing.assert_allclose(out, expected, atol=1.0e-11, rtol=1.0e-10)
+
     def test_constructors_and_lifecycle(self) -> None:
         for robot_type in (dynibo.Robot, dynibo.FloatingRobot):
             with self.subTest(robot=robot_type.__name__):

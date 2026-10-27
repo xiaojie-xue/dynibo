@@ -19,7 +19,7 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error for an invalid input length or link ID.
+    /// Returns an error for invalid input, an invalid link ID, or a non-finite numerical result.
     pub fn forward_kinematics(&mut self, q: &[f64], target: LinkId) -> Result<Frame> {
         self.model
             .forward_kinematics(&self.world_from_root, q, target, &mut self.workspace)
@@ -31,7 +31,7 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error for an invalid input length or link ID.
+    /// Returns an error for invalid input, an invalid link ID, or a non-finite numerical result.
     pub fn forward_velocity_kinematics(
         &mut self,
         q: &[f64],
@@ -54,7 +54,7 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error for an invalid input length or link ID.
+    /// Returns an error for invalid input, an invalid link ID, or a non-finite numerical result.
     pub fn forward_acceleration_kinematics(
         &mut self,
         q: &[f64],
@@ -170,7 +170,16 @@ impl Model {
             root_from_link[joint_index] = local;
             output[child_link_index(joint_index)] = *base * local;
         }
-        Ok(())
+        Self::validate_numerical_result(
+            "forward kinematics",
+            output.iter().flat_map(|frame| {
+                frame
+                    .translation
+                    .vector
+                    .iter()
+                    .chain(frame.rotation.coords.iter())
+            }),
+        )
     }
 
     /// Computes a target link frame using runtime-sized input and workspace.
@@ -184,7 +193,7 @@ impl Model {
     ///
     /// # Errors
     ///
-    /// Returns an error for an invalid input length or link ID.
+    /// Returns an error for invalid input, an invalid link ID, or a non-finite numerical result.
     fn forward_kinematics(
         &self,
         base_frame: &Frame,
@@ -195,7 +204,16 @@ impl Model {
         self.validate_slice("q", q)?;
         let target_index = self.validate_link_id(target)?;
         let depth = self.prepare_ancestor_path(target_index, &mut workspace.ancestor_path);
-        Ok(*base_frame * self.target_frame_kernel(q, &workspace.ancestor_path[..depth]))
+        let result = *base_frame * self.target_frame_kernel(q, &workspace.ancestor_path[..depth]);
+        Self::validate_numerical_result(
+            "forward kinematics",
+            result
+                .translation
+                .vector
+                .iter()
+                .chain(result.rotation.coords.iter()),
+        )?;
+        Ok(result)
     }
 
     /// Computes runtime-sized spatial velocity at a point on a target link.
@@ -236,7 +254,7 @@ impl Model {
             });
         }
         let target_index = self.validate_link_id(target)?;
-        Ok(self.forward_velocity_for_base(
+        let result = self.forward_velocity_for_base(
             q,
             qd,
             target_index,
@@ -244,7 +262,12 @@ impl Model {
             base_frame,
             base_velocity,
             &mut workspace.ancestor_path,
-        ))
+        );
+        Self::validate_numerical_result(
+            "forward velocity kinematics",
+            result.angular.iter().chain(result.linear.iter()),
+        )?;
+        Ok(result)
     }
 
     /// Computes world-expressed spatial acceleration of a target link origin.
@@ -285,7 +308,7 @@ impl Model {
         let offset = rotation * local_target.translation.vector;
         let relative_angular = rotation * relative_velocity.angular;
         let relative_linear = rotation * relative_velocity.linear;
-        Ok(Twist::new(
+        let result = Twist::new(
             base_acceleration.angular
                 + base_velocity.angular.cross(&relative_angular)
                 + rotation * relative_acceleration.angular,
@@ -296,7 +319,12 @@ impl Model {
                     .cross(&base_velocity.angular.cross(&offset))
                 + 2.0 * base_velocity.angular.cross(&relative_linear)
                 + rotation * relative_acceleration.linear,
-        ))
+        );
+        Self::validate_numerical_result(
+            "forward acceleration kinematics",
+            result.angular.iter().chain(result.linear.iter()),
+        )?;
+        Ok(result)
     }
 
     fn target_frame_kernel(&self, q: &[f64], path: &[usize]) -> Frame {

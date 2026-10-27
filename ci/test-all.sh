@@ -20,6 +20,9 @@ fi
 
 CARGO_NET_OFFLINE=true DYNIBO_ALLOW_DIRTY=1 bash ci/test-rust-package.sh
 
+python_command="${PYTHON:-python3}"
+"${python_command}" ci/test-native-build.py
+
 package_test_root="$(mktemp -d "${TMPDIR:-/tmp}/dynibo-package-test.XXXXXX")"
 cleanup() {
     rm -rf -- "${package_test_root}"
@@ -30,7 +33,6 @@ native_build="${package_test_root}/native"
 cmake -S . -B "${native_build}" -DCMAKE_BUILD_TYPE=Release
 cmake --build "${native_build}" --config Release --parallel
 cmake --build "${native_build}" --config Release --target package
-python_command="${PYTHON:-python3}"
 "${python_command}" ci/test-native-package.py \
     --package-dir "${native_build}" --configuration Release
 

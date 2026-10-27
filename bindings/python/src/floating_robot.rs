@@ -151,7 +151,7 @@ impl PyFloatingRobot {
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let base = base.to_core()?;
-        let q = input_slice(&q);
+        let q = input_slice(&q)?;
         with_calculation(&self.inner, py, |state| {
             calculate_output(py, 7 * self.link_count, out, |output| {
                 state
@@ -171,7 +171,7 @@ impl PyFloatingRobot {
         target: usize,
     ) -> PyResult<PyPose> {
         let base = base.to_core()?;
-        let q = input_slice(&q);
+        let q = input_slice(&q)?;
         let target = target_link(&self.links, target)?;
         with_robot(&self.inner, py, |robot| {
             py.detach(|| robot.forward_kinematics(&base, &q, target))
@@ -190,7 +190,7 @@ impl PyFloatingRobot {
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let base = base.to_core()?;
-        let q = input_slice(&q);
+        let q = input_slice(&q)?;
         let target = target_link(&self.links, target)?;
         with_robot(&self.inner, py, |robot| {
             calculate_output(py, 6 * self.generalized_count, out, |output| {
@@ -210,8 +210,8 @@ impl PyFloatingRobot {
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let base = base.to_core()?;
-        let q = input_slice(&q);
-        let qd = input_slice(&qd);
+        let q = input_slice(&q)?;
+        let qd = input_slice(&qd)?;
         require_same_length(&q, &qd, "qd")?;
         let target = target_link(&self.links, target)?;
         with_robot(&self.inner, py, |robot| {
@@ -232,8 +232,8 @@ impl PyFloatingRobot {
         tool: Option<PyRef<'_, PyPose>>,
     ) -> PyResult<PyTwist> {
         let base = base.to_core()?;
-        let q = input_slice(&q);
-        let qd = input_slice(&qd);
+        let q = input_slice(&q)?;
+        let qd = input_slice(&qd)?;
         require_same_length(&q, &qd, "qd")?;
         let target = target_link(&self.links, target)?;
         let tool = tool.map_or_else(|| Ok(Frame::identity()), |value| value.to_frame())?;
@@ -254,9 +254,9 @@ impl PyFloatingRobot {
         target: usize,
     ) -> PyResult<PyTwist> {
         let base = base.to_core()?;
-        let q = input_slice(&q);
-        let qd = input_slice(&qd);
-        let qdd = input_slice(&qdd);
+        let q = input_slice(&q)?;
+        let qd = input_slice(&qd)?;
+        let qdd = input_slice(&qdd)?;
         require_same_length(&q, &qd, "qd")?;
         require_same_length(&q, &qdd, "qdd")?;
         let target = target_link(&self.links, target)?;
@@ -277,7 +277,7 @@ impl PyFloatingRobot {
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let base = base.to_core()?;
-        let q = input_slice(&q);
+        let q = input_slice(&q)?;
         let load_guard = convert_loads(&self.links, loads.as_ref())?;
         let loads = load_guard.as_slice();
         with_robot(&self.inner, py, |robot| {
@@ -300,9 +300,9 @@ impl PyFloatingRobot {
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let base = base.to_core()?;
-        let q = input_slice(&q);
-        let qd = input_slice(&qd);
-        let qdd = input_slice(&qdd);
+        let q = input_slice(&q)?;
+        let qd = input_slice(&qd)?;
+        let qdd = input_slice(&qdd)?;
         require_same_length(&q, &qd, "qd")?;
         require_same_length(&q, &qdd, "qdd")?;
         let load_guard = convert_loads(&self.links, loads.as_ref())?;
@@ -327,9 +327,9 @@ impl PyFloatingRobot {
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let base = base.to_core()?;
-        let q = input_slice(&q);
-        let qd = input_slice(&qd);
-        let forces = input_slice(&forces);
+        let q = input_slice(&q)?;
+        let qd = input_slice(&qd)?;
+        let forces = input_slice(&forces)?;
         require_same_length(&q, &qd, "qd")?;
         let load_guard = convert_loads(&self.links, loads.as_ref())?;
         let loads = load_guard.as_slice();
@@ -349,7 +349,7 @@ impl PyFloatingRobot {
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let base = base.to_core()?;
-        let q = input_slice(&q);
+        let q = input_slice(&q)?;
         with_robot(&self.inner, py, |robot| {
             calculate_output(
                 py,
@@ -370,8 +370,8 @@ impl PyFloatingRobot {
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let base = base.to_core()?;
-        let q = input_slice(&q);
-        let qd = input_slice(&qd);
+        let q = input_slice(&q)?;
+        let qd = input_slice(&qd)?;
         require_same_length(&q, &qd, "qd")?;
         with_robot(&self.inner, py, |robot| {
             calculate_output(py, self.generalized_count, out, |output| {

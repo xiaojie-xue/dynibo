@@ -1,10 +1,13 @@
-prefix=@CMAKE_INSTALL_PREFIX@
+prefix=${pcfiledir}/@DYNIBO_PC_PREFIX_RELATIVE@
 exec_prefix=${prefix}
 libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
 includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+# Quote during variable expansion: pkg-config and pkgconf parse fields differently.
+quoted_libdir="${libdir}"
+quoted_includedir="${includedir}"
 
 Name: dynibo
 Description: Tree-structured robot kinematics and dynamics C API
 Version: @PROJECT_VERSION@
-Libs: -L${libdir} -ldynibo_c
-Cflags: -I${includedir}
+Libs: -L${quoted_libdir} -ldynibo_c
+Cflags: -I${quoted_includedir}

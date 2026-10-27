@@ -22,7 +22,7 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error for an invalid input or output length, or link ID.
+    /// Returns an error for invalid input, an invalid output length or link ID, or a non-finite result.
     pub fn jacobian(&mut self, q: &[f64], target: LinkId, output: &mut [f64]) -> Result<()> {
         self.model.fixed_jacobian(
             &self.world_from_root,
@@ -37,7 +37,7 @@ impl Robot {
     ///
     /// # Errors
     ///
-    /// Returns an error for an invalid input or output length, or link ID.
+    /// Returns an error for invalid input, an invalid output length or link ID, or a non-finite result.
     pub fn jacobian_derivative(
         &mut self,
         q: &[f64],
@@ -134,7 +134,7 @@ impl Model {
             &workspace.jacobian_derivative,
             output,
         );
-        Ok(())
+        Self::validate_numerical_result("jacobian derivative", output.iter())
     }
     /// Writes a runtime-sized `6 x G` geometric Jacobian in column-major order.
     ///
@@ -239,7 +239,7 @@ impl Model {
             &workspace.jacobian_derivative,
             output,
         );
-        Ok(())
+        Self::validate_numerical_result("jacobian derivative", output.iter())
     }
 
     // Entry points have validated q, target and output dimensions. This path
@@ -306,7 +306,7 @@ impl Model {
                 JointType::Fixed => unreachable!(),
             }
         }
-        Ok(())
+        Self::validate_numerical_result("jacobian", output.iter())
     }
 
     pub(super) fn jacobian_kernel(

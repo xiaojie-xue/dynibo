@@ -7,11 +7,16 @@ use std::borrow::Cow;
 
 pub(super) type ArrayInput<'py> = PyArrayLike1<'py, f64, AllowTypeChange>;
 
-pub(super) fn input_slice<'a>(value: &'a ArrayInput<'_>) -> Cow<'a, [f64]> {
-    value.as_slice().map_or_else(
-        |_| Cow::Owned(value.as_array().iter().copied().collect()),
-        Cow::Borrowed,
-    )
+pub(super) fn input_slice<'a>(value: &'a ArrayInput<'_>) -> PyResult<Cow<'a, [f64]>> {
+    if let Ok(slice) = value.as_slice() {
+        return Ok(Cow::Borrowed(slice));
+    }
+    // NumPy must interpret byte strides and unaligned data before Rust borrows it.
+    let contiguous = value.cast_array::<f64>(false)?;
+    contiguous
+        .to_vec()
+        .map(Cow::Owned)
+        .map_err(|error| PyValueError::new_err(error.to_string()))
 }
 
 pub(super) fn require_same_length(q: &[f64], other: &[f64], name: &str) -> PyResult<()> {
