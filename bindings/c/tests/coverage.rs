@@ -697,6 +697,258 @@ fn last_error() -> String {
 }
 
 #[test]
+fn invalid_utf8_paths_and_link_names_report_errors_without_writing_results() {
+    let handles = Handles::new();
+    // A valid, NUL-terminated C string whose content is not UTF-8.
+    let invalid = c"\xff";
+    unsafe {
+        let mut fixed = handles.fixed;
+        let mut floating = handles.floating;
+        assert_eq!(
+            dynibo_robot_from_urdf(invalid.as_ptr(), &mut fixed),
+            DyniboStatus::InvalidArgument
+        );
+        assert!(fixed.is_null());
+        assert_eq!(last_error(), "path must be valid UTF-8");
+        assert_eq!(
+            dynibo_floating_robot_from_urdf(invalid.as_ptr(), &mut floating),
+            DyniboStatus::InvalidArgument
+        );
+        assert!(floating.is_null());
+        assert_eq!(last_error(), "path must be valid UTF-8");
+
+        for is_floating in [false, true] {
+            let mut target = usize::MAX;
+            let status = if is_floating {
+                dynibo_floating_robot_link_id(handles.floating, invalid.as_ptr(), &mut target)
+            } else {
+                dynibo_robot_link_id(handles.fixed, invalid.as_ptr(), &mut target)
+            };
+            assert_eq!(status, DyniboStatus::InvalidArgument);
+            assert_eq!(last_error(), "name must be valid UTF-8");
+            assert_eq!(target, usize::MAX);
+            let status = if is_floating {
+                dynibo_floating_robot_link_id(
+                    handles.floating,
+                    c"test_link_4".as_ptr(),
+                    &mut target,
+                )
+            } else {
+                dynibo_robot_link_id(handles.fixed, c"test_link_4".as_ptr(), &mut target)
+            };
+            assert_eq!(status, DyniboStatus::Ok);
+            assert!(last_error().is_empty());
+            assert_eq!(
+                target,
+                if is_floating {
+                    handles.floating_target
+                } else {
+                    handles.target
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn output_address_and_struct_input_length_overflow_are_rejected_before_slicing() {
+    let handles = Handles::new();
+    let q = [0.0; 4];
+    let mut pose = DyniboPose::default();
+    let mut twist = DyniboTwist::default();
+    unsafe {
+        // The fabricated output is rejected by address arithmetic, before it
+        // could be dereferenced or turned into a mutable slice.
+        let output = ptr::without_provenance_mut::<f64>(usize::MAX - 3);
+        assert_eq!(
+            dynibo_mass_matrix(
+                handles.fixed,
+                handles.fixed_workspace,
+                q.as_ptr(),
+                q.len(),
+                output,
+                1
+            ),
+            DyniboStatus::InvalidArgument
+        );
+        assert_eq!(last_error(), "output address range overflows");
+        assert_eq!(
+            dynibo_forward_kinematics(
+                handles.fixed,
+                handles.fixed_workspace,
+                q.as_ptr(),
+                usize::MAX,
+                handles.target,
+                &mut pose
+            ),
+            DyniboStatus::InvalidArgument
+        );
+        assert_eq!(last_error(), "q length is too large");
+        assert_eq!(pose.translation, [0.0; 3]);
+        assert_eq!(pose.rotation_xyzw, [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(
+            dynibo_forward_velocity_kinematics(
+                handles.fixed,
+                handles.fixed_workspace,
+                q.as_ptr(),
+                q.as_ptr(),
+                usize::MAX,
+                handles.target,
+                &DyniboPose::default(),
+                &mut twist
+            ),
+            DyniboStatus::InvalidArgument
+        );
+        assert_eq!(last_error(), "q length is too large");
+        assert_eq!(twist.angular, [0.0; 3]);
+        assert_eq!(twist.linear, [0.0; 3]);
+        assert_eq!(
+            dynibo_forward_kinematics(
+                handles.fixed,
+                handles.fixed_workspace,
+                q.as_ptr(),
+                q.len(),
+                handles.target,
+                &mut pose
+            ),
+            DyniboStatus::Ok
+        );
+        assert!(last_error().is_empty());
+        assert!(pose.translation.iter().all(|v| v.is_finite()));
+    }
+}
+
+#[test]
+fn inverse_and_forward_dynamics_load_errors_preserve_outputs_and_recover() {
+    let handles = Handles::new();
+    let base = DyniboBaseState::default();
+    let q = [0.2, -0.3, 0.4, -0.1];
+    let qd = [0.1, 0.2, -0.1, -0.2];
+    let qdd = [-0.2, 0.1, 0.3, -0.1];
+    for floating in [false, true] {
+        for inverse in [false, true] {
+            let forces = vec![0.1; if floating { 10 } else { 4 }];
+            let target = if floating {
+                handles.floating_target
+            } else {
+                handles.target
+            };
+            let load = DyniboLoad {
+                link_id: target,
+                torque: [0.1, 0.2, -0.3],
+                force: [-0.1, 0.3, 0.2],
+            };
+            let calculate = |loads: &[DyniboLoad], output: &mut [f64]| unsafe {
+                match (floating, inverse) {
+                    (false, false) => dynibo_forward_dynamics(
+                        handles.fixed,
+                        handles.fixed_workspace,
+                        q.as_ptr(),
+                        qd.as_ptr(),
+                        q.len(),
+                        forces.as_ptr(),
+                        forces.len(),
+                        loads.as_ptr(),
+                        loads.len(),
+                        output.as_mut_ptr(),
+                        output.len(),
+                    ),
+                    (false, true) => dynibo_inverse_dynamics(
+                        handles.fixed,
+                        handles.fixed_workspace,
+                        q.as_ptr(),
+                        qd.as_ptr(),
+                        qdd.as_ptr(),
+                        q.len(),
+                        loads.as_ptr(),
+                        loads.len(),
+                        output.as_mut_ptr(),
+                        output.len(),
+                    ),
+                    (true, false) => dynibo_floating_forward_dynamics(
+                        handles.floating,
+                        handles.floating_workspace,
+                        &base,
+                        q.as_ptr(),
+                        qd.as_ptr(),
+                        q.len(),
+                        forces.as_ptr(),
+                        forces.len(),
+                        loads.as_ptr(),
+                        loads.len(),
+                        output.as_mut_ptr(),
+                        output.len(),
+                    ),
+                    (true, true) => dynibo_floating_inverse_dynamics(
+                        handles.floating,
+                        handles.floating_workspace,
+                        &base,
+                        q.as_ptr(),
+                        qd.as_ptr(),
+                        qdd.as_ptr(),
+                        q.len(),
+                        loads.as_ptr(),
+                        loads.len(),
+                        output.as_mut_ptr(),
+                        output.len(),
+                    ),
+                }
+            };
+            let mut expected = vec![0.0; if floating { 10 } else { 4 }];
+            assert_eq!(calculate(&[load], &mut expected), DyniboStatus::Ok);
+            let invalid_id = DyniboLoad {
+                link_id: usize::MAX,
+                ..load
+            };
+            let overflow = DyniboLoad {
+                torque: [f64::MAX; 3],
+                ..load
+            };
+            let mut cases = vec![
+                (
+                    vec![load, invalid_id],
+                    DyniboStatus::InvalidArgument,
+                    "invalid link id",
+                ),
+                (
+                    vec![overflow, overflow],
+                    DyniboStatus::SolverError,
+                    "load aggregation",
+                ),
+            ];
+            for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                for torque in [false, true] {
+                    let mut invalid = load;
+                    if torque {
+                        invalid.torque[1] = value;
+                    } else {
+                        invalid.force[2] = value;
+                    }
+                    cases.push((
+                        vec![load, invalid],
+                        DyniboStatus::InvalidArgument,
+                        "load contains a non-finite value",
+                    ));
+                }
+            }
+            for (loads, status, message) in cases {
+                let mut output = vec![123.0; expected.len()];
+                assert_eq!(
+                    calculate(&loads, &mut output),
+                    status,
+                    "floating={floating}, inverse={inverse}, {message}"
+                );
+                assert!(last_error().contains(message), "{}", last_error());
+                assert!(output.iter().all(|v| *v == 123.0));
+                assert_eq!(calculate(&[load], &mut output), DyniboStatus::Ok);
+                assert!(last_error().is_empty());
+                assert_eq!(output, expected);
+            }
+        }
+    }
+}
+
+#[test]
 fn factory_diagnostics_version_and_null_destruction_follow_the_c_contract() {
     unsafe {
         assert_eq!(

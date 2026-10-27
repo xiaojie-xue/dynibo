@@ -1,6 +1,71 @@
 mod support;
 
 #[test]
+fn articulated_joint_inertia_overflow_is_reported_and_workspace_recovers() {
+    let mut robot = Robot::from_urdf(fixture_path("mixed_arm.urdf")).unwrap();
+    let q = [0.2, 0.3];
+    let qd = [0.0; 2];
+    let forces = [0.1, -0.2];
+    let mut fresh = robot.fork();
+    let mut expected = [0.0; 2];
+    fresh
+        .forward_dynamics(&q, &qd, &forces, &[], &mut expected)
+        .unwrap();
+    for translation in [1e155, -1e155] {
+        let mut output = [123.0; 2];
+        // Each rigid body's inertial parameters remain finite. The huge
+        // prismatic displacement overflows the inertia propagated upstream.
+        assert!(matches!(
+            robot.forward_dynamics(&[0.0, translation], &qd, &forces, &[], &mut output),
+            Err(Error::NumericalFailure {
+                operation: "joint articulated inertia"
+            })
+        ));
+        robot
+            .forward_dynamics(&q, &qd, &forces, &[], &mut output)
+            .unwrap();
+        assert_eq!(output, expected);
+    }
+}
+
+#[test]
+fn world_base_acceleration_overflow_is_reported_and_workspace_recovers() {
+    let mut robot = FloatingRobot::from_urdf(fixture_path("small_floating_base.urdf")).unwrap();
+    let base = BaseState::stationary(Frame::from_parts(
+        Translation3::identity(),
+        UnitQuaternion::from_euler_angles(0.0, 0.0, std::f64::consts::FRAC_PI_4),
+    ))
+    .unwrap();
+    let mut fresh = robot.fork();
+    let mut expected = [0.0; 6];
+    fresh
+        .forward_dynamics(&base, &[], &[], &[0.0; 6], &[], &mut expected)
+        .unwrap();
+    for torque in [1.9e299, -1.9e299] {
+        // With 1e-9 rotational inertia, the two local angular acceleration
+        // components fit in f64, but rotating back to world axes overflows.
+        let mut output = [123.0; 6];
+        assert!(matches!(
+            robot.forward_dynamics(
+                &base,
+                &[],
+                &[],
+                &[0.0, torque, 0.0, 0.0, 0.0, 0.0],
+                &[],
+                &mut output
+            ),
+            Err(Error::NumericalFailure {
+                operation: "floating-base acceleration"
+            })
+        ));
+        robot
+            .forward_dynamics(&base, &[], &[], &[0.0; 6], &[], &mut output)
+            .unwrap();
+        assert_eq!(output, expected);
+    }
+}
+
+#[test]
 fn small_floating_inertia_supports_free_fall_and_prescribed_acceleration() {
     let mut robot = FloatingRobot::from_urdf(fixture_path("small_floating_base.urdf")).unwrap();
     let frame = Frame::from_parts(

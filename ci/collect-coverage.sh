@@ -43,7 +43,10 @@ trap cleanup EXIT
 eval "$(cargo llvm-cov --branch show-env --sh)"
 cargo llvm-cov clean --workspace
 
-cargo test --workspace --all-targets --locked
+# Embedded PyO3 unit tests need the selected interpreter's standard library,
+# including when the interpreter is a relocated standalone Python build.
+PYTHONHOME="$("${python_command}" -c 'import sys; print(sys.base_prefix)')" \
+    cargo test --workspace --all-targets --locked
 
 wheelhouse="${coverage_work}/wheelhouse"
 installed="${coverage_work}/installed"

@@ -109,6 +109,20 @@ identities. Both robot types exercise constructors, lifecycle errors, NumPy
 input layouts, reusable outputs, and recovery after invalid calls. Non-finite
 loads must raise `ValueError` before writing an output buffer.
 
+Rust unit tests in `bindings/python/src/tests.rs` embed Python to exercise panic
+payload conversion, calculation recovery without poisoning the lock, and
+poisoned-lock errors during calculation and close. Maturin enables
+`pyo3/extension-module` through `pyproject.toml`; ordinary Rust unit tests retain
+libpython linkage. For a relocated standalone interpreter, set `PYO3_PYTHON`
+to its executable and `PYTHONHOME` to its `sys.base_prefix` when running these
+tests directly. The coverage script sets both automatically.
+
+Forward-dynamics overflow tests assert the precise failing operation and compare
+the next valid call with a fresh workspace. C ABI tests cover output-address and
+structure-input length overflow before slicing, invalid UTF-8 paths and names,
+and load conversion errors across fixed/floating forward and inverse dynamics.
+Load errors preserve output buffers and allow successful reuse.
+
 ## Rust implementation joint-test coverage
 
 `ci/collect-coverage.sh` merges profiles from Rust workspace unit/integration
@@ -156,3 +170,9 @@ and 24 installed-wheel Python tests passed. Production Rust coverage was
 5,046/5,132 lines (98.32%) and 315/334 branch outcomes (94.31%). This baseline
 excludes test implementations and is not directly comparable to older reports
 that included them. It is a local measurement, not a Codecov service result.
+
+Measured again on 2026-10-27 with the same pins after adding the boundary and
+recovery tests: 134 Rust tests and 28 installed-wheel Python tests passed.
+Production coverage was 5,140/5,195 lines (98.94%) and 327/344 branch outcomes
+(95.06%). The comparison immediately before these additions was 5,109/5,195
+lines (98.34%) and 325/344 branch outcomes (94.48%), using the same source scope.
