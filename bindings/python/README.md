@@ -41,9 +41,9 @@ The table below shows Dynibo's speedup using the Python interfaces of both libra
 
 | Operation | Franka | unitree G1 |
 |---|---:|---:|
-| Jacobian | 1.28× | 1.38× |
-| RNEA | 1.17× | 1.54× |
-| ABA | 1.81× | 1.89× |
+| Jacobian | 1.26× | 1.40× |
+| RNEA | 1.19× | 1.56× |
+| ABA | 1.76× | 1.94× |
 
 Source code to reproduce these results is available in
 [`benches/`](https://github.com/xiaojie-xue/dynibo/tree/main/benches).
