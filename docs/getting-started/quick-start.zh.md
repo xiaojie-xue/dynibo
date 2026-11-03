@@ -7,6 +7,13 @@
 3. 按 URDF 中非固定关节的顺序创建关节位置向量。
 4. 执行计算。
 
+先将以下完整模型保存为当前目录下的 `robot.urdf`。示例的目标 link 名称为 `tool`，
+关节绕 y 轴转动，不需要 mesh 或 ROS。
+
+```xml
+--8<-- "examples/data/pendulum.urdf"
+```
+
 === "Rust"
 
     ```rust
@@ -102,3 +109,5 @@
 这些示例的区别在资源管理和错误处理方式，而不是数值含义。接下来可以阅读
 [API 对照](../languages/api-mapping.md)了解接口对应关系，并在使用矩阵或空间向量结果前
 阅读[参考系与空间向量](../user-guide/frames-and-spatial-vectors.md)。
+
+完整的独立脚本与数值校验见[任务示例](../recipes/index.md)。

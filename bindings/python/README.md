@@ -4,7 +4,7 @@
 
 <h1>dynibo</h1>
 
-<p><strong>a fast, reliable and easy to use library for robot kinematics and dynamics</strong></p>
+<p><strong>Robot kinematics and rigid-body dynamics with URDF, Jacobians, inverse kinematics, RNEA and ABA</strong></p>
 
 <p>
   <a href="https://dynibo.readthedocs.io/">Documentation</a> &nbsp;&middot;&nbsp;
@@ -24,6 +24,28 @@
 through a Python API backed by a Rust core. It loads robot models from URDF
 and supports manipulators, humanoids, and other robots with fixed or floating
 bases.
+
+## Algorithms and task recipes
+
+Dynibo provides forward kinematics (FK), world geometric Jacobians and their
+time derivatives, damped least-squares inverse kinematics (IK), mass matrices,
+gravity compensation, recursive Newton–Euler inverse dynamics (RNEA), and
+articulated-body forward dynamics (ABA). Fixed and floating bases use the same
+Rust core; IK is available for fixed bases.
+
+| Task | Complete, verified example |
+|---|---|
+| Load URDF and calculate a tool pose | [Forward kinematics](https://dynibo.readthedocs.io/en/latest/recipes/forward-kinematics/) |
+| Compute a Jacobian and reshape for NumPy | [Jacobian and array layout](https://dynibo.readthedocs.io/en/latest/recipes/jacobian/) |
+| Calculate holding torque | [Gravity compensation](https://dynibo.readthedocs.io/en/latest/recipes/gravity-compensation/) |
+| Calculate torque or recover acceleration | [RNEA and ABA](https://dynibo.readthedocs.io/en/latest/recipes/inverse-forward-dynamics/) |
+| Evaluate a floating-base robot | [Floating-base dynamics](https://dynibo.readthedocs.io/en/latest/recipes/floating-base/) |
+| Reuse arrays in repeated calculations | [Output buffers](https://dynibo.readthedocs.io/en/latest/recipes/reuse-buffers/) |
+
+Each Python recipe embeds a small URDF and checks its numerical output, with
+no ROS or mesh downloads.
+See [Choosing Dynibo and migrating from Pinocchio](https://dynibo.readthedocs.io/en/latest/getting-started/choosing-dynibo/)
+for supported workloads, API mappings, and frame/array conversion rules.
 
 ## Features
 
@@ -70,6 +92,11 @@ NumPy arrays or Python sequences, and errors are reported as Python exceptions.
 Requires Python 3.9 or newer and NumPy 1.23 or newer. Prebuilt wheels bundle
 the native library.
 
+The wheel build targets are Linux x86-64 and aarch64 (glibc 2.28+), macOS
+Apple Silicon arm64, and Windows x86-64, for CPython 3.9–3.14. Check the
+[files for your release](https://pypi.org/project/dynibo/#files); older releases
+may not include every target. Alpine/musl wheels are not built.
+
 ## Quick start
 
 Install the Python package from PyPI:
@@ -81,20 +108,55 @@ python -m pip install dynibo
 Load a URDF, compute a target-link pose, and reuse an output buffer for its Jacobian:
 
 ```python
+"""URDF forward kinematics: run with an installed dynibo package; no model download needed."""
+
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 import numpy as np
 
 from dynibo import Robot
 
-with Robot.from_urdf("robot.urdf") as robot:
-    tool = robot.link_id("tool")
-    q = np.zeros(robot.joint_count)
-    pose = robot.forward_kinematics(q, tool)
-    jacobian = np.empty(6 * robot.generalized_count)
-    robot.jacobian(q, tool, out=jacobian)
-    print(pose.translation)
+URDF = """<robot name="pendulum">
+  <link name="base">
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+    </inertial>
+  </link>
+  <link name="arm">
+    <inertial>
+      <origin xyz="0.5 0 0"/>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+    </inertial>
+  </link>
+  <joint name="hinge" type="revolute">
+    <parent link="base"/><child link="arm"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+  <link name="tool"/>
+  <joint name="tip" type="fixed">
+    <parent link="arm"/><child link="tool"/>
+    <origin xyz="1 0 0"/>
+  </joint>
+</robot>"""
+
+with TemporaryDirectory() as directory:
+    path = Path(directory) / "pendulum.urdf"
+    path.write_text(URDF, encoding="utf-8")
+    with Robot.from_urdf(path) as robot:
+        target = robot.link_id("tool")
+        q = np.array([0.3], dtype=np.float64)
+        pose = robot.forward_kinematics(q, target)
+        expected = (np.cos(q[0]), 0.0, -np.sin(q[0]))
+        np.testing.assert_allclose(pose.translation, expected, atol=1e-12)
+        assert len(pose.rotation_xyzw) == 4
+        print("world tool translation:", pose.translation)
 ```
 
-Replace `robot.urdf` and `tool` with your model path and target-link name.
+This example writes its own model into a temporary directory.
 Vector and matrix results are one-dimensional `float64` NumPy arrays;
 matrices use column-major order.
 

@@ -80,6 +80,7 @@ add_custom_command(
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     DEPENDS
         Cargo.toml Cargo.lock
+        docs/rustdoc/index.md
         bindings/c/Cargo.toml ${DYNIBO_RUST_SOURCES}
         bindings/c/include/dynibo/dynibo.h bindings/c/include/dynibo/dynibo.hpp
         bindings/c/include/dynibo/version.h.in

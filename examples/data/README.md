@@ -1,5 +1,8 @@
 # Robot model licenses
 
+`pendulum.urdf` is an original minimal model distributed under dynibo's MIT
+license. The task recipes embed the same model and require no third-party assets.
+
 These third-party robot descriptions retain their own licenses. Dynibo's MIT
 license does not replace them.
 

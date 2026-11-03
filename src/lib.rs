@@ -1,4 +1,4 @@
-//! Tree-structured robot kinematics and dynamics with allocation-free calculation APIs.
+#![doc = include_str!("../docs/rustdoc/index.md")]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

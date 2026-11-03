@@ -98,3 +98,23 @@ components, then joint entries in Dynibo's breadth-first URDF order. RNEA's
 first six outputs are a base wrench, not motor torques. ABA returns the base's
 classical acceleration followed by joint accelerations. See
 [model licensing](data/README.md).
+
+## Small, self-contained task recipes
+
+The six scripts in [`python/recipes/`](python/recipes/) each embed a one-joint
+URDF, need only the installed Python package, and verify an analytical or
+consistency result. They cover forward kinematics, Jacobian/NumPy layout,
+gravity compensation, RNEA/ABA, floating bases, and output-buffer reuse.
+
+```bash
+python examples/python/recipes/forward_kinematics.py
+python examples/python/recipes/jacobian.py
+python examples/python/recipes/gravity_compensation.py
+python examples/python/recipes/inverse_forward_dynamics.py
+python examples/python/recipes/floating_base.py
+python examples/python/recipes/reuse_buffers.py
+cargo run --example recipes
+```
+
+[`rust/recipes.rs`](rust/recipes.rs) checks the same tasks using the bundled
+[`data/pendulum.urdf`](data/pendulum.urdf), an original MIT-licensed example.

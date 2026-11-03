@@ -7,6 +7,7 @@ from package_cases.values import ValueTypeTests
 from package_cases.floating import FloatingMotionTests
 from package_cases.contracts import BindingContractTests
 from package_cases.array_allocation import ArrayAllocationTests
+from package_cases.documentation import DocumentationTests
 
 
 if __name__ == "__main__":

@@ -10,8 +10,8 @@
 cargo add dynibo
 ```
 
-支持的 Rust 版本和 crate features 可以在
-[Rust API 参考](https://docs.rs/dynibo)中查看。
+最低支持 **Rust 1.88**，CI 会用该版本验证整个 workspace。
+crate features 可以在 [Rust API 参考](https://docs.rs/dynibo)中查看。
 
 ## Python
 
@@ -22,6 +22,26 @@ python -m pip install dynibo
 ```
 
 wheel 包含直接调用 Rust core 的 PyO3 扩展，并以 NumPy 作为运行时数组依赖。
+
+### Wheel 构建目标
+
+CI 和 tag 发布流程会为以下平台构建并安装测试 CPython 3.9–3.14 的 wheel：
+
+| 平台 | 架构 | Linux 兼容要求 |
+|---|---|---|
+| Linux | x86-64 | glibc 2.28 或更新版本 |
+| Linux | aarch64 / ARM64 | glibc 2.28 或更新版本 |
+| macOS | Apple Silicon arm64 | — |
+| Windows | x86-64 | — |
+
+Linux aarch64 使用原生 `ubuntu-24.04-arm` runner，生成
+`manylinux_2_28_aarch64` wheel。目前不构建 Alpine/musl wheel。
+已发布版本的实际覆盖范围请查看对应的 [PyPI 文件](https://pypi.org/project/dynibo/#files)，
+旧版本不一定具备所有目标。若希望只安装 wheel、避免意外从源码构建，可使用：
+
+```bash
+python -m pip install --only-binary=:all: dynibo
+```
 
 ## C 和 C++
 

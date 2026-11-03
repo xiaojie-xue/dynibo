@@ -26,8 +26,9 @@ fn main() -> dynibo::Result<()> {
 ## Allocation and concurrency
 
 Create output buffers once when repeatedly calculating matrices or generalized
-forces. A `Workspace` is model-scoped and mutable; use one per concurrent
-calculation. A `LinkId` is also model-scoped and cannot be mixed with an
+forces. Each `Robot` or `FloatingRobot` owns its calculation storage; use
+`fork()` to create independent storage for concurrent calculations.
+A `LinkId` is also model-scoped and cannot be mixed with an
 independently loaded model.
 
 ## Types and errors
@@ -38,3 +39,10 @@ named angular/linear and torque/force components. Fallible calls return
 the error variant preserves detail.
 
 [Open the Rust API reference](https://docs.rs/dynibo){ .md-button }
+
+## Runnable tasks
+
+Run `cargo run --example recipes` from the repository root to verify FK,
+Jacobians, gravity compensation, RNEA/ABA, floating bases, and buffer reuse.
+The [crate homepage](https://docs.rs/dynibo) includes a complete quick start
+with an embedded URDF.

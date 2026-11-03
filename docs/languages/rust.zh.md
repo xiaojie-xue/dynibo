@@ -35,3 +35,9 @@ angular/linear 与 torque/force 分量。可能失败的调用返回 `dynibo::Re
 `Error::category()` 提供稳定的粗粒度类别，具体 error variant 则保留详细信息。
 
 [打开 Rust API 参考](https://docs.rs/dynibo){ .md-button }
+
+## 可运行任务
+
+在仓库根目录运行 `cargo run --example recipes` 可验证 FK、雅可比、重力补偿、
+RNEA/ABA、浮动基座与存储复用。[crate 首页](https://docs.rs/dynibo)提供内嵌
+URDF 的完整入门程序。

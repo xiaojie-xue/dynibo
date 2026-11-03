@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+import runpy
 import dynibo
 
-from .support import reference, motion_base, twist_values
+from .support import URDF, reference, motion_base, twist_values
 
 
 class ValueTypeTests(unittest.TestCase):
+    def test_numpy_spatial_vector_inputs(self) -> None:
+        cases = Path(__file__).resolve().parents[1] / "typing" / "vector_inputs.py"
+        check = runpy.run_path(str(cases))["check_vector_inputs"]
+        with dynibo.Robot.from_urdf(URDF) as robot:
+            check(robot.load_buffer(), robot.link_id("test_link_4"))
+
     def test_defaults_and_properties(self) -> None:
         self.assertEqual(dynibo.Pose().translation, (0.0, 0.0, 0.0))
         self.assertEqual(dynibo.Pose().rotation_xyzw, (0.0, 0.0, 0.0, 1.0))
