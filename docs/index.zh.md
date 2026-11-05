@@ -13,14 +13,14 @@ C++ 和 C 接口。
 
 ### 快速
 
-核心算法使用 Rust 编写，并以复用内存为设计目标。创建 `Workspace` 和所需的输出
+核心算法使用 Rust 编写，并以复用内存为设计目标。创建 `Robot` 或 `FloatingRobot` 和所需的输出
 buffer 后，主要运动学与动力学接口不会在计算循环中分配内存或调整容量。在项目公布的
 benchmark 中，所测核心操作的运行速度是 Pinocchio 的 1.19–2.51 倍。
 
 ### 轻量
 
 Dynibo 专注于一组紧凑、常用的机器人算法，而不是构建庞大的框架。API 围绕少量共同
-概念组织：`Robot`、`Workspace`、`LinkId`、`Frame`、`Twist` 和 `Wrench`；四种
+概念组织：`Robot`、`FloatingRobot`、`LinkId`、`Frame`、`Twist` 和 `Wrench`；四种
 语言接口共享这套词汇。
 
 ### 可靠
@@ -35,7 +35,7 @@ Workspace 复用和内存分配行为。核心数值结果还会与独立的 Pin
 | 模型 | 加载 URDF、查询 link、配置固定基座或浮动基座 | [机器人模型与 URDF](user-guide/robot-model-and-urdf.md) |
 | 运动学 | 位姿、雅可比矩阵、雅可比时间导数、空间速度与加速度 | [运动学](user-guide/kinematics.md) |
 | 逆运动学 | 使用阻尼最小二乘法求解目标位姿 | [运动学](user-guide/kinematics.md#inverse-kinematics) |
-| 动力学 | 质量矩阵、速度乘积力、重力项与逆动力学 | [动力学](user-guide/dynamics.md) |
+| 动力学 | 质量矩阵、速度乘积力、重力补偿、RNEA 逆动力学与 ABA 正动力学 | [动力学](user-guide/dynamics.md) |
 | 载荷 | 向 link 施加外部 wrench | [外部载荷](user-guide/external-loads.md) |
 
 在解释数值结果前，请先阅读[参考系与空间向量](user-guide/frames-and-spatial-vectors.md)，
@@ -45,7 +45,7 @@ Workspace 复用和内存分配行为。核心数值结果还会与独立的 Pin
 
 | 接口 | 适用场景 | API 风格 |
 |---|---|---|
-| [Rust](languages/rust.md) | 原生 Rust 应用和显式内存控制 | `Robot` 方法，显式复用 `Workspace` |
+| [Rust](languages/rust.md) | 原生 Rust 应用和显式内存控制 | `Robot` 方法，内部复用存储，调用者提供输出切片 |
 | [Python](languages/python.md) | 科研、脚本和快速原型 | `Robot` 方法，内部持有 workspace |
 | [C++](languages/cpp.md) | 需要 RAII 和异常处理的 C++ 应用 | 只可移动的 `dynibo::Robot` 封装 |
 | [C](languages/c.md) | 稳定 ABI 和其他语言集成 | opaque handle 与 `dynibo_*` 函数 |
@@ -64,3 +64,9 @@ Workspace 复用和内存分配行为。核心数值结果还会与独立的 Pin
   [C](c-api/dynibo_8h.md) 或 [Rust](https://docs.rs/dynibo)。
 - [GitHub 源代码](https://github.com/xiaojie-xue/dynibo) — 查看示例、issue、benchmark
   和开发信息。
+
+## 按任务开始
+
+[六个可运行任务示例](recipes/index.md)内嵌小型 URDF，并验证数值结果。
+[选型与迁移](getting-started/choosing-dynibo.md)解释适用范围，以及从 Pinocchio
+迁移时的关节、数组和参考系转换。

@@ -37,3 +37,5 @@ jobs:
         run: cargo doc-katex
       - name: Build documentation
         run: mkdocs build --strict
+      - name: Check generated API and recipe content
+        run: python ci/check-docs.py

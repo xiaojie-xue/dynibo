@@ -10,8 +10,8 @@ Add dynibo from crates.io:
 cargo add dynibo
 ```
 
-The supported Rust version and crate features are listed in the
-[Rust API reference](https://docs.rs/dynibo).
+The minimum supported Rust version is **1.88**, tested in CI for the complete
+workspace. Crate features are listed in the [Rust API reference](https://docs.rs/dynibo).
 
 ## Python
 
@@ -23,6 +23,27 @@ python -m pip install dynibo
 
 The wheel contains a PyO3 extension that calls the Rust core directly. NumPy is
 installed as its runtime array dependency.
+
+### Wheel build targets
+
+CI and tagged releases build and install-test CPython 3.9–3.14 wheels on:
+
+| Platform | Architecture | Linux compatibility |
+|---|---|---|
+| Linux | x86-64 | glibc 2.28 or newer |
+| Linux | aarch64 / ARM64 | glibc 2.28 or newer |
+| macOS | Apple Silicon arm64 | — |
+| Windows | x86-64 | — |
+
+Linux aarch64 runs on a native `ubuntu-24.04-arm` runner and produces
+`manylinux_2_28_aarch64` wheels. Alpine/musl is not a wheel target.
+For an already published version, check its [PyPI files](https://pypi.org/project/dynibo/#files):
+older versions may not have every target. To require a wheel and avoid an
+unexpected source build, use:
+
+```bash
+python -m pip install --only-binary=:all: dynibo
+```
 
 ## C and C++
 

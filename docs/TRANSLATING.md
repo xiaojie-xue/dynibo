@@ -10,11 +10,13 @@ prefer the concise Chinese term. Keep headings and examples aligned between the
 two files so readers land at the corresponding content when switching language.
 
 The Rust, Python, C++, and C generated API references remain English-only. Their
-source comments and docstrings are the single source of truth; do not create
+source comments and typed-interface docstrings are the single source of truth;
+the Python reference reads `bindings/python/dynibo/_dynibo.pyi`. Do not create
 translated copies of generated pages.
 
 Before submitting documentation changes, run:
 
 ```bash
 mkdocs build --strict
+python ci/check-docs.py
 ```

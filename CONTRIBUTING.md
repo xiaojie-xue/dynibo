@@ -8,7 +8,7 @@ be discussed.
 
 Development requires:
 
-- stable Rust with `rustfmt` and `clippy`;
+- Rust 1.88 or newer, with `rustfmt` and `clippy` on stable;
 - Python 3.9 or newer for the Python binding;
 - CMake 3.16 or newer and a C/C++ compiler for the native package.
 
@@ -72,6 +72,14 @@ git push origin main vX.Y.Z
 The release workflow repeats the tag/version consistency check before building
 or publishing any artifacts.
 
+Python wheel jobs in `package-ci.yml` and `release.yml` must target the same
+runners. Linux aarch64 uses native `ubuntu-24.04-arm` with cibuildwheel's
+`auto64` architecture selection and the `manylinux_2_28` image. It runs the
+same installed-package tests as Linux x86-64, including typing artifacts and
+task recipes. Its artifact name contains `Linux-ARM64`; the release's
+`release-python-*` download includes it automatically, and publishing waits
+for every wheel matrix entry to pass.
+
 ## Guidelines
 
 - The core library (`src/`) forbids unsafe Rust with `#![forbid(unsafe_code)]`.
@@ -80,9 +88,42 @@ or publishing any artifacts.
   code for FFI and allocation instrumentation.
 - Keep changes focused and add tests for new behavior or bug fixes.
 - Update public API documentation and examples when usage changes.
+- Keep `bindings/python/dynibo/_dynibo.pyi` aligned with the native public API.
+  Its signatures and docstrings generate the Python reference without loading
+  the extension. `__init__.pyi` re-exports the public names; both stubs and
+  `py.typed` must remain in installed wheels and source distributions.
 - Keep `README.md` and `README.zh.md` aligned.
 - Include reproducible measurements and environment details for performance
   changes.
+
+For Python API, typing, and documentation changes, install the package into a
+virtual environment and run:
+
+```bash
+python -m pip install --group docs --group typing .
+python -m mypy.stubtest dynibo
+python -m mypy --strict tests/python/typing/*.py examples/python/recipes/*.py
+mkdocs build --strict
+python ci/check-docs.py
+cargo test -p dynibo --doc --locked
+cargo run --example recipes --locked
+```
+
+The installed-package suite also runs all six Python recipes and checks the
+shipped typing artifacts. Documentation builds expand the recipe scripts via
+MkDocs snippets; edit each script rather than duplicating its code in Markdown.
+
+## Project listing metadata
+
+Keep the GitHub About description aligned with `package.description` in
+`Cargo.toml` and `project.description` in `pyproject.toml`. Link the About
+website to `https://dynibo.readthedocs.io/`. Use these repository topics to
+describe the supported tasks and interfaces:
+
+```text
+robotics kinematics robot-dynamics rigid-body-dynamics urdf
+inverse-kinematics jacobian floating-base rust python
+```
 
 In the pull request description, briefly explain the change and list the checks
 you ran.

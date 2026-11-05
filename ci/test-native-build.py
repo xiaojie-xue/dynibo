@@ -67,6 +67,8 @@ def test_build(work: Path) -> None:
             PROJECT / name, source / name,
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "results"),
         )
+    # The crate-level documentation is included at compile time by src/lib.rs.
+    shutil.copytree(PROJECT / "docs" / "rustdoc", source / "docs" / "rustdoc")
 
     build = work / "native build"
     environment = os.environ.copy()

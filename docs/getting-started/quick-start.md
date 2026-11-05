@@ -7,6 +7,14 @@ All interfaces follow the same workflow:
 3. Create a joint-position vector in non-fixed URDF joint order.
 4. Run a calculation.
 
+First save this complete model as `robot.urdf` in the working directory.
+The target link is named `tool`; the joint rotates about y. No meshes or ROS
+installation are required.
+
+```xml
+--8<-- "examples/data/pendulum.urdf"
+```
+
 === "Rust"
 
     ```rust
@@ -103,3 +111,5 @@ The examples differ in resource and error handling, not in numerical meaning.
 Continue with [API Mapping](../languages/api-mapping.md) to understand that mapping,
 then read [Frames and Spatial Vectors](../user-guide/frames-and-spatial-vectors.md) before
 using matrix or spatial-vector results.
+
+For standalone scripts with numerical checks, see the [task recipes](../recipes/index.md).

@@ -2,13 +2,14 @@
 name = "dynibo"
 version.workspace = true
 edition = "2024"
-description = "Tree-structured robot kinematics and dynamics with runtime-size workspace APIs"
+rust-version.workspace = true
+description = "Robot kinematics and rigid-body dynamics with URDF, Jacobians, inverse kinematics, RNEA and ABA"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/xiaojie-xue/dynibo"
 homepage = "https://github.com/xiaojie-xue/dynibo"
 documentation = "https://docs.rs/dynibo"
-keywords = ["robotics", "kinematics", "dynamics", "urdf"]
+keywords = ["robotics", "kinematics", "dynamics", "urdf", "inverse-kinematics"]
 categories = ["science::robotics", "simulation"]
 exclude = [
     ".github/",
@@ -31,6 +32,7 @@ resolver = "3"
 
 [workspace.package]
 version = "0.5.3"
+rust-version = "1.88"
 
 [features]
 default = []
@@ -68,6 +70,10 @@ path = "examples/rust/franka.rs"
 [[example]]
 name = "g1"
 path = "examples/rust/g1.rs"
+
+[[example]]
+name = "recipes"
+path = "examples/rust/recipes.rs"
 
 [profile.release]
 codegen-units = 1

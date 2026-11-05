@@ -4,7 +4,7 @@
 
 <h1>dynibo</h1>
 
-<p><strong>a fast, reliable and easy to use library for robot kinematics and dynamics</strong></p>
+<p><strong>Robot kinematics and rigid-body dynamics with URDF, Jacobians, inverse kinematics, RNEA and ABA</strong></p>
 
 <p>
   <a href="https://dynibo.readthedocs.io/en/latest/zh/">文档</a> &nbsp;&middot;&nbsp;
@@ -23,6 +23,26 @@
 
 `dynibo` 是一个面向控制器设计的机器人运动学与动力学库，适用于机械臂、人形机器人等
 多种形态，支持固定和浮动基座。它可从 URDF 加载机器人模型，并提供 Rust、Python、C 和 C++ 接口。
+
+## 算法与任务示例
+
+Dynibo 提供正运动学（FK）、世界几何雅可比及其时间导数、阻尼最小二乘逆运动学（IK）、
+质量矩阵、重力补偿、递归牛顿–欧拉逆动力学（RNEA）和关节体正动力学（ABA）。
+固定与浮动基座使用同一套 Rust 核心；IK 适用于固定基座。
+
+| 任务 | 完整且经过验证的示例 |
+|---|---|
+| 加载 URDF 并计算工具位姿 | [正运动学](https://dynibo.readthedocs.io/en/latest/zh/recipes/forward-kinematics/) |
+| 计算雅可比并转换 NumPy 布局 | [雅可比与数组布局](https://dynibo.readthedocs.io/en/latest/zh/recipes/jacobian/) |
+| 计算保持力矩 | [重力补偿](https://dynibo.readthedocs.io/en/latest/zh/recipes/gravity-compensation/) |
+| 计算力矩或恢复加速度 | [RNEA 与 ABA](https://dynibo.readthedocs.io/en/latest/zh/recipes/inverse-forward-dynamics/) |
+| 计算浮动基座机器人 | [浮动基座动力学](https://dynibo.readthedocs.io/en/latest/zh/recipes/floating-base/) |
+| 在重复计算中复用数组 | [输出缓冲区](https://dynibo.readthedocs.io/en/latest/zh/recipes/reuse-buffers/) |
+
+每个 Python 示例都内嵌小型 URDF 并校验数值结果，无需 ROS 或下载 mesh。
+Rust 用户可在仓库中执行 `cargo run --example recipes` 运行相同六类任务。
+[选型与 Pinocchio 迁移指南](https://dynibo.readthedocs.io/en/latest/zh/getting-started/choosing-dynibo/)
+介绍了适用范围、API 映射和参考系、数组转换约定。
 
 ## 特性
 
@@ -105,13 +125,44 @@ cargo add dynibo
 ```rust
 use dynibo::Robot;
 
-fn main() -> dynibo::Result<()> {
-    let mut robot = Robot::from_urdf("robot.urdf")?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let urdf = r#"<robot name="arm">
+      <link name="base"/>
+      <link name="arm">
+        <inertial>
+          <origin xyz="0.5 0 0"/>
+          <mass value="1"/>
+          <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+        </inertial>
+      </link>
+      <joint name="hinge" type="revolute">
+        <parent link="base"/><child link="arm"/>
+        <axis xyz="0 1 0"/>
+        <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+      </joint>
+      <link name="tool"/>
+      <joint name="tip" type="fixed">
+        <parent link="arm"/><child link="tool"/>
+        <origin xyz="1 0 0"/>
+      </joint>
+    </robot>"#;
+    let path = std::env::temp_dir()
+        .join(format!("dynibo-quick-start-{}.urdf", std::process::id()));
+    std::fs::write(&path, urdf)?;
+    let loaded = Robot::from_urdf(&path);
+    std::fs::remove_file(&path)?;
+    let mut robot = loaded?;
     let tool = robot.link_id("tool")?;
-    let q = vec![0.0; robot.joint_count()];
-
+    let q = [0.3_f64];
     let pose = robot.forward_kinematics(&q, tool)?;
-    println!("translation: {}", pose.translation.vector.transpose());
+    assert!((pose.translation.x - q[0].cos()).abs() < 1.0e-12);
+    assert!((pose.translation.z + q[0].sin()).abs() < 1.0e-12);
+
+    let mut jacobian = vec![0.0; 6 * robot.generalized_count()];
+    robot.jacobian(&q, tool, &mut jacobian)?;
+    let mut gravity = vec![0.0; robot.generalized_count()];
+    robot.gravity(&q, &[], &mut gravity)?;
+    println!("translation: {:?}; holding torque: {:?}", pose.translation, gravity);
     Ok(())
 }
 ```
@@ -127,17 +178,52 @@ python -m pip install dynibo
 Python binding 会在内部持有并复用原生计算存储：
 
 ```python
+"""URDF forward kinematics: run with an installed dynibo package; no model download needed."""
+
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 import numpy as np
 
 from dynibo import Robot
 
-with Robot.from_urdf("robot.urdf") as robot:
-    tool = robot.link_id("tool")
-    q = np.zeros(robot.joint_count)
-    pose = robot.forward_kinematics(q, tool)
-    jacobian = np.empty(6 * robot.generalized_count)
-    robot.jacobian(q, tool, out=jacobian)
-    print(pose.translation)
+URDF = """<robot name="pendulum">
+  <link name="base">
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+    </inertial>
+  </link>
+  <link name="arm">
+    <inertial>
+      <origin xyz="0.5 0 0"/>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+    </inertial>
+  </link>
+  <joint name="hinge" type="revolute">
+    <parent link="base"/><child link="arm"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+  <link name="tool"/>
+  <joint name="tip" type="fixed">
+    <parent link="arm"/><child link="tool"/>
+    <origin xyz="1 0 0"/>
+  </joint>
+</robot>"""
+
+with TemporaryDirectory() as directory:
+    path = Path(directory) / "pendulum.urdf"
+    path.write_text(URDF, encoding="utf-8")
+    with Robot.from_urdf(path) as robot:
+        target = robot.link_id("tool")
+        q = np.array([0.3], dtype=np.float64)
+        pose = robot.forward_kinematics(q, target)
+        expected = (np.cos(q[0]), 0.0, -np.sin(q[0]))
+        np.testing.assert_allclose(pose.translation, expected, atol=1e-12)
+        assert len(pose.rotation_xyzw) == 4
+        print("world tool translation:", pose.translation)
 ```
 
 ### C/C++

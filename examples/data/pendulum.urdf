@@ -1,0 +1,25 @@
+<robot name="pendulum">
+  <link name="base">
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+    </inertial>
+  </link>
+  <link name="arm">
+    <inertial>
+      <origin xyz="0.5 0 0"/>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+    </inertial>
+  </link>
+  <joint name="hinge" type="revolute">
+    <parent link="base"/><child link="arm"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+  <link name="tool"/>
+  <joint name="tip" type="fixed">
+    <parent link="arm"/><child link="tool"/>
+    <origin xyz="1 0 0"/>
+  </joint>
+</robot>

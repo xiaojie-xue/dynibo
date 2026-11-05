@@ -4,7 +4,7 @@
 
 <h1>dynibo</h1>
 
-<p><strong>a fast, reliable and easy to use library for robot kinematics and dynamics</strong></p>
+<p><strong>Robot kinematics and rigid-body dynamics with URDF, Jacobians, inverse kinematics, RNEA and ABA</strong></p>
 
 <p>
   <a href="https://dynibo.readthedocs.io/">Documentation</a> &nbsp;&middot;&nbsp;
@@ -25,6 +25,29 @@
 It supports manipulators, humanoids, and other robots with fixed or floating
 bases. It loads robot models from URDF and provides Rust, Python, C, and C++
 interfaces.
+
+## Algorithms and task recipes
+
+Dynibo provides forward kinematics (FK), world geometric Jacobians and their
+time derivatives, damped least-squares inverse kinematics (IK), mass matrices,
+gravity compensation, recursive Newton–Euler inverse dynamics (RNEA), and
+articulated-body forward dynamics (ABA). Fixed and floating bases use the same
+Rust core; IK is available for fixed bases.
+
+| Task | Complete, verified example |
+|---|---|
+| Load URDF and calculate a tool pose | [Forward kinematics](https://dynibo.readthedocs.io/en/latest/recipes/forward-kinematics/) |
+| Compute a Jacobian and reshape for NumPy | [Jacobian and array layout](https://dynibo.readthedocs.io/en/latest/recipes/jacobian/) |
+| Calculate holding torque | [Gravity compensation](https://dynibo.readthedocs.io/en/latest/recipes/gravity-compensation/) |
+| Calculate torque or recover acceleration | [RNEA and ABA](https://dynibo.readthedocs.io/en/latest/recipes/inverse-forward-dynamics/) |
+| Evaluate a floating-base robot | [Floating-base dynamics](https://dynibo.readthedocs.io/en/latest/recipes/floating-base/) |
+| Reuse arrays in repeated calculations | [Output buffers](https://dynibo.readthedocs.io/en/latest/recipes/reuse-buffers/) |
+
+Each Python recipe embeds a small URDF and checks its numerical output, with
+no ROS or mesh downloads. Rust users can run the same six tasks with
+`cargo run --example recipes` from this repository.
+See [Choosing Dynibo and migrating from Pinocchio](https://dynibo.readthedocs.io/en/latest/getting-started/choosing-dynibo/)
+for supported workloads, API mappings, and frame/array conversion rules.
 
 ## Features
 
@@ -117,13 +140,44 @@ Load a URDF and compute a target-link pose:
 ```rust
 use dynibo::Robot;
 
-fn main() -> dynibo::Result<()> {
-    let mut robot = Robot::from_urdf("robot.urdf")?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let urdf = r#"<robot name="arm">
+      <link name="base"/>
+      <link name="arm">
+        <inertial>
+          <origin xyz="0.5 0 0"/>
+          <mass value="1"/>
+          <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+        </inertial>
+      </link>
+      <joint name="hinge" type="revolute">
+        <parent link="base"/><child link="arm"/>
+        <axis xyz="0 1 0"/>
+        <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+      </joint>
+      <link name="tool"/>
+      <joint name="tip" type="fixed">
+        <parent link="arm"/><child link="tool"/>
+        <origin xyz="1 0 0"/>
+      </joint>
+    </robot>"#;
+    let path = std::env::temp_dir()
+        .join(format!("dynibo-quick-start-{}.urdf", std::process::id()));
+    std::fs::write(&path, urdf)?;
+    let loaded = Robot::from_urdf(&path);
+    std::fs::remove_file(&path)?;
+    let mut robot = loaded?;
     let tool = robot.link_id("tool")?;
-    let q = vec![0.0; robot.joint_count()];
-
+    let q = [0.3_f64];
     let pose = robot.forward_kinematics(&q, tool)?;
-    println!("translation: {}", pose.translation.vector.transpose());
+    assert!((pose.translation.x - q[0].cos()).abs() < 1.0e-12);
+    assert!((pose.translation.z + q[0].sin()).abs() < 1.0e-12);
+
+    let mut jacobian = vec![0.0; 6 * robot.generalized_count()];
+    robot.jacobian(&q, tool, &mut jacobian)?;
+    let mut gravity = vec![0.0; robot.generalized_count()];
+    robot.gravity(&q, &[], &mut gravity)?;
+    println!("translation: {:?}; holding torque: {:?}", pose.translation, gravity);
     Ok(())
 }
 ```
@@ -139,17 +193,52 @@ python -m pip install dynibo
 The Python binding owns its reusable native calculation storage:
 
 ```python
+"""URDF forward kinematics: run with an installed dynibo package; no model download needed."""
+
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 import numpy as np
 
 from dynibo import Robot
 
-robot = Robot.from_urdf("robot.urdf")
-tool = robot.link_id("tool")
-q = np.zeros(robot.joint_count)
-pose = robot.forward_kinematics(q, tool)
-jacobian = np.empty(6 * robot.generalized_count)
-robot.jacobian(q, tool, out=jacobian)
-print(pose.translation)
+URDF = """<robot name="pendulum">
+  <link name="base">
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+    </inertial>
+  </link>
+  <link name="arm">
+    <inertial>
+      <origin xyz="0.5 0 0"/>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.1"/>
+    </inertial>
+  </link>
+  <joint name="hinge" type="revolute">
+    <parent link="base"/><child link="arm"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.14" upper="3.14" effort="100" velocity="10"/>
+  </joint>
+  <link name="tool"/>
+  <joint name="tip" type="fixed">
+    <parent link="arm"/><child link="tool"/>
+    <origin xyz="1 0 0"/>
+  </joint>
+</robot>"""
+
+with TemporaryDirectory() as directory:
+    path = Path(directory) / "pendulum.urdf"
+    path.write_text(URDF, encoding="utf-8")
+    with Robot.from_urdf(path) as robot:
+        target = robot.link_id("tool")
+        q = np.array([0.3], dtype=np.float64)
+        pose = robot.forward_kinematics(q, target)
+        expected = (np.cos(q[0]), 0.0, -np.sin(q[0]))
+        np.testing.assert_allclose(pose.translation, expected, atol=1e-12)
+        assert len(pose.rotation_xyzw) == 4
+        print("world tool translation:", pose.translation)
 ```
 
 ### C/C++

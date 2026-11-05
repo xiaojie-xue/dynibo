@@ -15,7 +15,7 @@ Rust implementation.
 ### Fast
 
 The core algorithms are written in Rust and designed to reuse memory. Once a
-`Workspace` and the required output buffers have been created, the main
+`Robot` or `FloatingRobot` and the required output buffers have been created, the main
 kinematics and dynamics routines do not allocate or resize memory inside the
 calculation loop. In the benchmark set published with the project, the measured
 core operations run 1.19–2.51× as fast as Pinocchio.
@@ -23,7 +23,7 @@ core operations run 1.19–2.51× as fast as Pinocchio.
 ### Lightweight
 
 Dynibo focuses on a compact set of commonly used operations instead of a large
-framework. Its API is built around a small vocabulary—`Robot`, `Workspace`,
+framework. Its API is built around a small vocabulary—`Robot`, `FloatingRobot`,
 `LinkId`, `Frame`, `Twist`, and `Wrench`—shared by all four language
 interfaces.
 
@@ -41,7 +41,7 @@ independent Pinocchio oracle.
 | Model | Load URDF models, look up links, configure fixed or floating bases | [Robot model and URDF](user-guide/robot-model-and-urdf.md) |
 | Kinematics | Poses, Jacobians, Jacobian derivatives, spatial velocities and accelerations | [Kinematics](user-guide/kinematics.md) |
 | Inverse kinematics | Damped least-squares target-pose solving | [Kinematics](user-guide/kinematics.md#inverse-kinematics) |
-| Dynamics | Mass matrix, velocity-product forces, gravity and inverse dynamics | [Dynamics](user-guide/dynamics.md) |
+| Dynamics | Mass matrix, velocity-product forces, gravity compensation, RNEA and ABA | [Dynamics](user-guide/dynamics.md) |
 | Loads | Apply external wrenches to links | [External loads](user-guide/external-loads.md) |
 
 Before interpreting numerical results, read [Frames and spatial
@@ -52,7 +52,7 @@ ordering, matrix layout, units, and reference frames.
 
 | Interface | Best for | API style |
 |---|---|---|
-| [Rust](languages/rust.md) | Native Rust applications and explicit memory control | `Robot` methods with a reusable `Workspace` |
+| [Rust](languages/rust.md) | Native Rust applications and explicit memory control | `Robot` methods with owned storage and caller-provided output slices |
 | [Python](languages/python.md) | Research, scripting, and rapid prototyping | `Robot` methods with an internally owned workspace |
 | [C++](languages/cpp.md) | C++ applications that want RAII and exceptions | Move-only `dynibo::Robot` wrapper |
 | [C](languages/c.md) | Stable ABI and integration with other languages | Opaque handles and `dynibo_*` functions |
@@ -75,3 +75,9 @@ corresponding names, ownership rules, and error models side by side.
   [Rust](https://docs.rs/dynibo).
 - [GitHub source code](https://github.com/xiaojie-xue/dynibo) — examples, issue
   tracking, benchmarks, and development information.
+
+## Start with a task
+
+[Six runnable recipes](recipes/index.md) embed a small URDF and verify numerical
+results. [Choosing Dynibo and migrating](getting-started/choosing-dynibo.md)
+explains capability boundaries and Pinocchio joint, array, and frame conversions.

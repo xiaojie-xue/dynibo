@@ -1,5 +1,5 @@
 site_name: dynibo
-site_description: API documentation for dynibo robot kinematics and dynamics
+site_description: Robot kinematics and rigid-body dynamics in Rust and Python, with URDF, Jacobians, inverse kinematics, RNEA and ABA
 site_url: !ENV READTHEDOCS_CANONICAL_URL
 repo_url: https://github.com/xiaojie-xue/dynibo
 repo_name: xiaojie-xue/dynibo
@@ -37,6 +37,15 @@ nav:
   - Getting Started:
       - Installation: getting-started/installation.md
       - Quick Start: getting-started/quick-start.md
+      - Choosing Dynibo and Migrating: getting-started/choosing-dynibo.md
+  - Task Recipes:
+      - Overview: recipes/index.md
+      - URDF Forward Kinematics: recipes/forward-kinematics.md
+      - Jacobian and NumPy Layout: recipes/jacobian.md
+      - Gravity Compensation: recipes/gravity-compensation.md
+      - Inverse and Forward Dynamics: recipes/inverse-forward-dynamics.md
+      - Floating-Base Dynamics: recipes/floating-base.md
+      - Reusing Output Buffers: recipes/reuse-buffers.md
   - User Guide:
       - Overview: user-guide/index.md
       - Robot Model and URDF: user-guide/robot-model-and-urdf.md
@@ -81,6 +90,14 @@ plugins:
             Getting Started: 快速开始
             Installation: 安装
             Quick Start: 入门示例
+            Choosing Dynibo and Migrating: 选型与迁移
+            Task Recipes: 任务示例
+            URDF Forward Kinematics: 从 URDF 计算正运动学
+            Jacobian and NumPy Layout: 雅可比与 NumPy 布局
+            Gravity Compensation: 重力补偿
+            Inverse and Forward Dynamics: 逆动力学与正动力学
+            Floating-Base Dynamics: 浮动基座动力学
+            Reusing Output Buffers: 复用输出缓冲区
             User Guide: 使用指南
             Overview: 概览
             Robot Model and URDF: 机器人模型与 URDF
@@ -117,6 +134,9 @@ plugins:
             show_source: false
             show_symbol_type_heading: true
             show_symbol_type_toc: true
+            show_signature_annotations: true
+            separate_signature: true
+            merge_init_into_class: true
   - mkdoxy:
       doxygen-bin-path: !ENV [DYNIBO_DOXYGEN_BIN, doxygen]
       # Keep generated Markdown under docs so the i18n plugin can classify it
@@ -158,6 +178,8 @@ markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.superfences
+  - pymdownx.snippets:
+      check_paths: true
   - pymdownx.tabbed:
       alternate_style: true
 
