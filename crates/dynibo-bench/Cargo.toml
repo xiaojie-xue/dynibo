@@ -1,0 +1,26 @@
+[package]
+name = "dynibo-bench"
+version.workspace = true
+edition = "2024"
+description = "Criterion benchmarks for dynibo"
+license = "MIT"
+publish = false
+
+[features]
+default = []
+pinocchio-bench = ["dep:dynibo-oracle"]
+
+[dependencies]
+criterion = "0.7.0"
+dynibo = { path = "../.." }
+dynibo-oracle = { path = "../dynibo-oracle", features = ["pinocchio"], optional = true }
+nalgebra = "0.34.1"
+
+[[bench]]
+name = "core"
+harness = false
+
+[[bench]]
+name = "pinocchio"
+harness = false
+required-features = ["pinocchio-bench"]

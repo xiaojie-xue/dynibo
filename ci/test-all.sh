@@ -12,8 +12,8 @@ PYTHONHOME="$("${python_command}" -c 'import sys; print(sys.base_prefix)')" \
     cargo test --workspace --all-targets --locked
 
 if pkg-config --exists pinocchio; then
-    cargo clippy -p dynibo --tests --locked --features pinocchio-tests -- -D warnings
-    cargo test -p dynibo --locked --features pinocchio-tests --tests
+    cargo clippy -p dynibo-oracle --tests --locked --features pinocchio -- -D warnings
+    cargo test -p dynibo-oracle --locked --features pinocchio --tests
 elif [[ "${DYNIBO_REQUIRE_PINOCCHIO:-0}" == "1" ]]; then
     echo "Pinocchio is required, but pkg-config could not find it" >&2
     exit 1

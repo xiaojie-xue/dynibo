@@ -60,9 +60,9 @@ def test_pkg_config(prefix: Path, work: Path) -> None:
 def test_build(work: Path) -> None:
     source = work / "source snapshot"
     source.mkdir()
-    for name in ("Cargo.toml", "Cargo.lock", "CMakeLists.txt", "build.rs", "LICENSE"):
+    for name in ("Cargo.toml", "Cargo.lock", "CMakeLists.txt", "LICENSE"):
         shutil.copy2(PROJECT / name, source / name)
-    for name in ("src", "bindings", "benches", "examples"):
+    for name in ("src", "bindings", "crates", "examples"):
         shutil.copytree(
             PROJECT / name, source / name,
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "results"),

@@ -199,12 +199,19 @@ name = "dynibo"
 version = "0.5.3"
 dependencies = [
  "approx",
- "cc",
- "criterion",
  "getrandom",
  "nalgebra",
- "pkg-config",
  "urdf-rs",
+]
+
+[[package]]
+name = "dynibo-bench"
+version = "0.5.3"
+dependencies = [
+ "criterion",
+ "dynibo",
+ "dynibo-oracle",
+ "nalgebra",
 ]
 
 [[package]]
@@ -213,6 +220,18 @@ version = "0.5.3"
 dependencies = [
  "dynibo",
  "nalgebra",
+]
+
+[[package]]
+name = "dynibo-oracle"
+version = "0.5.3"
+dependencies = [
+ "approx",
+ "cc",
+ "dynibo",
+ "getrandom",
+ "nalgebra",
+ "pkg-config",
 ]
 
 [[package]]

@@ -1,22 +1,23 @@
 //! Shared fixtures and adapters for this integration-test target.
 
-#[path = "../support/pinocchio.rs"]
-mod pinocchio;
-
 use std::path::PathBuf;
 
 use dynibo::{
     BaseState, FloatingRobot, Frame, IndexedLoad, InverseKinematicsOptions, Robot, Twist, Wrench,
 };
+use dynibo_oracle::pinocchio::PinocchioContext;
 use nalgebra::{Quaternion, Rotation3, Translation3, UnitQuaternion, Vector3};
-use pinocchio::PinocchioContext;
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
 
 fn fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/oracle_mixed.urdf")
+    repo_root().join("tests/data/oracle_mixed.urdf")
 }
 
 fn tree_fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_tree_7.urdf")
+    repo_root().join("tests/data/test_tree_7.urdf")
 }
 
 fn deterministic_state(sample: usize) -> ([f64; 4], [f64; 4], [f64; 4]) {
@@ -54,7 +55,7 @@ fn deterministic_tree_state(sample: usize) -> ([f64; 7], [f64; 7], [f64; 7]) {
 }
 
 fn serial_fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_arm.urdf")
+    repo_root().join("tests/data/test_arm.urdf")
 }
 
 fn assert_close(actual: &[f64], expected: &[f64], absolute: f64, relative: f64, context: &str) {
@@ -69,8 +70,7 @@ fn assert_close(actual: &[f64], expected: &[f64], absolute: f64, relative: f64, 
 }
 
 fn binding_reference(key: &str) -> Vec<f64> {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/pinocchio_reference_v1.tsv");
+    let path = repo_root().join("tests/data/pinocchio_reference_v1.tsv");
     let contents = std::fs::read_to_string(path).unwrap();
     contents
         .lines()
