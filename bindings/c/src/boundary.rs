@@ -30,7 +30,7 @@ pub(super) fn core_error(e: dynibo::Error) -> (DyniboStatus, String) {
     (status, e.to_string())
 }
 fn set_error(s: impl Into<String>) {
-    LAST_ERROR.with(|slot| {
+    let _ = LAST_ERROR.try_with(|slot| {
         let mut out = slot.borrow_mut();
         out.clear();
         out.extend(s.into().bytes().map(|b| if b == 0 { b' ' } else { b }));
@@ -38,7 +38,7 @@ fn set_error(s: impl Into<String>) {
     });
 }
 pub(super) fn call(f: impl FnOnce() -> CResult<()>) -> DyniboStatus {
-    LAST_ERROR.with(|slot| {
+    let _ = LAST_ERROR.try_with(|slot| {
         let mut out = slot.borrow_mut();
         out.clear();
         out.push(0);
@@ -178,7 +178,9 @@ macro_rules! reject_struct_output_overlap {
 pub(super) use {reject_output_overlap, reject_struct_output_overlap};
 #[unsafe(no_mangle)]
 pub extern "C" fn dynibo_last_error_message() -> *const c_char {
-    LAST_ERROR.with(|x| x.borrow().as_ptr().cast())
+    LAST_ERROR
+        .try_with(|x| x.borrow().as_ptr().cast())
+        .unwrap_or(c"".as_ptr())
 }
 
 #[cfg(test)]

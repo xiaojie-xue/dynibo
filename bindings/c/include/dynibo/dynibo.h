@@ -17,10 +17,13 @@
  * Matrices are column-major. Jacobians are `6 x G`; mass matrices are `G x G`.
  * Spatial values use angular-before-linear ordering.
  *
- * Unless explicitly documented otherwise, all pointer arguments are non-null.
- * Input arrays have their documented exact length, and numeric output buffers
- * must not overlap any numeric input buffer. A failed call never creates a
- * borrowed output. Invalid arguments return `DYNIBO_STATUS_INVALID_ARGUMENT`.
+ * Unless explicitly documented otherwise, all pointer arguments are non-null,
+ * and string paths and link names must be valid UTF-8. Input arrays have their
+ * documented exact length, and numeric output buffers must not overlap any
+ * numeric input buffer. A failed call never creates a borrowed output. Invalid
+ * arguments return `DYNIBO_STATUS_INVALID_ARGUMENT`. If a call returns
+ * `DYNIBO_STATUS_PANIC`, destroy and recreate the affected workspace before
+ * continuing.
  */
 
 #include <stddef.h>
@@ -68,26 +71,30 @@ typedef struct DyniboIkOptions { size_t max_iterations; double translation_toler
 
 /** Returns the linked ABI version; the static string must not be freed. */
 DYNIBO_API const char *dynibo_version(void);
-/** Returns the calling thread's latest fallible-call error; valid until its next fallible call. */
+/** Returns the calling thread's latest fallible-call error; valid until its next fallible call or thread exit. */
 DYNIBO_API const char *dynibo_last_error_message(void);
+/** Returns the default damped-least-squares inverse-kinematics options. */
 DYNIBO_API DyniboIkOptions dynibo_ik_options_default(void);
 
 /** @name Fixed-base model lifetime and metadata */
 /**@{*/
-/** Loads a fixed-base URDF and writes an owned handle to `output` (null on failure). */
+/** Loads a fixed-base URDF (UTF-8 path) and writes an owned handle to `output` (null on failure). */
 DYNIBO_API DyniboStatus dynibo_robot_from_urdf(const char *path, DyniboRobot **output);
 /** Destroys a fixed robot; null is accepted. */
 DYNIBO_API void dynibo_robot_destroy(DyniboRobot *robot);
 /** Returns a borrowed name, or null for a null handle. */
 DYNIBO_API const char *dynibo_robot_name(const DyniboRobot *robot);
+/** Returns the active joint count, or 0 for a null handle. */
 DYNIBO_API size_t dynibo_robot_joint_count(const DyniboRobot *robot);
+/** Returns the generalized coordinate count, or 0 for a null handle. */
 DYNIBO_API size_t dynibo_robot_generalized_count(const DyniboRobot *robot);
+/** Returns the link count including the root, or 0 for a null handle. */
 DYNIBO_API size_t dynibo_robot_link_count(const DyniboRobot *robot);
-/** Resolves `name` to a link ID valid only for `robot`. */
+/** Resolves UTF-8 `name` to a link ID valid only for `robot`. */
 DYNIBO_API DyniboStatus dynibo_robot_link_id(const DyniboRobot *robot, const char *name, size_t *output);
-/** Stores the fixed root world frame used by later calculations. */
+/** Stores the fixed root world frame used by later calculations. Must not be called concurrently with calculations using `robot`. */
 DYNIBO_API DyniboStatus dynibo_robot_set_base_frame(DyniboRobot *robot, const DyniboPose *frame);
-/** Allocates a workspace belonging to `robot`. */
+/** Allocates a workspace belonging to `robot` and writes it to `output` (null on failure). */
 DYNIBO_API DyniboStatus dynibo_workspace_create(const DyniboRobot *robot, DyniboWorkspace **output);
 /** Destroys a fixed workspace; null is accepted. */
 DYNIBO_API void dynibo_workspace_destroy(DyniboWorkspace *workspace);
@@ -95,14 +102,18 @@ DYNIBO_API void dynibo_workspace_destroy(DyniboWorkspace *workspace);
 
 /** @name Floating-base model lifetime and metadata */
 /**@{*/
-/** Loads a floating-base URDF. The returned handle never stores a base state. */
+/** Loads a floating-base URDF (UTF-8 path). The returned handle never stores a base state (null on failure). */
 DYNIBO_API DyniboStatus dynibo_floating_robot_from_urdf(const char *path, DyniboFloatingRobot **output);
 DYNIBO_API void dynibo_floating_robot_destroy(DyniboFloatingRobot *robot);
 DYNIBO_API const char *dynibo_floating_robot_name(const DyniboFloatingRobot *robot);
+/** Returns the active joint count, or 0 for a null handle. */
 DYNIBO_API size_t dynibo_floating_robot_joint_count(const DyniboFloatingRobot *robot);
+/** Returns the generalized coordinate count, or 0 for a null handle. */
 DYNIBO_API size_t dynibo_floating_robot_generalized_count(const DyniboFloatingRobot *robot);
+/** Returns the link count including the root, or 0 for a null handle. */
 DYNIBO_API size_t dynibo_floating_robot_link_count(const DyniboFloatingRobot *robot);
 DYNIBO_API DyniboStatus dynibo_floating_robot_link_id(const DyniboFloatingRobot *robot, const char *name, size_t *output);
+/** Allocates a floating workspace belonging to `robot` and writes it to `output` (null on failure). */
 DYNIBO_API DyniboStatus dynibo_floating_workspace_create(const DyniboFloatingRobot *robot, DyniboFloatingWorkspace **output);
 DYNIBO_API void dynibo_floating_workspace_destroy(DyniboFloatingWorkspace *workspace);
 /**@}*/

@@ -17,6 +17,35 @@ def run(command: list[str], **kwargs: object) -> None:
     subprocess.run(command, check=True, timeout=600, **kwargs)
 
 
+def check_relocatable_linkage(prefix: Path, build: Path) -> None:
+    if sys.platform == "darwin":
+        lib = prefix / "lib" / "libdynibo_c.dylib"
+        install_id = subprocess.check_output(["otool", "-D", str(lib)], text=True, timeout=30)
+        if "@rpath/libdynibo_c.dylib" not in install_id:
+            raise SystemExit(f"expected @rpath install_name in {lib}, got:\n{install_id}")
+        for binary in (build / "dynibo_c_package_test", build / "dynibo_cpp_package_test"):
+            if not binary.exists():
+                raise SystemExit(f"expected built consumer binary {binary}")
+            deps = subprocess.check_output(["otool", "-L", str(binary)], text=True, timeout=30)
+            if "@rpath/libdynibo_c.dylib" not in deps:
+                raise SystemExit(f"expected @rpath linkage in {binary}, got:\n{deps}")
+    elif sys.platform.startswith("linux") and shutil.which("readelf"):
+        libs = list(prefix.rglob("libdynibo_c.so"))
+        if len(libs) != 1:
+            raise SystemExit(f"expected one libdynibo_c.so under {prefix}, found: {libs}")
+        dynamic = subprocess.check_output(["readelf", "-d", str(libs[0])], text=True, timeout=30)
+        if "(SONAME)" not in dynamic or "[libdynibo_c.so]" not in dynamic:
+            raise SystemExit(f"expected SONAME [libdynibo_c.so] in {libs[0]}, got:\n{dynamic}")
+        for binary in (build / "dynibo_c_package_test", build / "dynibo_cpp_package_test"):
+            if not binary.exists():
+                raise SystemExit(f"expected built consumer binary {binary}")
+            deps = subprocess.check_output(["readelf", "-d", str(binary)], text=True, timeout=30)
+            if "(NEEDED)" not in deps or "[libdynibo_c.so]" not in deps:
+                raise SystemExit(
+                    f"expected non-path NEEDED [libdynibo_c.so] in {binary}, got:\n{deps}"
+                )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--package-dir", type=Path, required=True)
@@ -53,6 +82,7 @@ def main() -> None:
         f"-DCMAKE_BUILD_TYPE={args.configuration}",
     ])
     run(["cmake", "--build", str(build), "--config", args.configuration, "--parallel"])
+    check_relocatable_linkage(prefix, build)
 
     environment = os.environ.copy()
     path_entries = [prefix / "bin", prefix / "lib"]

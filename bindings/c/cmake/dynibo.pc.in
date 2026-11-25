@@ -10,4 +10,4 @@ Name: dynibo
 Description: Tree-structured robot kinematics and dynamics C API
 Version: @PROJECT_VERSION@
 Libs: -L${quoted_libdir} -ldynibo_c
-Cflags: -I${quoted_includedir}
+Cflags: -I${quoted_includedir}@DYNIBO_PC_EXTRA_CFLAGS@

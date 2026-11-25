@@ -163,6 +163,12 @@ fn metadata_and_factory_error_paths_are_reported() {
             DyniboStatus::InvalidArgument
         );
 
+        let mut sentinel_fixed = ptr::dangling_mut();
+        assert_eq!(
+            dynibo_workspace_create(ptr::null(), &mut sentinel_fixed),
+            DyniboStatus::InvalidArgument
+        );
+        assert!(sentinel_fixed.is_null());
         assert_eq!(
             dynibo_workspace_create(ptr::null(), ptr::null_mut()),
             DyniboStatus::InvalidArgument
@@ -171,6 +177,12 @@ fn metadata_and_factory_error_paths_are_reported() {
             dynibo_workspace_create(handles.fixed, ptr::null_mut()),
             DyniboStatus::InvalidArgument
         );
+        let mut sentinel_floating = ptr::dangling_mut();
+        assert_eq!(
+            dynibo_floating_workspace_create(ptr::null(), &mut sentinel_floating),
+            DyniboStatus::InvalidArgument
+        );
+        assert!(sentinel_floating.is_null());
         assert_eq!(
             dynibo_floating_workspace_create(ptr::null(), ptr::null_mut()),
             DyniboStatus::InvalidArgument

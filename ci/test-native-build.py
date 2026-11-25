@@ -78,6 +78,7 @@ def test_build(work: Path) -> None:
     run(["cmake", "--build", str(build), "--config", "Debug", "--parallel"], env=environment)
     installed = work / "custom install"
     run(["cmake", "--install", str(build), "--prefix", str(installed), "--config", "Debug"])
+    shutil.rmtree(build)
     relocated = work / "relocated install"
     installed.rename(relocated)
     test_pkg_config(relocated, work / "consumer build")

@@ -345,8 +345,9 @@ pub unsafe extern "C" fn dynibo_workspace_create(
     out: *mut *mut DyniboWorkspace,
 ) -> DyniboStatus {
     call(|| {
-        let robot = unsafe { required_ref(p, "robot") }?;
         let out = unsafe { required_mut(out, "output") }?;
+        *out = ptr::null_mut();
+        let robot = unsafe { required_ref(p, "robot") }?;
         *out = Box::into_raw(Box::new(DyniboWorkspace {
             inner: robot.inner.robot(),
             poses: vec![Frame::identity(); robot.inner.link_count()].into_boxed_slice(),
@@ -362,8 +363,9 @@ pub unsafe extern "C" fn dynibo_floating_workspace_create(
     out: *mut *mut DyniboFloatingWorkspace,
 ) -> DyniboStatus {
     call(|| {
-        let robot = unsafe { required_ref(p, "robot") }?;
         let out = unsafe { required_mut(out, "output") }?;
+        *out = ptr::null_mut();
+        let robot = unsafe { required_ref(p, "robot") }?;
         *out = Box::into_raw(Box::new(DyniboFloatingWorkspace {
             inner: robot.inner.floating_robot().map_err(core_error)?,
             poses: vec![Frame::identity(); robot.inner.link_count()].into_boxed_slice(),

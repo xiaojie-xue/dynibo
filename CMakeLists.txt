@@ -31,6 +31,14 @@ configure_file(
     bindings/c/include/dynibo/version.h.in
     "${DYNIBO_GENERATED_INCLUDE_DIR}/dynibo/version.h"
     @ONLY)
+configure_file(
+    bindings/c/include/dynibo/dynibo.h
+    "${DYNIBO_GENERATED_INCLUDE_DIR}/dynibo/dynibo.h"
+    COPYONLY)
+configure_file(
+    bindings/c/include/dynibo/dynibo.hpp
+    "${DYNIBO_GENERATED_INCLUDE_DIR}/dynibo/dynibo.hpp"
+    COPYONLY)
 
 if(DYNIBO_CARGO_PROFILE STREQUAL "release")
     set(DYNIBO_CARGO_PROFILE_FLAG --release)
@@ -47,6 +55,8 @@ endif()
 if(WIN32)
     set(DYNIBO_LIBRARY_FILE "dynibo_c.dll")
     set(DYNIBO_LIBRARY_INSTALL_DIR "${CMAKE_INSTALL_BINDIR}")
+    set(DYNIBO_LIBRARY_SONAME "")
+    set(DYNIBO_PC_EXTRA_CFLAGS " -DDYNIBO_SHARED")
     if(MSVC)
         set(DYNIBO_IMPLIB_FILE "dynibo_c.dll.lib")
     else()
@@ -55,9 +65,13 @@ if(WIN32)
 elseif(APPLE)
     set(DYNIBO_LIBRARY_FILE "libdynibo_c.dylib")
     set(DYNIBO_LIBRARY_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}")
+    set(DYNIBO_LIBRARY_SONAME "@rpath/libdynibo_c.dylib")
+    set(DYNIBO_PC_EXTRA_CFLAGS "")
 else()
     set(DYNIBO_LIBRARY_FILE "libdynibo_c.so")
     set(DYNIBO_LIBRARY_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}")
+    set(DYNIBO_LIBRARY_SONAME "libdynibo_c.so")
+    set(DYNIBO_PC_EXTRA_CFLAGS "")
 endif()
 
 set(DYNIBO_CARGO_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/cargo")
@@ -80,9 +94,7 @@ add_custom_command(
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     DEPENDS
         Cargo.toml Cargo.lock
-        bindings/c/Cargo.toml ${DYNIBO_RUST_SOURCES}
-        bindings/c/include/dynibo/dynibo.h bindings/c/include/dynibo/dynibo.hpp
-        bindings/c/include/dynibo/version.h.in
+        bindings/c/Cargo.toml bindings/c/build.rs ${DYNIBO_RUST_SOURCES}
     COMMENT "Building dynibo C ABI with Cargo"
     VERBATIM)
 
@@ -90,8 +102,11 @@ add_custom_target(dynibo_c_build ALL DEPENDS "${DYNIBO_BUILT_LIBRARY}")
 add_library(dynibo_c SHARED IMPORTED GLOBAL)
 set_target_properties(dynibo_c PROPERTIES
     IMPORTED_LOCATION "${DYNIBO_BUILT_LIBRARY}"
-    INTERFACE_INCLUDE_DIRECTORIES
-        "${DYNIBO_GENERATED_INCLUDE_DIR};${DYNIBO_GENERATED_INCLUDE_DIR}/dynibo;${CMAKE_CURRENT_SOURCE_DIR}/bindings/c/include")
+    INTERFACE_COMPILE_DEFINITIONS "DYNIBO_SHARED"
+    INTERFACE_INCLUDE_DIRECTORIES "${DYNIBO_GENERATED_INCLUDE_DIR}")
+if(DYNIBO_LIBRARY_SONAME)
+    set_target_properties(dynibo_c PROPERTIES IMPORTED_SONAME "${DYNIBO_LIBRARY_SONAME}")
+endif()
 if(WIN32)
     set(DYNIBO_CARGO_IMPLIB
         "${DYNIBO_CARGO_OUTPUT_DIR}/${DYNIBO_CARGO_TARGET_DIR}/${DYNIBO_IMPLIB_FILE}")

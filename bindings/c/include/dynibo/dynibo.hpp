@@ -2,6 +2,7 @@
 #define DYNIBO_DYNIBO_HPP
 
 #include "dynibo.h"
+#include <cstddef>
 #include <stdexcept>
 #include <string>
 #include <utility>
