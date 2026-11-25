@@ -212,3 +212,41 @@ fn inverse_kinematics_validates_every_option_and_target_component() {
         Err(Error::IkNumericalFailure { iteration: 1 })
     ));
 }
+
+#[test]
+fn inverse_kinematics_wraps_revolute_angles_and_respects_joint_limits() {
+    let mut tree = Robot::from_urdf(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/test_tree_7.urdf"),
+    )
+    .unwrap();
+    let target = tree.link_id("left_tool").unwrap();
+    // Target near -pi reached from an initial guess near +pi crosses the +-pi wrap boundary.
+    let expected_q = [-3.05, 0.3, 0.0, -0.4, 0.0, 0.2, 0.0];
+    let desired = tree.forward_kinematics(&expected_q, target).unwrap();
+    let initial_q = [3.05, 0.25, 0.0, -0.35, 0.0, 0.15, 0.0];
+    let mut solved_q = vec![0.0; tree.joint_count()];
+    tree.inverse_kinematics(
+        &initial_q,
+        target,
+        &desired,
+        InverseKinematicsOptions::default(),
+        &mut solved_q,
+    )
+    .unwrap();
+    for (dof, &value) in solved_q.iter().enumerate() {
+        let lower = tree.joint_lower_limit(dof).unwrap();
+        let upper = tree.joint_upper_limit(dof).unwrap();
+        assert!(
+            value >= lower - 1.0e-12 && value <= upper + 1.0e-12,
+            "dof {dof} value {value} outside [{lower}, {upper}]"
+        );
+    }
+    let solved = tree.forward_kinematics(&solved_q, target).unwrap();
+    assert!((solved.translation.vector - desired.translation.vector).norm() <= 1.0e-6);
+    assert!(
+        (desired.rotation * solved.rotation.inverse())
+            .scaled_axis()
+            .norm()
+            <= 1.0e-6
+    );
+}

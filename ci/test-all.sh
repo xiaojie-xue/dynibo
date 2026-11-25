@@ -4,9 +4,12 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
+python_command="${PYTHON:-python3}"
+
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --all-targets --locked
+PYTHONHOME="$("${python_command}" -c 'import sys; print(sys.base_prefix)')" \
+    cargo test --workspace --all-targets --locked
 
 if pkg-config --exists pinocchio; then
     cargo clippy -p dynibo --tests --locked --features pinocchio-tests -- -D warnings
@@ -20,7 +23,6 @@ fi
 
 CARGO_NET_OFFLINE=true DYNIBO_ALLOW_DIRTY=1 bash ci/test-rust-package.sh
 
-python_command="${PYTHON:-python3}"
 "${python_command}" ci/test-native-build.py
 
 package_test_root="$(mktemp -d "${TMPDIR:-/tmp}/dynibo-package-test.XXXXXX")"
