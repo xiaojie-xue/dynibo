@@ -95,18 +95,14 @@ fn convert_urdf(robot: &Robot) -> Result<Tree> {
     let mut links = Vec::with_capacity(robot.links.len());
     let mut parent_link_indices = Vec::with_capacity(robot.joints.len());
     let mut topological_source_indices = Vec::with_capacity(robot.links.len());
-    let mut discovered = vec![None; robot.links.len()];
 
     links.push(robot_link(&robot.links[root_source_index])?);
     topological_source_indices.push(root_source_index);
-    discovered[root_source_index] = Some(0);
 
     let mut parent_index = 0;
     while parent_index < topological_source_indices.len() {
         let parent_source_index = topological_source_indices[parent_index];
         for &(child_source_index, joint_source_index) in &children_by_parent[parent_source_index] {
-            let child_index = links.len();
-            discovered[child_source_index] = Some(child_index);
             topological_source_indices.push(child_source_index);
             links.push(robot_link(&robot.links[child_source_index])?);
             joints.push(robot_joint(&robot.joints[joint_source_index])?);

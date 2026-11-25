@@ -11,11 +11,10 @@ use crate::{
 
 use super::super::topology::{child_link_index, incoming_joint_index};
 use super::super::{
-    FLOATING_BASE_DOF, FloatingRobot, IndexedLoad, Model, Robot, RootMode, Workspace,
-    base_dof_count,
+    BaseKind, FLOATING_BASE_DOF, Fixed, Floating, FloatingRobot, IndexedLoad, Model, Robot,
+    Workspace,
 };
 
-const GRAVITY: f64 = 9.80665;
 type Vector6 = SVector<f64, 6>;
 
 impl Robot {
@@ -39,10 +38,10 @@ impl Robot {
         loads: &[IndexedLoad],
         output: &mut [f64],
     ) -> Result<()> {
-        self.model.forward_dynamics(
-            RootMode::Fixed,
+        self.model.forward_dynamics::<Fixed>(
             &self.world_from_root,
             Twist::zeros(),
+            self.world_gravity,
             q,
             qd,
             generalized_forces,
@@ -65,10 +64,10 @@ impl FloatingRobot {
         loads: &[IndexedLoad],
         output: &mut [f64],
     ) -> Result<()> {
-        self.model.forward_dynamics(
-            RootMode::Floating,
+        self.model.forward_dynamics::<Floating>(
             base.frame(),
             base.velocity(),
+            self.world_gravity,
             q,
             qd,
             generalized_forces,
@@ -85,11 +84,11 @@ impl Model {
         clippy::needless_range_loop,
         reason = "joint indices address parallel model and workspace arrays in tree order"
     )]
-    fn forward_dynamics(
+    pub(super) fn forward_dynamics<B: BaseKind>(
         &self,
-        base_mode: RootMode,
         base_frame: &Frame,
         base_velocity: Twist,
+        world_gravity: Vector3<f64>,
         q: &[f64],
         qd: &[f64],
         generalized_forces: &[f64],
@@ -99,12 +98,8 @@ impl Model {
     ) -> Result<()> {
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
-        self.validate_output(
-            base_mode,
-            "forward dynamics generalized forces",
-            generalized_forces,
-        )?;
-        self.validate_output(base_mode, "forward dynamics output", output)?;
+        self.validate_output::<B>("forward dynamics generalized forces", generalized_forces)?;
+        self.validate_output::<B>("forward dynamics output", output)?;
         if !generalized_forces.iter().all(|value| value.is_finite()) {
             return Err(Error::NonFiniteInput {
                 input: "generalized forces",
@@ -149,15 +144,12 @@ impl Model {
                 force_cross(velocity, momentum) + workspace.link_loads[joint_index];
         }
 
-        let joint_offset = base_dof_count(base_mode);
-
         // Second pass: eliminate active joint accelerations and propagate each
         // articulated subtree into its parent.
         for joint_index in (0..self.model_joint_count()).rev() {
             let joint = self.joint_kinematics[joint_index];
             let parent_link_index = self.parent_link_indices[joint_index];
-            let skip_root_propagation =
-                parent_link_index == 0 && matches!(base_mode, RootMode::Fixed);
+            let skip_root_propagation = parent_link_index == 0 && !B::IS_FLOATING;
             let inertia = workspace.articulated_inertias[joint_index];
             let bias_force = workspace.articulated_bias_forces[joint_index];
             let bias_acceleration = workspace.bias_accelerations[joint_index];
@@ -177,8 +169,8 @@ impl Model {
                         joint_index: dof_index,
                     });
                 }
-                let joint_bias = generalized_forces[joint_offset + dof_index]
-                    - motion_subspace.dot_wrench(bias_force);
+                let joint_bias =
+                    generalized_forces[B::DOF + dof_index] - motion_subspace.dot_wrench(bias_force);
                 workspace.articulated_u[joint_index] = articulated_u;
                 workspace.articulated_d[joint_index] = articulated_d;
                 workspace.articulated_joint_bias[joint_index] = joint_bias;
@@ -219,37 +211,36 @@ impl Model {
         }
 
         output.fill(0.0);
-        let gravity_local = root_rotation_inverse * Vector3::new(0.0, 0.0, GRAVITY);
-        let root_acceleration = match base_mode {
-            RootMode::Fixed => Twist::new(Vector3::zeros(), gravity_local),
-            RootMode::Floating => {
-                let world_base_force = Wrench::new(
-                    Vector3::from_column_slice(&generalized_forces[..3]),
-                    Vector3::from_column_slice(&generalized_forces[3..FLOATING_BASE_DOF]),
-                );
-                let local_base_force = Wrench::new(
-                    root_rotation_inverse * world_base_force.torque,
-                    root_rotation_inverse * world_base_force.force,
-                );
-                let right_hand_side = (local_base_force - root_bias_force).to_vector();
-                // Average without overflowing a finite diagonal before scaling.
-                let symmetric_inertia = root_inertia.0 * 0.5 + root_inertia.0.transpose() * 0.5;
-                let acceleration =
-                    Twist::from_vector(solve_base_inertia(symmetric_inertia, right_hand_side)?);
+        let gravity_local = root_rotation_inverse * (-world_gravity);
+        let root_acceleration = if !B::IS_FLOATING {
+            Twist::new(Vector3::zeros(), gravity_local)
+        } else {
+            let world_base_force = Wrench::new(
+                Vector3::from_column_slice(&generalized_forces[..3]),
+                Vector3::from_column_slice(&generalized_forces[3..FLOATING_BASE_DOF]),
+            );
+            let local_base_force = Wrench::new(
+                root_rotation_inverse * world_base_force.torque,
+                root_rotation_inverse * world_base_force.force,
+            );
+            let right_hand_side = (local_base_force - root_bias_force).to_vector();
+            // Average without overflowing a finite diagonal before scaling.
+            let symmetric_inertia = root_inertia.0 * 0.5 + root_inertia.0.transpose() * 0.5;
+            let acceleration =
+                Twist::from_vector(solve_base_inertia(symmetric_inertia, right_hand_side)?);
 
-                let physical_linear_local = acceleration.linear - gravity_local
-                    + root_velocity.angular.cross(&root_velocity.linear);
-                let world_angular = base_frame.rotation * acceleration.angular;
-                let world_linear = base_frame.rotation * physical_linear_local;
-                if !Twist::new(world_angular, world_linear).is_finite() {
-                    return Err(Error::NumericalFailure {
-                        operation: "floating-base acceleration",
-                    });
-                }
-                output[..3].copy_from_slice(world_angular.as_slice());
-                output[3..FLOATING_BASE_DOF].copy_from_slice(world_linear.as_slice());
-                acceleration
+            let physical_linear_local = acceleration.linear - gravity_local
+                + root_velocity.angular.cross(&root_velocity.linear);
+            let world_angular = base_frame.rotation * acceleration.angular;
+            let world_linear = base_frame.rotation * physical_linear_local;
+            if !Twist::new(world_angular, world_linear).is_finite() {
+                return Err(Error::NumericalFailure {
+                    operation: "floating-base acceleration",
+                });
             }
+            output[..3].copy_from_slice(world_angular.as_slice());
+            output[3..FLOATING_BASE_DOF].copy_from_slice(world_linear.as_slice());
+            acceleration
         };
 
         // Third pass: recover joint accelerations and complete link accelerations.
@@ -277,7 +268,7 @@ impl Model {
                     *self.joint_kinematics[joint_index].axis.as_ref(),
                 );
                 acceleration += joint_acceleration * motion_subspace;
-                output[joint_offset + dof_index] = joint_acceleration;
+                output[B::DOF + dof_index] = joint_acceleration;
             }
             workspace.spatial_accelerations[joint_index] = acceleration;
         }
