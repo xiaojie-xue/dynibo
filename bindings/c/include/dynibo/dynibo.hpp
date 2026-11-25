@@ -32,6 +32,32 @@ inline DyniboPose identity_pose() {
     return {{0., 0., 0.}, {0., 0., 0., 1.}};
 }
 
+class Robot;
+class FloatingRobot;
+
+/** Model-scoped link identifier returned by Robot or FloatingRobot. */
+class LinkId {
+public:
+    std::size_t index() const noexcept {
+        return index_;
+    }
+    bool operator==(const LinkId &other) const noexcept {
+        return index_ == other.index_ && owner_ == other.owner_;
+    }
+    bool operator!=(const LinkId &other) const noexcept {
+        return !(*this == other);
+    }
+
+private:
+    friend class Robot;
+    friend class FloatingRobot;
+
+    LinkId(std::size_t index, const void *owner) noexcept : index_(index), owner_(owner) {}
+
+    std::size_t index_ = 0;
+    const void *owner_ = nullptr;
+};
+
 /** State explicitly supplied to each FloatingRobot calculation. */
 struct BaseState {
     DyniboPose frame = identity_pose();
@@ -105,10 +131,26 @@ public:
     std::size_t link_count() const {
         return dynibo_robot_link_count(robot_);
     }
-    std::size_t link_id(const std::string &name) const {
+    LinkId link_id(const std::string &name) const {
         std::size_t value{};
         check(dynibo_robot_link_id(robot_, name.c_str(), &value));
-        return value;
+        return LinkId(value, static_cast<const void *>(robot_));
+    }
+    LinkId link_id_at(std::size_t index) const {
+        if (!robot_ || index >= link_count()) {
+            throw Error(DYNIBO_STATUS_INVALID_ARGUMENT, "invalid link id");
+        }
+        return LinkId(index, static_cast<const void *>(robot_));
+    }
+    DyniboLoad make_load(LinkId link, const std::array<double, 3> &torque = {0., 0., 0.},
+                         const std::array<double, 3> &force = {0., 0., 0.}) const {
+        DyniboLoad load{};
+        load.link_id = verify_link(link);
+        for (std::size_t i = 0; i < 3; ++i) {
+            load.torque[i] = torque[i];
+            load.force[i] = force[i];
+        }
+        return load;
     }
     void set_base_frame(const DyniboPose &frame) {
         check(dynibo_workspace_set_base_frame(workspace_, &frame));
@@ -131,30 +173,31 @@ public:
         forward_kinematics_all_into(q, out);
         return out;
     }
-    DyniboPose forward_kinematics(const std::vector<double> &q, std::size_t target) {
+    DyniboPose forward_kinematics(const std::vector<double> &q, LinkId target) {
         DyniboPose result{};
-        check(dynibo_forward_kinematics(robot_, workspace_, q.data(), q.size(), target, &result));
+        check(dynibo_forward_kinematics(robot_, workspace_, q.data(), q.size(), verify_link(target),
+                                        &result));
         return result;
     }
     /** Writes into an exactly sized caller buffer without resizing or allocating. */
-    void jacobian_into(const std::vector<double> &q, std::size_t target, std::vector<double> &out) {
-        check(dynibo_jacobian(robot_, workspace_, q.data(), q.size(), target, out.data(),
-                              out.size()));
+    void jacobian_into(const std::vector<double> &q, LinkId target, std::vector<double> &out) {
+        check(dynibo_jacobian(robot_, workspace_, q.data(), q.size(), verify_link(target),
+                              out.data(), out.size()));
     }
-    std::vector<double> jacobian(const std::vector<double> &q, std::size_t target) {
+    std::vector<double> jacobian(const std::vector<double> &q, LinkId target) {
         std::vector<double> out(6 * generalized_count());
         jacobian_into(q, target, out);
         return out;
     }
     /** Writes into an exactly sized caller buffer without resizing or allocating. */
     void jacobian_derivative_into(const std::vector<double> &q, const std::vector<double> &qd,
-                                  std::size_t target, std::vector<double> &out) {
+                                  LinkId target, std::vector<double> &out) {
         detail::same(q, qd, "qd");
-        check(dynibo_jacobian_derivative(robot_, workspace_, q.data(), qd.data(), q.size(), target,
-                                         out.data(), out.size()));
+        check(dynibo_jacobian_derivative(robot_, workspace_, q.data(), qd.data(), q.size(),
+                                         verify_link(target), out.data(), out.size()));
     }
     std::vector<double> jacobian_derivative(const std::vector<double> &q,
-                                            const std::vector<double> &qd, std::size_t target) {
+                                            const std::vector<double> &qd, LinkId target) {
         std::vector<double> out(6 * generalized_count());
         jacobian_derivative_into(q, qd, target, out);
         return out;
@@ -182,22 +225,22 @@ public:
         return out;
     }
     DyniboTwist forward_velocity_kinematics(const std::vector<double> &q,
-                                            const std::vector<double> &qd, std::size_t target,
+                                            const std::vector<double> &qd, LinkId target,
                                             const DyniboPose &tool = identity_pose()) {
         detail::same(q, qd, "qd");
         DyniboTwist result{};
         check(dynibo_forward_velocity_kinematics(robot_, workspace_, q.data(), qd.data(), q.size(),
-                                                 target, &tool, &result));
+                                                 verify_link(target), &tool, &result));
         return result;
     }
     DyniboTwist forward_acceleration_kinematics(const std::vector<double> &q,
                                                 const std::vector<double> &qd,
-                                                const std::vector<double> &qdd,
-                                                std::size_t target) {
+                                                const std::vector<double> &qdd, LinkId target) {
         detail::same3(q, qd, qdd);
         DyniboTwist result{};
         check(dynibo_forward_acceleration_kinematics(robot_, workspace_, q.data(), qd.data(),
-                                                     qdd.data(), q.size(), target, &result));
+                                                     qdd.data(), q.size(), verify_link(target),
+                                                     &result));
         return result;
     }
     /** Writes into an exactly sized caller buffer without resizing or allocating. */
@@ -247,13 +290,13 @@ public:
         return out;
     }
     /** Writes into an exactly sized caller buffer without resizing or allocating. */
-    void inverse_kinematics_into(const std::vector<double> &q, std::size_t target,
+    void inverse_kinematics_into(const std::vector<double> &q, LinkId target,
                                  const DyniboPose &desired, std::vector<double> &out,
                                  DyniboIkOptions options = dynibo_ik_options_default()) {
-        check(dynibo_inverse_kinematics(robot_, workspace_, q.data(), q.size(), target, &desired,
-                                        options, out.data(), out.size()));
+        check(dynibo_inverse_kinematics(robot_, workspace_, q.data(), q.size(), verify_link(target),
+                                        &desired, options, out.data(), out.size()));
     }
-    std::vector<double> inverse_kinematics(const std::vector<double> &q, std::size_t target,
+    std::vector<double> inverse_kinematics(const std::vector<double> &q, LinkId target,
                                            const DyniboPose &desired,
                                            DyniboIkOptions options = dynibo_ik_options_default()) {
         std::vector<double> out(joint_count());
@@ -268,6 +311,14 @@ public:
     }
 
 private:
+    std::size_t verify_link(LinkId target) const {
+        if (!robot_ || target.owner_ != static_cast<const void *>(robot_)) {
+            throw Error(DYNIBO_STATUS_INVALID_ARGUMENT,
+                        "link identifier does not belong to this robot model");
+        }
+        return target.index_;
+    }
+
     DyniboRobot *robot_ = nullptr;
     DyniboWorkspace *workspace_ = nullptr;
 };
@@ -316,10 +367,26 @@ public:
     std::size_t link_count() const {
         return dynibo_floating_robot_link_count(robot_);
     }
-    std::size_t link_id(const std::string &name) const {
+    LinkId link_id(const std::string &name) const {
         std::size_t value{};
         check(dynibo_floating_robot_link_id(robot_, name.c_str(), &value));
-        return value;
+        return LinkId(value, static_cast<const void *>(robot_));
+    }
+    LinkId link_id_at(std::size_t index) const {
+        if (!robot_ || index >= link_count()) {
+            throw Error(DYNIBO_STATUS_INVALID_ARGUMENT, "invalid link id");
+        }
+        return LinkId(index, static_cast<const void *>(robot_));
+    }
+    DyniboLoad make_load(LinkId link, const std::array<double, 3> &torque = {0., 0., 0.},
+                         const std::array<double, 3> &force = {0., 0., 0.}) const {
+        DyniboLoad load{};
+        load.link_id = verify_link(link);
+        for (std::size_t i = 0; i < 3; ++i) {
+            load.torque[i] = torque[i];
+            load.force[i] = force[i];
+        }
+        return load;
     }
     void set_gravity(const std::array<double, 3> &gravity) {
         check(dynibo_floating_workspace_set_gravity(workspace_, gravity.data()));
@@ -343,38 +410,39 @@ public:
         return out;
     }
     DyniboPose forward_kinematics(const BaseState &base_state, const std::vector<double> &q,
-                                  std::size_t target) {
+                                  LinkId target) {
         auto base = base_state.native();
         DyniboPose out{};
         check(dynibo_floating_forward_kinematics(robot_, workspace_, &base, q.data(), q.size(),
-                                                 target, &out));
+                                                 verify_link(target), &out));
         return out;
     }
     /** Writes into an exactly sized caller buffer without resizing or allocating. */
-    void jacobian_into(const BaseState &base_state, const std::vector<double> &q,
-                       std::size_t target, std::vector<double> &out) {
+    void jacobian_into(const BaseState &base_state, const std::vector<double> &q, LinkId target,
+                       std::vector<double> &out) {
         const auto base = base_state.native();
-        check(dynibo_floating_jacobian(robot_, workspace_, &base, q.data(), q.size(), target,
-                                       out.data(), out.size()));
+        check(dynibo_floating_jacobian(robot_, workspace_, &base, q.data(), q.size(),
+                                       verify_link(target), out.data(), out.size()));
     }
     std::vector<double> jacobian(const BaseState &base_state, const std::vector<double> &q,
-                                 std::size_t target) {
+                                 LinkId target) {
         std::vector<double> out(6 * generalized_count());
         jacobian_into(base_state, q, target, out);
         return out;
     }
     /** Writes into an exactly sized caller buffer without resizing or allocating. */
     void jacobian_derivative_into(const BaseState &base_state, const std::vector<double> &q,
-                                  const std::vector<double> &qd, std::size_t target,
+                                  const std::vector<double> &qd, LinkId target,
                                   std::vector<double> &out) {
         detail::same(q, qd, "qd");
         const auto base = base_state.native();
         check(dynibo_floating_jacobian_derivative(robot_, workspace_, &base, q.data(), qd.data(),
-                                                  q.size(), target, out.data(), out.size()));
+                                                  q.size(), verify_link(target), out.data(),
+                                                  out.size()));
     }
     std::vector<double> jacobian_derivative(const BaseState &base_state,
                                             const std::vector<double> &q,
-                                            const std::vector<double> &qd, std::size_t target) {
+                                            const std::vector<double> &qd, LinkId target) {
         std::vector<double> out(6 * generalized_count());
         jacobian_derivative_into(base_state, q, qd, target, out);
         return out;
@@ -408,25 +476,26 @@ public:
     }
     DyniboTwist forward_velocity_kinematics(const BaseState &base_state,
                                             const std::vector<double> &q,
-                                            const std::vector<double> &qd, std::size_t target,
+                                            const std::vector<double> &qd, LinkId target,
                                             const DyniboPose &tool = identity_pose()) {
         detail::same(q, qd, "qd");
         auto base = base_state.native();
         DyniboTwist out{};
         check(dynibo_floating_forward_velocity_kinematics(
-            robot_, workspace_, &base, q.data(), qd.data(), q.size(), target, &tool, &out));
+            robot_, workspace_, &base, q.data(), qd.data(), q.size(), verify_link(target), &tool,
+            &out));
         return out;
     }
     DyniboTwist forward_acceleration_kinematics(const BaseState &base_state,
                                                 const std::vector<double> &q,
                                                 const std::vector<double> &qd,
-                                                const std::vector<double> &qdd,
-                                                std::size_t target) {
+                                                const std::vector<double> &qdd, LinkId target) {
         detail::same3(q, qd, qdd);
         auto base = base_state.native();
         DyniboTwist out{};
         check(dynibo_floating_forward_acceleration_kinematics(
-            robot_, workspace_, &base, q.data(), qd.data(), qdd.data(), q.size(), target, &out));
+            robot_, workspace_, &base, q.data(), qd.data(), qdd.data(), q.size(),
+            verify_link(target), &out));
         return out;
     }
     /** Writes into an exactly sized caller buffer without resizing or allocating. */
@@ -489,6 +558,14 @@ public:
     }
 
 private:
+    std::size_t verify_link(LinkId target) const {
+        if (!robot_ || target.owner_ != static_cast<const void *>(robot_)) {
+            throw Error(DYNIBO_STATUS_INVALID_ARGUMENT,
+                        "link identifier does not belong to this robot model");
+        }
+        return target.index_;
+    }
+
     DyniboFloatingRobot *robot_ = nullptr;
     DyniboFloatingWorkspace *workspace_ = nullptr;
 };

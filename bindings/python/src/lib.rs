@@ -14,7 +14,7 @@ mod tests;
 
 use errors::{DyniboError, ModelError, PanicError, SolverError};
 use floating_robot::PyFloatingRobot;
-use loads::{PyLoad, PyLoadBuffer};
+use loads::{PyLoad, PyLoadBuffer, PyModelTag};
 use pyo3::{prelude::*, types::PyModule};
 use robot::PyRobot;
 use values::{PyBaseState, PyIkOptions, PyPose, PyTwist};
@@ -24,6 +24,7 @@ fn _dynibo(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyPose>()?;
     module.add_class::<PyTwist>()?;
     module.add_class::<PyBaseState>()?;
+    module.add_class::<PyModelTag>()?;
     module.add_class::<PyLoad>()?;
     module.add_class::<PyLoadBuffer>()?;
     module.add_class::<PyIkOptions>()?;

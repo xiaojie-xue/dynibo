@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import unittest
+import warnings
 from importlib.metadata import version as distribution_version
 import dynibo
 import numpy as np
@@ -65,7 +66,7 @@ class PackageTests(unittest.TestCase):
                 out = np.empty(7 * robot.link_count)
                 self.assertIs(robot.forward_kinematics_all(*prefix, q, out=out), out)
                 for i, row in enumerate(out.reshape(-1, 7)):
-                    pose = robot.forward_kinematics(*prefix, q, i)
+                    pose = robot.forward_kinematics(*prefix, q, robot.link_id_at(i))
                     np.testing.assert_allclose(row[:3], pose.translation, atol=1e-12)
                     np.testing.assert_allclose(row[3:], pose.rotation_xyzw, atol=1e-12)
                 saved = out.copy()
@@ -458,3 +459,44 @@ class PackageTests(unittest.TestCase):
             self.robot.gravity(q, out=np.empty(self.robot.generalized_count, dtype=np.float32))
         with self.assertRaises(ValueError):
             self.robot.gravity(q, out=q)
+
+    def test_typed_link_id_scoping_and_deprecation(self) -> None:
+        for robot_type in (dynibo.Robot, dynibo.FloatingRobot):
+            with robot_type(URDF) as robot, robot_type(URDF) as other:
+                prefix = (motion_base(),) if robot_type is dynibo.FloatingRobot else ()
+                q = np.zeros(robot.joint_count)
+                target = robot.link_id("test_link_4")
+                self.assertIsInstance(target, dynibo.LinkId)
+                self.assertIsInstance(target, int)
+                self.assertEqual(target.index, int(target))
+                self.assertEqual(robot.link_id_at(target.index), target)
+                with self.assertRaises(AttributeError):
+                    target._model_tag = None  # type: ignore[misc]
+                poses = robot.forward_kinematics_all(*prefix, q).reshape(-1, 7)
+                pose = robot.forward_kinematics(*prefix, q, target)
+                np.testing.assert_allclose(poses[target][:3], pose.translation, atol=1e-12)
+
+                with robot.fork() as forked:
+                    self.assertEqual(
+                        forked.forward_kinematics(*prefix, q, target),
+                        pose,
+                    )
+
+                with self.assertRaises(ValueError):
+                    other.forward_kinematics(*prefix, q, target)
+                with self.assertRaises(ValueError):
+                    other.gravity(*prefix, q, loads=[dynibo.Load(target, force=(1.0, 0.0, 0.0))])
+                other_buf = other.load_buffer()
+                with self.assertRaises(ValueError):
+                    other_buf.set(target, force=(1.0, 0.0, 0.0))
+
+                with self.assertRaises(ValueError):
+                    robot.link_id_at(robot.link_count)
+                with self.assertRaises(TypeError):
+                    robot.forward_kinematics(*prefix, q, True)
+
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always", DeprecationWarning)
+                    deprecated_pose = robot.forward_kinematics(*prefix, q, int(target))
+                self.assertEqual(deprecated_pose, pose)
+                self.assertTrue(any(issubclass(w.category, DeprecationWarning) for w in caught))

@@ -98,7 +98,7 @@ DYNIBO_API size_t dynibo_robot_joint_count(const DyniboRobot *robot);
 DYNIBO_API size_t dynibo_robot_generalized_count(const DyniboRobot *robot);
 /** Returns the link count including the root, or 0 for a null handle. */
 DYNIBO_API size_t dynibo_robot_link_count(const DyniboRobot *robot);
-/** Resolves UTF-8 `name` to a link ID valid only for `robot`. */
+/** Resolves UTF-8 `name` to an unchecked link index valid only for `robot`. */
 DYNIBO_API DyniboStatus dynibo_robot_link_id(const DyniboRobot *robot, const char *name, size_t *output);
 /** Deprecated: stores a base frame on the shared robot handle. Use `dynibo_workspace_set_base_frame` instead. Must not be called concurrently with calculations using `robot`. */
 DYNIBO_DEPRECATED("use dynibo_workspace_set_base_frame instead")
@@ -127,6 +127,7 @@ DYNIBO_API size_t dynibo_floating_robot_joint_count(const DyniboFloatingRobot *r
 DYNIBO_API size_t dynibo_floating_robot_generalized_count(const DyniboFloatingRobot *robot);
 /** Returns the link count including the root, or 0 for a null handle. */
 DYNIBO_API size_t dynibo_floating_robot_link_count(const DyniboFloatingRobot *robot);
+/** Resolves UTF-8 `name` to an unchecked link index valid only for `robot`. */
 DYNIBO_API DyniboStatus dynibo_floating_robot_link_id(const DyniboFloatingRobot *robot, const char *name, size_t *output);
 /** Allocates a floating workspace belonging to `robot` and writes it to `output` (null on failure). */
 DYNIBO_API DyniboStatus dynibo_floating_workspace_create(const DyniboFloatingRobot *robot, DyniboFloatingWorkspace **output);
@@ -141,8 +142,10 @@ DYNIBO_API void dynibo_floating_workspace_destroy(DyniboFloatingWorkspace *works
  * @name Calculations
  * Fixed functions take `(robot, workspace, ...)`; floating functions take
  * `(robot, workspace, base, ...)`. `base` is validated for a finite pose,
- * non-zero quaternion, and finite motion. `target` and every load ID must be
- * obtained from the matching robot. `loads` may be null only when `load_count`
+ * non-zero quaternion, and finite motion. In the C ABI, `target` and load
+ * `link_id` values are unchecked `size_t` indices scoped to the robot that
+ * produced them (the C++ and Python bindings wrap them in model-checked
+ * `LinkId` types). `loads` may be null only when `load_count`
  * is zero. `tool` is a finite target-relative pose.
  * Position-only functions require `q_len == J`; state functions require
  * `state_len == J`. Jacobian and derivative output lengths are `6 * G`, mass

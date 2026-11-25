@@ -6,7 +6,7 @@ use crate::calculation::{
     Calculation, close_calculation, ensure_open, lock_calculation, with_robot,
 };
 use crate::errors::core_error;
-use crate::loads::{PyLoadBuffer, convert_loads, target_link};
+use crate::loads::{PyLoadBuffer, convert_loads, make_py_link_id, target_link};
 use crate::values::{PyIkOptions, PyPose, PyTwist};
 use dynibo::{Frame, Robot as CoreRobot};
 use dynibo_binding_support::LinkTable;
@@ -133,13 +133,22 @@ impl PyRobot {
         Ok(self.link_count)
     }
 
-    fn link_id(&self, py: Python<'_>, name: &str) -> PyResult<usize> {
-        with_robot(&self.inner, py, |robot| {
+    fn link_id(&self, py: Python<'_>, name: &str) -> PyResult<Py<PyAny>> {
+        let index = with_robot(&self.inner, py, |robot| {
             let id = robot.link_id(name).map_err(core_error)?;
             self.links
                 .index_of(id)
                 .ok_or_else(|| PyValueError::new_err("link does not belong to this robot"))
-        })
+        })?;
+        make_py_link_id(py, &self.links, index)
+    }
+
+    fn link_id_at(&self, py: Python<'_>, index: usize) -> PyResult<Py<PyAny>> {
+        ensure_open(&self.closed)?;
+        if index >= self.link_count {
+            return Err(PyValueError::new_err(format!("invalid link id {index}")));
+        }
+        make_py_link_id(py, &self.links, index)
     }
 
     fn set_base_frame(&self, py: Python<'_>, frame: PyRef<'_, PyPose>) -> PyResult<()> {
@@ -187,11 +196,11 @@ impl PyRobot {
         &self,
         py: Python<'_>,
         q: &Bound<'_, PyAny>,
-        target: usize,
+        target: &Bound<'_, PyAny>,
     ) -> PyResult<PyPose> {
         ensure_open(&self.closed)?;
         let q = prepare_input(q)?.into_vec();
-        let target = target_link(&self.links, target)?;
+        let target = target_link(py, &self.links, target)?;
         with_robot(&self.inner, py, |robot| {
             py.detach(|| robot.forward_kinematics(&q, target))
                 .map(|frame| PyPose::from_frame(&frame))
@@ -204,12 +213,12 @@ impl PyRobot {
         &self,
         py: Python<'py>,
         q: &Bound<'py, PyAny>,
-        target: usize,
+        target: &Bound<'py, PyAny>,
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         ensure_open(&self.closed)?;
         let q = prepare_input(q)?;
-        let target = target_link(&self.links, target)?;
+        let target = target_link(py, &self.links, target)?;
         let output = validate_output(6 * self.generalized_count, out)?;
         let q = q.into_vec();
         run_with_output(py, &self.inner, output, |state, scratch| {
@@ -223,14 +232,14 @@ impl PyRobot {
         py: Python<'py>,
         q: &Bound<'py, PyAny>,
         qd: &Bound<'py, PyAny>,
-        target: usize,
+        target: &Bound<'py, PyAny>,
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         ensure_open(&self.closed)?;
         let q = prepare_input(q)?;
         let qd = prepare_input(qd)?;
         require_same_length(q.as_slice(), qd.as_slice(), "qd")?;
-        let target = target_link(&self.links, target)?;
+        let target = target_link(py, &self.links, target)?;
         let output = validate_output(6 * self.generalized_count, out)?;
         let (q, qd) = (q.into_vec(), qd.into_vec());
         run_with_output(py, &self.inner, output, |state, scratch| {
@@ -244,14 +253,14 @@ impl PyRobot {
         py: Python<'_>,
         q: &Bound<'_, PyAny>,
         qd: &Bound<'_, PyAny>,
-        target: usize,
+        target: &Bound<'_, PyAny>,
         tool: Option<PyRef<'_, PyPose>>,
     ) -> PyResult<PyTwist> {
         ensure_open(&self.closed)?;
         let q = prepare_input(q)?.into_vec();
         let qd = prepare_input(qd)?.into_vec();
         require_same_length(&q, &qd, "qd")?;
-        let target = target_link(&self.links, target)?;
+        let target = target_link(py, &self.links, target)?;
         let tool = tool.map_or_else(|| Ok(Frame::identity()), |value| value.to_frame())?;
         with_robot(&self.inner, py, |robot| {
             py.detach(|| robot.forward_velocity_kinematics(&q, &qd, target, &tool))
@@ -266,7 +275,7 @@ impl PyRobot {
         q: &Bound<'_, PyAny>,
         qd: &Bound<'_, PyAny>,
         qdd: &Bound<'_, PyAny>,
-        target: usize,
+        target: &Bound<'_, PyAny>,
     ) -> PyResult<PyTwist> {
         ensure_open(&self.closed)?;
         let q = prepare_input(q)?.into_vec();
@@ -274,7 +283,7 @@ impl PyRobot {
         let qdd = prepare_input(qdd)?.into_vec();
         require_same_length(&q, &qd, "qd")?;
         require_same_length(&q, &qdd, "qdd")?;
-        let target = target_link(&self.links, target)?;
+        let target = target_link(py, &self.links, target)?;
         with_robot(&self.inner, py, |robot| {
             py.detach(|| robot.forward_acceleration_kinematics(&q, &qd, &qdd, target))
                 .map(PyTwist::from_core)
@@ -292,7 +301,7 @@ impl PyRobot {
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         ensure_open(&self.closed)?;
         let q = prepare_input(q)?;
-        let loads = convert_loads(&self.links, loads.as_ref())?;
+        let loads = convert_loads(py, &self.links, loads.as_ref())?;
         let output = validate_output(self.generalized_count, out)?;
         let q = q.into_vec();
         run_with_output(py, &self.inner, output, |state, scratch| {
@@ -316,7 +325,7 @@ impl PyRobot {
         let qdd = prepare_input(qdd)?;
         require_same_length(q.as_slice(), qd.as_slice(), "qd")?;
         require_same_length(q.as_slice(), qdd.as_slice(), "qdd")?;
-        let loads = convert_loads(&self.links, loads.as_ref())?;
+        let loads = convert_loads(py, &self.links, loads.as_ref())?;
         let output = validate_output(self.generalized_count, out)?;
         let (q, qd, qdd) = (q.into_vec(), qd.into_vec(), qdd.into_vec());
         run_with_output(py, &self.inner, output, |state, scratch| {
@@ -339,7 +348,7 @@ impl PyRobot {
         let qd = prepare_input(qd)?;
         let forces = prepare_input(forces)?;
         require_same_length(q.as_slice(), qd.as_slice(), "qd")?;
-        let loads = convert_loads(&self.links, loads.as_ref())?;
+        let loads = convert_loads(py, &self.links, loads.as_ref())?;
         let output = validate_output(self.generalized_count, out)?;
         let (q, qd, forces) = (q.into_vec(), qd.into_vec(), forces.into_vec());
         run_with_output(py, &self.inner, output, |state, scratch| {
@@ -389,14 +398,14 @@ impl PyRobot {
         &self,
         py: Python<'py>,
         q: &Bound<'py, PyAny>,
-        target: usize,
+        target: &Bound<'py, PyAny>,
         desired: PyRef<'py, PyPose>,
         options: Option<PyRef<'py, PyIkOptions>>,
         out: Option<Bound<'py, PyArray1<f64>>>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         ensure_open(&self.closed)?;
         let q = prepare_input(q)?;
-        let target = target_link(&self.links, target)?;
+        let target = target_link(py, &self.links, target)?;
         let desired = desired.to_frame()?;
         let options = options.map_or_else(PyIkOptions::default, |value| *value);
         let output = validate_output(self.joint_count, out)?;
