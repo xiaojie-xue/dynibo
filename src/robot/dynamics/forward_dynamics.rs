@@ -17,6 +17,18 @@ use super::super::{
 
 type Vector6 = SVector<f64, 6>;
 
+struct ForwardDynamicsScratch<'a> {
+    link_loads: &'a mut [Wrench],
+    spatial_velocities: &'a mut [Twist],
+    bias_accelerations: &'a mut [Twist],
+    spatial_accelerations: &'a mut [Twist],
+    articulated_inertias: &'a mut [ArticulatedInertia],
+    articulated_bias_forces: &'a mut [Wrench],
+    articulated_u: &'a mut [Wrench],
+    articulated_d: &'a mut [f64],
+    articulated_joint_bias: &'a mut [f64],
+}
+
 impl Robot {
     /// Writes generalized accelerations computed with the articulated-body algorithm.
     ///
@@ -80,10 +92,6 @@ impl FloatingRobot {
 
 impl Model {
     #[allow(clippy::too_many_arguments)]
-    #[allow(
-        clippy::needless_range_loop,
-        reason = "joint indices address parallel model and workspace arrays in tree order"
-    )]
     pub(super) fn forward_dynamics<B: BaseKind>(
         &self,
         base_frame: &Frame,
@@ -105,9 +113,91 @@ impl Model {
                 input: "generalized forces",
             });
         }
+        self.populate_parent_from_child(q, &mut workspace.frames)?;
+        self.forward_dynamics_kernel::<B>(
+            base_frame,
+            base_velocity,
+            world_gravity,
+            &workspace.frames,
+            qd,
+            generalized_forces,
+            loads,
+            ForwardDynamicsScratch {
+                link_loads: &mut workspace.link_loads,
+                spatial_velocities: &mut workspace.spatial_velocities,
+                bias_accelerations: &mut workspace.bias_accelerations,
+                spatial_accelerations: &mut workspace.spatial_accelerations,
+                articulated_inertias: &mut workspace.articulated_inertias,
+                articulated_bias_forces: &mut workspace.articulated_bias_forces,
+                articulated_u: &mut workspace.articulated_u,
+                articulated_d: &mut workspace.articulated_d,
+                articulated_joint_bias: &mut workspace.articulated_joint_bias,
+            },
+            output,
+        )
+    }
 
-        let root_load = self.prepare_indexed_loads(loads, &mut workspace.link_loads)?;
-        let parent_from_child = &mut workspace.frames;
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::robot) fn forward_dynamics_from_transforms<B: BaseKind>(
+        &self,
+        base_frame: &Frame,
+        base_velocity: Twist,
+        world_gravity: Vector3<f64>,
+        parent_from_child: &[Frame],
+        qd: &[f64],
+        generalized_forces: &[f64],
+        loads: &[IndexedLoad],
+        workspace: &mut Workspace,
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.validate_output::<B>("forward dynamics generalized forces", generalized_forces)?;
+        self.validate_output::<B>("forward dynamics output", output)?;
+        if !generalized_forces.iter().all(|value| value.is_finite()) {
+            return Err(Error::NonFiniteInput {
+                input: "generalized forces",
+            });
+        }
+        self.forward_dynamics_kernel::<B>(
+            base_frame,
+            base_velocity,
+            world_gravity,
+            parent_from_child,
+            qd,
+            generalized_forces,
+            loads,
+            ForwardDynamicsScratch {
+                link_loads: &mut workspace.link_loads,
+                spatial_velocities: &mut workspace.spatial_velocities,
+                bias_accelerations: &mut workspace.bias_accelerations,
+                spatial_accelerations: &mut workspace.spatial_accelerations,
+                articulated_inertias: &mut workspace.articulated_inertias,
+                articulated_bias_forces: &mut workspace.articulated_bias_forces,
+                articulated_u: &mut workspace.articulated_u,
+                articulated_d: &mut workspace.articulated_d,
+                articulated_joint_bias: &mut workspace.articulated_joint_bias,
+            },
+            output,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::needless_range_loop,
+        reason = "joint indices address parallel model and workspace arrays in tree order"
+    )]
+    fn forward_dynamics_kernel<B: BaseKind>(
+        &self,
+        base_frame: &Frame,
+        base_velocity: Twist,
+        world_gravity: Vector3<f64>,
+        parent_from_child: &[Frame],
+        qd: &[f64],
+        generalized_forces: &[f64],
+        loads: &[IndexedLoad],
+        scratch: ForwardDynamicsScratch<'_>,
+        output: &mut [f64],
+    ) -> Result<()> {
+        let root_load = self.prepare_indexed_loads(loads, scratch.link_loads)?;
         let root_rotation_inverse = base_frame.rotation.inverse();
         let root_velocity = Twist::new(
             root_rotation_inverse * base_velocity.angular,
@@ -119,15 +209,15 @@ impl Model {
         let root_momentum = root_inertia.apply(root_velocity);
         let mut root_bias_force = force_cross(root_velocity, root_momentum) + root_load;
 
-        // First pass: transforms, velocities, velocity bias, body inertia, and bias force.
+        // First pass: velocities, velocity bias, body inertia, and bias force.
         for joint_index in 0..self.model_joint_count() {
             let joint = self.joint_kinematics[joint_index];
-            let transform = joint.frame(self.joint_value(q, joint_index));
+            let transform = parent_from_child[joint_index];
             let parent_link_index = self.parent_link_indices[joint_index];
             let parent_velocity = if parent_link_index == 0 {
                 root_velocity
             } else {
-                workspace.spatial_velocities[incoming_joint_index(parent_link_index)]
+                scratch.spatial_velocities[incoming_joint_index(parent_link_index)]
             };
             let motion_subspace = joint_motion_subspace(joint.joint_type, *joint.axis.as_ref());
             let joint_velocity = self.joint_value(qd, joint_index) * motion_subspace;
@@ -136,12 +226,11 @@ impl Model {
             let inertia = ArticulatedInertia::from_spatial(link.spatial_inertia);
             let momentum = inertia.apply(velocity);
 
-            parent_from_child[joint_index] = transform;
-            workspace.spatial_velocities[joint_index] = velocity;
-            workspace.bias_accelerations[joint_index] = motion_cross(velocity, joint_velocity);
-            workspace.articulated_inertias[joint_index] = inertia;
-            workspace.articulated_bias_forces[joint_index] =
-                force_cross(velocity, momentum) + workspace.link_loads[joint_index];
+            scratch.spatial_velocities[joint_index] = velocity;
+            scratch.bias_accelerations[joint_index] = motion_cross(velocity, joint_velocity);
+            scratch.articulated_inertias[joint_index] = inertia;
+            scratch.articulated_bias_forces[joint_index] =
+                force_cross(velocity, momentum) + scratch.link_loads[joint_index];
         }
 
         // Second pass: eliminate active joint accelerations and propagate each
@@ -150,9 +239,9 @@ impl Model {
             let joint = self.joint_kinematics[joint_index];
             let parent_link_index = self.parent_link_indices[joint_index];
             let skip_root_propagation = parent_link_index == 0 && !B::IS_FLOATING;
-            let inertia = workspace.articulated_inertias[joint_index];
-            let bias_force = workspace.articulated_bias_forces[joint_index];
-            let bias_acceleration = workspace.bias_accelerations[joint_index];
+            let inertia = scratch.articulated_inertias[joint_index];
+            let bias_force = scratch.articulated_bias_forces[joint_index];
+            let bias_acceleration = scratch.bias_accelerations[joint_index];
             let (reduced_inertia, reduced_bias_force) = if let Some(dof_index) =
                 self.joint_dof_indices[joint_index]
             {
@@ -171,9 +260,9 @@ impl Model {
                 }
                 let joint_bias =
                     generalized_forces[B::DOF + dof_index] - motion_subspace.dot_wrench(bias_force);
-                workspace.articulated_u[joint_index] = articulated_u;
-                workspace.articulated_d[joint_index] = articulated_d;
-                workspace.articulated_joint_bias[joint_index] = joint_bias;
+                scratch.articulated_u[joint_index] = articulated_u;
+                scratch.articulated_d[joint_index] = articulated_d;
+                scratch.articulated_joint_bias[joint_index] = joint_bias;
 
                 // A fixed root has prescribed acceleration and no inertia solve.
                 // Keep the validated joint terms needed by the third pass, but
@@ -205,8 +294,8 @@ impl Model {
                 root_bias_force += parent_bias_force;
             } else {
                 let parent_joint_index = incoming_joint_index(parent_link_index);
-                workspace.articulated_inertias[parent_joint_index] += parent_inertia;
-                workspace.articulated_bias_forces[parent_joint_index] += parent_bias_force;
+                scratch.articulated_inertias[parent_joint_index] += parent_inertia;
+                scratch.articulated_bias_forces[parent_joint_index] += parent_bias_force;
             }
         }
 
@@ -249,15 +338,15 @@ impl Model {
             let parent_acceleration = if parent_link_index == 0 {
                 root_acceleration
             } else {
-                workspace.spatial_accelerations[incoming_joint_index(parent_link_index)]
+                scratch.spatial_accelerations[incoming_joint_index(parent_link_index)]
             };
             let mut acceleration =
                 motion_to_child(&parent_from_child[joint_index], parent_acceleration)
-                    + workspace.bias_accelerations[joint_index];
+                    + scratch.bias_accelerations[joint_index];
             if let Some(dof_index) = self.joint_dof_indices[joint_index] {
-                let joint_acceleration = (workspace.articulated_joint_bias[joint_index]
-                    - acceleration.dot_wrench(workspace.articulated_u[joint_index]))
-                    / workspace.articulated_d[joint_index];
+                let joint_acceleration = (scratch.articulated_joint_bias[joint_index]
+                    - acceleration.dot_wrench(scratch.articulated_u[joint_index]))
+                    / scratch.articulated_d[joint_index];
                 if !joint_acceleration.is_finite() {
                     return Err(Error::NumericalFailure {
                         operation: "joint acceleration",
@@ -270,7 +359,7 @@ impl Model {
                 acceleration += joint_acceleration * motion_subspace;
                 output[B::DOF + dof_index] = joint_acceleration;
             }
-            workspace.spatial_accelerations[joint_index] = acceleration;
+            scratch.spatial_accelerations[joint_index] = acceleration;
         }
         Ok(())
     }

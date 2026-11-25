@@ -51,6 +51,94 @@ fn benchmark_all_poses(c: &mut Criterion, case: &mut Case) {
     group.finish();
 }
 
+fn benchmark_control_loop(c: &mut Criterion, case: &mut Case) {
+    let g = case.g();
+    let mut jacobian = vec![0.0; 6 * g];
+    let mut mass = vec![0.0; g * g];
+    let mut tau = vec![0.0; g];
+    let mut group = c.benchmark_group(format!("{}/control_loop", case.model.name));
+    group.bench_function("individual", |b| {
+        b.iter(|| {
+            let pose = match &mut case.robot {
+                BenchmarkRobot::Fixed(r) => {
+                    let p = r
+                        .forward_kinematics(black_box(&case.q), case.target)
+                        .unwrap();
+                    r.jacobian(black_box(&case.q), case.target, &mut jacobian)
+                        .unwrap();
+                    r.mass_matrix(black_box(&case.q), &mut mass).unwrap();
+                    r.inverse_dynamics(
+                        black_box(&case.q),
+                        black_box(&case.qd),
+                        black_box(&case.qdd),
+                        &[],
+                        &mut tau,
+                    )
+                    .unwrap();
+                    p
+                }
+                BenchmarkRobot::Floating(r) => {
+                    let p = r
+                        .forward_kinematics(black_box(&case.base), black_box(&case.q), case.target)
+                        .unwrap();
+                    r.jacobian(
+                        black_box(&case.base),
+                        black_box(&case.q),
+                        case.target,
+                        &mut jacobian,
+                    )
+                    .unwrap();
+                    r.mass_matrix(black_box(&case.base), black_box(&case.q), &mut mass)
+                        .unwrap();
+                    r.inverse_dynamics(
+                        black_box(&case.base),
+                        black_box(&case.q),
+                        black_box(&case.qd),
+                        black_box(&case.qdd),
+                        &[],
+                        &mut tau,
+                    )
+                    .unwrap();
+                    p
+                }
+            };
+            black_box((pose, &jacobian, &mass, &tau));
+        })
+    });
+    group.bench_function("state", |b| {
+        b.iter(|| {
+            let pose = match &mut case.robot {
+                BenchmarkRobot::Fixed(r) => {
+                    let mut s = r.state(black_box(&case.q), black_box(&case.qd)).unwrap();
+                    let p = s.forward_kinematics(case.target).unwrap();
+                    s.jacobian(case.target, &mut jacobian).unwrap();
+                    s.mass_matrix(&mut mass).unwrap();
+                    s.inverse_dynamics(black_box(&case.qdd), &[], &mut tau)
+                        .unwrap();
+                    p
+                }
+                BenchmarkRobot::Floating(r) => {
+                    let mut s = r
+                        .state(
+                            black_box(&case.base),
+                            black_box(&case.q),
+                            black_box(&case.qd),
+                        )
+                        .unwrap();
+                    let p = s.forward_kinematics(case.target).unwrap();
+                    s.jacobian(case.target, &mut jacobian).unwrap();
+                    s.mass_matrix(&mut mass).unwrap();
+                    s.inverse_dynamics(black_box(&case.qdd), &[], &mut tau)
+                        .unwrap();
+                    p
+                }
+            };
+            black_box((pose, &jacobian, &mass, &tau));
+        })
+    });
+    group.finish();
+}
+
 fn benchmark_core(c: &mut Criterion) {
     let long_chain = Model {
         name: "chain40_fixed",
@@ -74,6 +162,7 @@ fn benchmark_core(c: &mut Criterion) {
             group.finish();
         }
         benchmark_all_poses(c, &mut case);
+        benchmark_control_loop(c, &mut case);
     }
 }
 

@@ -15,6 +15,7 @@ pub use base::BaseState;
 pub use error::{Error, ErrorCategory, Result, UrdfError};
 pub use model::JointType;
 pub use robot::{
-    FloatingRobot, IndexedLoad, InverseKinematicsOptions, LinkId, LoadBuffer, Robot, RobotModel,
+    FloatingRobot, FloatingRobotState, IndexedLoad, InverseKinematicsOptions, LinkId, LoadBuffer,
+    Robot, RobotModel, RobotState,
 };
 pub use spatial::{Frame, Twist, Wrench};

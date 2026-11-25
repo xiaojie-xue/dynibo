@@ -119,6 +119,26 @@ fn floating_calculations_do_not_allocate_after_robot_creation() {
         robot
             .forward_dynamics(&base, &q, &qd, &output, &[], &mut forward_output)
             .unwrap();
+        {
+            let mut state = robot.state(&base, &q, &qd).unwrap();
+            black_box(state.forward_kinematics(target).unwrap());
+            state.forward_kinematics_all(&mut poses).unwrap();
+            black_box(
+                state
+                    .forward_velocity_kinematics(target, &Frame::identity())
+                    .unwrap(),
+            );
+            black_box(state.forward_acceleration_kinematics(&qdd, target).unwrap());
+            state.jacobian(target, &mut jacobian).unwrap();
+            state.jacobian_derivative(target, &mut derivative).unwrap();
+            state.mass_matrix(&mut matrix).unwrap();
+            state.velocity_product_forces(&mut output).unwrap();
+            state.gravity(&[], &mut output).unwrap();
+            state.inverse_dynamics(&qdd, &[], &mut output).unwrap();
+            state
+                .forward_dynamics(&output, &[], &mut forward_output)
+                .unwrap();
+        }
         black_box((&jacobian, &derivative, &matrix, &output));
     }
     set_counting(false);
@@ -224,6 +244,34 @@ fn dynamic_calculations_do_not_allocate_after_robot_creation() {
                 &mut output,
             )
             .unwrap();
+        {
+            let mut state = robot.state(&q, &qd).unwrap();
+            black_box(state.forward_kinematics(target_id).unwrap());
+            state.forward_kinematics_all(&mut poses).unwrap();
+            black_box(
+                state
+                    .forward_velocity_kinematics(target_id, &Frame::identity())
+                    .unwrap(),
+            );
+            black_box(
+                state
+                    .forward_acceleration_kinematics(&qdd, target_id)
+                    .unwrap(),
+            );
+            state.jacobian(target_id, &mut jacobian).unwrap();
+            state
+                .jacobian_derivative(target_id, &mut jacobian_derivative)
+                .unwrap();
+            state.mass_matrix(&mut mass).unwrap();
+            state
+                .velocity_product_forces(&mut velocity_product)
+                .unwrap();
+            state.gravity(&[], &mut output).unwrap();
+            state.inverse_dynamics(&qdd, &[], &mut output).unwrap();
+            state
+                .forward_dynamics(&output, &[], &mut forward_output)
+                .unwrap();
+        }
         black_box((&jacobian, &output));
     }
     set_counting(false);

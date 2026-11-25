@@ -7,6 +7,7 @@ mod dynamics;
 mod kinematics;
 mod loads;
 mod model;
+mod state;
 mod topology;
 mod workspace;
 
@@ -15,8 +16,9 @@ pub use kinematics::InverseKinematicsOptions;
 pub use loads::{IndexedLoad, LoadBuffer};
 use model::Model;
 pub use model::RobotModel;
+pub use state::{FloatingRobotState, RobotState};
 pub use topology::LinkId;
-use workspace::Workspace;
+use workspace::{StateCache, Workspace};
 
 /// Standard Earth gravitational acceleration along the world `-z` axis (m/s²).
 pub(super) const DEFAULT_GRAVITY: Vector3<f64> = Vector3::new(0.0, 0.0, -9.80665);
@@ -26,6 +28,7 @@ pub(super) const DEFAULT_GRAVITY: Vector3<f64> = Vector3::new(0.0, 0.0, -9.80665
 pub struct Robot {
     model: Arc<Model>,
     workspace: Workspace,
+    state_cache: StateCache,
     world_from_root: Frame,
     world_gravity: Vector3<f64>,
 }
@@ -35,6 +38,7 @@ pub struct Robot {
 pub struct FloatingRobot {
     model: Arc<Model>,
     workspace: Workspace,
+    state_cache: StateCache,
     world_gravity: Vector3<f64>,
 }
 
@@ -104,9 +108,11 @@ impl Robot {
     pub fn fork(&self) -> Self {
         let model = Arc::clone(&self.model);
         let workspace = Workspace::new(model.as_ref());
+        let state_cache = StateCache::new(model.as_ref());
         Self {
             model,
             workspace,
+            state_cache,
             world_from_root: self.world_from_root,
             world_gravity: self.world_gravity,
         }
@@ -155,9 +161,11 @@ impl FloatingRobot {
     pub fn fork(&self) -> Self {
         let model = Arc::clone(&self.model);
         let workspace = Workspace::new(model.as_ref());
+        let state_cache = StateCache::new(model.as_ref());
         Self {
             model,
             workspace,
+            state_cache,
             world_gravity: self.world_gravity,
         }
     }

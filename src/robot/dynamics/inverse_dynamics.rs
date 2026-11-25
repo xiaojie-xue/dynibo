@@ -13,7 +13,7 @@ use super::write_world_wrench;
 
 /// Link-local Newton–Euler intermediates, initialized in the outward pass.
 struct DynamicsScratch<'a> {
-    parent_from_child: &'a mut [Frame],
+    parent_from_child: &'a [Frame],
     angular_velocities: &'a mut [Vector3<f64>],
     angular_accelerations: &'a mut [Vector3<f64>],
     origin_accelerations: &'a mut [Vector3<f64>],
@@ -24,7 +24,7 @@ struct DynamicsScratch<'a> {
 /// Reuses dynamics buffers: the outward pass writes local gravity and transforms,
 /// then the inward pass accumulates the already prepared external loads.
 struct GravityScratch<'a> {
-    parent_from_child: &'a mut [Frame],
+    parent_from_child: &'a [Frame],
     gravity_at_link: &'a mut [Vector3<f64>],
     link_loads: &'a mut [Wrench],
 }
@@ -171,11 +171,11 @@ impl Model {
         self.validate_slice("q", q)?;
         self.validate_slice("qd", qd)?;
         self.validate_output::<B>("velocity product output", output)?;
+        self.populate_parent_from_child(q, &mut workspace.frames)?;
         workspace.step.fill(0.0);
         workspace.link_loads.fill(Wrench::zeros());
         output.fill(0.0);
         let base_load = self.inverse_dynamics_kernel_validated::<B>(
-            q,
             qd,
             &workspace.step,
             base.frame,
@@ -184,7 +184,43 @@ impl Model {
             Vector3::zeros(),
             Wrench::zeros(),
             DynamicsScratch {
-                parent_from_child: &mut workspace.frames,
+                parent_from_child: &workspace.frames,
+                angular_velocities: &mut workspace.angular_velocities,
+                angular_accelerations: &mut workspace.angular_accelerations,
+                origin_accelerations: &mut workspace.origin_accelerations,
+                link_accelerations: &mut workspace.link_accelerations,
+                link_loads: &mut workspace.link_loads,
+            },
+            &mut output[B::DOF..],
+        )?;
+        if B::IS_FLOATING {
+            write_world_wrench(base.frame, base_load, &mut output[..FLOATING_BASE_DOF]);
+        }
+        Self::validate_numerical_result("velocity product forces", output.iter())
+    }
+
+    pub(in crate::robot) fn velocity_product_forces_from_transforms<B: BaseKind>(
+        &self,
+        base: BaseMotion<'_>,
+        parent_from_child: &[Frame],
+        qd: &[f64],
+        workspace: &mut Workspace,
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.validate_output::<B>("velocity product output", output)?;
+        workspace.step.fill(0.0);
+        workspace.link_loads.fill(Wrench::zeros());
+        output.fill(0.0);
+        let base_load = self.inverse_dynamics_kernel_validated::<B>(
+            qd,
+            &workspace.step,
+            base.frame,
+            base.velocity,
+            Twist::zeros(),
+            Vector3::zeros(),
+            Wrench::zeros(),
+            DynamicsScratch {
+                parent_from_child,
                 angular_velocities: &mut workspace.angular_velocities,
                 angular_accelerations: &mut workspace.angular_accelerations,
                 origin_accelerations: &mut workspace.origin_accelerations,
@@ -220,10 +256,10 @@ impl Model {
         self.validate_slice("qd", qd)?;
         self.validate_slice("qdd", qdd)?;
         self.validate_output::<B>("inverse dynamics output", output)?;
+        self.populate_parent_from_child(q, &mut workspace.frames)?;
         let root_load = self.prepare_indexed_loads(loads, &mut workspace.link_loads)?;
         output.fill(0.0);
         let base_load = self.inverse_dynamics_kernel_validated::<B>(
-            q,
             qd,
             qdd,
             base.frame,
@@ -232,7 +268,47 @@ impl Model {
             -world_gravity,
             root_load,
             DynamicsScratch {
-                parent_from_child: &mut workspace.frames,
+                parent_from_child: &workspace.frames,
+                angular_velocities: &mut workspace.angular_velocities,
+                angular_accelerations: &mut workspace.angular_accelerations,
+                origin_accelerations: &mut workspace.origin_accelerations,
+                link_accelerations: &mut workspace.link_accelerations,
+                link_loads: &mut workspace.link_loads,
+            },
+            &mut output[B::DOF..],
+        )?;
+        if B::IS_FLOATING {
+            write_world_wrench(base.frame, base_load, &mut output[..FLOATING_BASE_DOF]);
+        }
+        Self::validate_numerical_result("inverse dynamics", output.iter())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::robot) fn inverse_dynamics_from_transforms<B: BaseKind>(
+        &self,
+        base: BaseMotion<'_>,
+        world_gravity: Vector3<f64>,
+        parent_from_child: &[Frame],
+        qd: &[f64],
+        qdd: &[f64],
+        loads: &[IndexedLoad],
+        workspace: &mut Workspace,
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.validate_slice("qdd", qdd)?;
+        self.validate_output::<B>("inverse dynamics output", output)?;
+        let root_load = self.prepare_indexed_loads(loads, &mut workspace.link_loads)?;
+        output.fill(0.0);
+        let base_load = self.inverse_dynamics_kernel_validated::<B>(
+            qd,
+            qdd,
+            base.frame,
+            base.velocity,
+            base.acceleration,
+            -world_gravity,
+            root_load,
+            DynamicsScratch {
+                parent_from_child,
                 angular_velocities: &mut workspace.angular_velocities,
                 angular_accelerations: &mut workspace.angular_accelerations,
                 origin_accelerations: &mut workspace.origin_accelerations,
@@ -266,15 +342,44 @@ impl Model {
     ) -> Result<()> {
         self.validate_slice("q", q)?;
         self.validate_output::<B>("gravity output", output)?;
+        self.populate_parent_from_child(q, &mut workspace.frames)?;
         let root_load = self.prepare_indexed_loads(loads, &mut workspace.link_loads)?;
         output.fill(0.0);
         let base_load = self.gravity_kernel::<B>(
-            q,
             base_frame,
             -world_gravity,
             root_load,
             GravityScratch {
-                parent_from_child: &mut workspace.frames,
+                parent_from_child: &workspace.frames,
+                gravity_at_link: &mut workspace.angular_accelerations,
+                link_loads: &mut workspace.link_loads,
+            },
+            &mut output[B::DOF..],
+        )?;
+        if B::IS_FLOATING {
+            write_world_wrench(base_frame, base_load, &mut output[..FLOATING_BASE_DOF]);
+        }
+        Self::validate_numerical_result("gravity", output.iter())
+    }
+
+    pub(in crate::robot) fn gravity_from_transforms<B: BaseKind>(
+        &self,
+        base_frame: &Frame,
+        world_gravity: Vector3<f64>,
+        parent_from_child: &[Frame],
+        loads: &[IndexedLoad],
+        workspace: &mut Workspace,
+        output: &mut [f64],
+    ) -> Result<()> {
+        self.validate_output::<B>("gravity output", output)?;
+        let root_load = self.prepare_indexed_loads(loads, &mut workspace.link_loads)?;
+        output.fill(0.0);
+        let base_load = self.gravity_kernel::<B>(
+            base_frame,
+            -world_gravity,
+            root_load,
+            GravityScratch {
+                parent_from_child,
                 gravity_at_link: &mut workspace.angular_accelerations,
                 link_loads: &mut workspace.link_loads,
             },
@@ -293,7 +398,6 @@ impl Model {
     #[allow(clippy::too_many_arguments)]
     fn inverse_dynamics_kernel_validated<B: BaseKind>(
         &self,
-        q: &[f64],
         qd: &[f64],
         qdd: &[f64],
         base_frame: &Frame,
@@ -304,7 +408,6 @@ impl Model {
         scratch: DynamicsScratch<'_>,
         output: &mut [f64],
     ) -> Result<Wrench> {
-        self.validate_slice_length("q", q.len(), self.joint_count())?;
         self.validate_slice_length("qd", qd.len(), self.joint_count())?;
         self.validate_slice_length("qdd", qdd.len(), self.joint_count())?;
         self.validate_dynamics_scratch(&scratch)?;
@@ -333,10 +436,9 @@ impl Model {
                     scratch.origin_accelerations[parent_joint_index],
                 )
             };
-            let position = self.joint_value(q, joint_index);
             let velocity = self.joint_value(qd, joint_index);
             let acceleration_value = self.joint_value(qdd, joint_index);
-            let transform = joint.frame(position);
+            let transform = scratch.parent_from_child[joint_index];
             // Reuse one stack-local matrix for the three rotations below.
             let rotation_inverse = transform.rotation.inverse().to_rotation_matrix();
             let translation = transform.translation.vector;
@@ -373,7 +475,6 @@ impl Model {
             let center = &link.center_of_mass;
             scratch.link_accelerations[joint_index] =
                 acceleration + alpha.cross(center) + omega.cross(&omega.cross(center));
-            scratch.parent_from_child[joint_index] = transform;
         }
 
         let mut accumulated_root_load = if B::IS_FLOATING {
@@ -435,14 +536,12 @@ impl Model {
 
     fn gravity_kernel<B: BaseKind>(
         &self,
-        q: &[f64],
         base_frame: &Frame,
         virtual_gravity: Vector3<f64>,
         root_load: Wrench,
         scratch: GravityScratch<'_>,
         output: &mut [f64],
     ) -> Result<Wrench> {
-        self.validate_slice_length("q", q.len(), self.joint_count())?;
         self.validate_slice_length(
             "transform workspace",
             scratch.parent_from_child.len(),
@@ -461,8 +560,6 @@ impl Model {
         self.validate_joint_output("gravity joint output", output)?;
         let base_gravity = base_frame.rotation.inverse() * virtual_gravity;
         for joint_index in 0..self.model_joint_count() {
-            scratch.parent_from_child[joint_index] =
-                self.joint_kinematics[joint_index].frame(self.joint_value(q, joint_index));
             let parent_link_index = self.parent_link_indices[joint_index];
             let parent_gravity = if parent_link_index == 0 {
                 base_gravity

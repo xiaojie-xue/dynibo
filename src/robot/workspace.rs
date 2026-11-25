@@ -77,3 +77,28 @@ impl Workspace {
         }
     }
 }
+
+/// Cached kinematics snapshot populated once by [`super::Robot::state`] or
+/// [`super::FloatingRobot::state`] and read immutably by snapshot queries.
+#[derive(Debug)]
+pub(super) struct StateCache {
+    pub(super) parent_from_child: Vec<Frame>,
+    pub(super) root_from_link: Vec<Frame>,
+    pub(super) root_angular_velocities: Vec<Vector3<f64>>,
+    pub(super) root_origin_velocities: Vec<Vector3<f64>>,
+    pub(super) qd: Vec<f64>,
+}
+
+impl StateCache {
+    pub(super) fn new(model: &Model) -> Self {
+        let joint_count = model.joint_count();
+        let model_joint_count = model.model_joint_count();
+        Self {
+            parent_from_child: vec![Frame::identity(); model_joint_count],
+            root_from_link: vec![Frame::identity(); model_joint_count],
+            root_angular_velocities: vec![Vector3::zeros(); model_joint_count],
+            root_origin_velocities: vec![Vector3::zeros(); model_joint_count],
+            qd: vec![0.0; joint_count],
+        }
+    }
+}

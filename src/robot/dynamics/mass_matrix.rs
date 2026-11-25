@@ -1,7 +1,8 @@
 use nalgebra::Vector3;
 
 use crate::{
-    BaseState, Frame, JointType, Result, Twist, Wrench, spatial::transform::force_to_parent,
+    BaseState, Frame, JointType, Result, Twist, Wrench,
+    spatial::{inertia::SpatialInertia, transform::force_to_parent},
 };
 
 use super::super::topology::{child_link_index, incoming_joint_index};
@@ -62,7 +63,25 @@ impl Model {
         let g = generalized_count::<B>(self);
         self.validate_slice("q", q)?;
         self.validate_slice_length("mass matrix output", output.len(), g * g)?;
-        self.mass_matrix_kernel::<B>(base_frame, q, workspace, output);
+        self.populate_parent_from_child(q, &mut workspace.frames)?;
+        self.mass_matrix_from_transforms::<B>(
+            base_frame,
+            &workspace.frames,
+            &mut workspace.composite_inertias,
+            output,
+        )
+    }
+
+    pub(in crate::robot) fn mass_matrix_from_transforms<B: BaseKind>(
+        &self,
+        base_frame: &Frame,
+        parent_from_child: &[Frame],
+        composite_inertias: &mut [SpatialInertia],
+        output: &mut [f64],
+    ) -> Result<()> {
+        let g = generalized_count::<B>(self);
+        self.validate_slice_length("mass matrix output", output.len(), g * g)?;
+        self.mass_matrix_kernel::<B>(base_frame, parent_from_child, composite_inertias, output);
         Self::validate_numerical_result("mass matrix", output.iter())
     }
 
@@ -73,20 +92,17 @@ impl Model {
     fn mass_matrix_kernel<B: BaseKind>(
         &self,
         base_frame: &Frame,
-        q: &[f64],
-        workspace: &mut Workspace,
+        parent_from_child: &[Frame],
+        composite_inertias: &mut [SpatialInertia],
         output: &mut [f64],
     ) {
         let model_joint_count = self.model_joint_count();
-        let parent_from_child = &mut workspace.frames;
         let g = generalized_count::<B>(self);
         output.fill(0.0);
 
         let mut root_inertia = self.link_dynamics[0].spatial_inertia;
         for joint_index in 0..model_joint_count {
-            parent_from_child[joint_index] =
-                self.joint_kinematics[joint_index].frame(self.joint_value(q, joint_index));
-            workspace.composite_inertias[joint_index] =
+            composite_inertias[joint_index] =
                 self.link_dynamics[child_link_index(joint_index)].spatial_inertia;
         }
         // Composite rigid-body pass: accumulate each subtree inertia, expressed
@@ -95,15 +111,15 @@ impl Model {
             let parent_link_index = self.parent_link_indices[joint_index];
             if parent_link_index == 0 {
                 if B::IS_FLOATING {
-                    root_inertia += workspace.composite_inertias[joint_index]
+                    root_inertia += composite_inertias[joint_index]
                         .transform_to_parent(&parent_from_child[joint_index]);
                 }
                 continue;
             }
-            let transformed = workspace.composite_inertias[joint_index]
+            let transformed = composite_inertias[joint_index]
                 .transform_to_parent(&parent_from_child[joint_index]);
             let parent_joint_index = incoming_joint_index(parent_link_index);
-            workspace.composite_inertias[parent_joint_index] += transformed;
+            composite_inertias[parent_joint_index] += transformed;
         }
 
         let base_rotation = base_frame.rotation;
@@ -131,8 +147,8 @@ impl Model {
             let dof_index =
                 self.joint_dof_indices[joint_index].expect("active joint has a DOF index");
             let joint = self.joint_kinematics[joint_index];
-            let mut force = workspace.composite_inertias[joint_index]
-                .apply_joint(joint.joint_type, *joint.axis.as_ref());
+            let mut force =
+                composite_inertias[joint_index].apply_joint(joint.joint_type, *joint.axis.as_ref());
             let joint_column = B::DOF + dof_index;
             let mut current_joint_index = joint_index;
             loop {

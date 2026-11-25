@@ -9,7 +9,9 @@ pub(super) trait BaseKind {
     const IS_FLOATING: bool;
 }
 
+#[derive(Debug)]
 pub(super) struct Fixed;
+#[derive(Debug)]
 pub(super) struct Floating;
 
 impl BaseKind for Fixed {
