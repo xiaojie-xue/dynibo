@@ -210,35 +210,37 @@ impl From<PyIkOptions> for InverseKinematicsOptions {
 #[pymethods]
 impl PyIkOptions {
     #[new]
-    #[pyo3(signature = (max_iterations=None, translation_tolerance=1.0e-6, rotation_tolerance=1.0e-6, damping=1.0e-3, max_step_norm=0.5))]
+    #[pyo3(signature = (max_iterations=None, translation_tolerance=None, rotation_tolerance=None, damping=None, max_step_norm=None))]
     fn new(
         max_iterations: Option<&Bound<'_, PyAny>>,
-        translation_tolerance: f64,
-        rotation_tolerance: f64,
-        damping: f64,
-        max_step_norm: f64,
+        translation_tolerance: Option<f64>,
+        rotation_tolerance: Option<f64>,
+        damping: Option<f64>,
+        max_step_norm: Option<f64>,
     ) -> PyResult<Self> {
+        let defaults = InverseKinematicsOptions::default();
         let max_iterations = if let Some(value) = max_iterations {
             if value.is_instance_of::<PyBool>() {
                 return Err(PyTypeError::new_err("max_iterations must be an integer"));
             }
-            value
+            let parsed = value
                 .extract::<isize>()
-                .map_err(|_| PyTypeError::new_err("max_iterations must be an integer"))?
+                .map_err(|_| PyTypeError::new_err("max_iterations must be an integer"))?;
+            if parsed <= 0 {
+                return Err(PyValueError::new_err(
+                    "max_iterations must be greater than zero",
+                ));
+            }
+            parsed as usize
         } else {
-            100
+            defaults.max_iterations
         };
-        if max_iterations <= 0 {
-            return Err(PyValueError::new_err(
-                "max_iterations must be greater than zero",
-            ));
-        }
         Ok(Self {
-            max_iterations: max_iterations as usize,
-            translation_tolerance,
-            rotation_tolerance,
-            damping,
-            max_step_norm,
+            max_iterations,
+            translation_tolerance: translation_tolerance.unwrap_or(defaults.translation_tolerance),
+            rotation_tolerance: rotation_tolerance.unwrap_or(defaults.rotation_tolerance),
+            damping: damping.unwrap_or(defaults.damping),
+            max_step_norm: max_step_norm.unwrap_or(defaults.max_step_norm),
         })
     }
 

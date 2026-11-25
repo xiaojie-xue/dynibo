@@ -91,38 +91,22 @@ impl PyLoadBuffer {
     }
 }
 
-pub(super) enum LoadInput<'py> {
-    Empty,
-    List(Vec<IndexedLoad>),
-    Buffer(PyRef<'py, PyLoadBuffer>),
-}
-
-impl LoadInput<'_> {
-    pub(super) fn as_slice(&self) -> &[IndexedLoad] {
-        match self {
-            Self::Empty => &[],
-            Self::List(loads) => loads,
-            Self::Buffer(buffer) => buffer.inner.as_slice(),
-        }
-    }
-}
-
-pub(super) fn convert_loads<'py>(
+pub(super) fn convert_loads(
     links: &[LinkId],
-    loads: Option<&Bound<'py, PyAny>>,
-) -> PyResult<LoadInput<'py>> {
+    loads: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Vec<IndexedLoad>> {
     let Some(loads) = loads else {
-        return Ok(LoadInput::Empty);
+        return Ok(Vec::new());
     };
     if let Ok(buffer) = loads.cast::<PyLoadBuffer>() {
         let buffer = buffer.try_borrow()?;
         if buffer.links.first() != links.first() {
             return Err(core_error(dynibo::Error::InvalidLinkId));
         }
-        return Ok(LoadInput::Buffer(buffer));
+        return Ok(buffer.inner.as_slice().to_vec());
     }
-    let values = loads.extract::<Vec<PyRef<'py, PyLoad>>>()?;
-    let converted = values
+    let values = loads.extract::<Vec<PyRef<'_, PyLoad>>>()?;
+    values
         .iter()
         .map(|load| {
             let link = target_link(links, load.link_id)?;
@@ -132,6 +116,5 @@ pub(super) fn convert_loads<'py>(
             }
             Ok(IndexedLoad { link, wrench })
         })
-        .collect::<PyResult<Vec<_>>>()?;
-    Ok(LoadInput::List(converted))
+        .collect()
 }

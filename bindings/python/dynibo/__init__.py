@@ -1,6 +1,6 @@
 """Python interface to the dynibo robot kinematics and dynamics library."""
 
-from importlib.metadata import version as distribution_version
+from importlib.metadata import PackageNotFoundError, version as distribution_version
 
 from ._dynibo import (
     BaseState,
@@ -15,6 +15,7 @@ from ._dynibo import (
     Robot,
     SolverError,
     Twist,
+    __version__ as _native_version,
 )
 
 __all__ = [
@@ -31,4 +32,7 @@ __all__ = [
     "SolverError",
     "Twist",
 ]
-__version__ = distribution_version("dynibo")
+try:
+    __version__ = distribution_version("dynibo")
+except PackageNotFoundError:
+    __version__ = _native_version

@@ -33,5 +33,6 @@ fn _dynibo(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("ModelError", py.get_type::<ModelError>())?;
     module.add("SolverError", py.get_type::<SolverError>())?;
     module.add("PanicError", py.get_type::<PanicError>())?;
+    module.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

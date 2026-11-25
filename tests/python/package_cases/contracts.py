@@ -143,8 +143,10 @@ class BindingContractTests(unittest.TestCase):
                     ("forward_dynamics", (q, huge_velocity, np.zeros_like(out))),
                 ):
                     with self.subTest(robot=robot_type.__name__, operation=name):
+                        out.fill(123.0)
                         with self.assertRaises(dynibo.SolverError):
                             getattr(robot, name)(*prefix, *args, out=out)
+                        np.testing.assert_array_equal(out, 123.0)
                         self.assertIs(robot.inverse_dynamics(*prefix, q, q, q, out=out), out)
                         np.testing.assert_allclose(out, expected, atol=1.0e-11, rtol=1.0e-10)
 
@@ -297,6 +299,14 @@ class BindingContractTests(unittest.TestCase):
                     robot.link_id("missing")
                 with self.assertRaisesRegex(ValueError, "invalid link id"):
                     robot.gravity(*prefix, q, loads=[dynibo.Load(robot.link_count)])
+                for bad_array in (
+                    np.array([True, False, True, False]),
+                    np.array([1.0 + 2.0j, 0.0, 0.0, 0.0]),
+                    np.array(["0.1", "0.2", "0.3", "0.4"]),
+                    np.array([0.1, 0.2, 0.3, 0.4], dtype=object),
+                ):
+                    with self.assertRaises(TypeError):
+                        robot.mass_matrix(*prefix, bad_array)
                 for invalid in (float("nan"), float("inf"), float("-inf")):
                     bad = (invalid,) + q[1:]
                     for name, args in (
