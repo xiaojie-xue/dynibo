@@ -66,7 +66,7 @@ PYTHONPATH="${installed}" \
 
 # Only production Rust implementation files. Test modules/helpers are also
 # excluded at their definitions with coverage(off), without skipping execution.
-coverage_packages=(-p dynibo -p dynibo-c -p dynibo-python)
+coverage_packages=(-p dynibo -p dynibo-binding-support -p dynibo-c -p dynibo-python)
 coverage_filters=(--ignore-filename-regex '(^|/)(build\.rs|tests|benches|examples)(/|$)')
 cargo llvm-cov report \
     --branch \

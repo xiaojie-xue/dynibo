@@ -83,6 +83,7 @@ set(DYNIBO_BUILT_LIBRARY "${CMAKE_CURRENT_BINARY_DIR}/${DYNIBO_LIBRARY_FILE}")
 # editing a split module must rebuild the native library on incremental builds.
 file(GLOB_RECURSE DYNIBO_RUST_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.rs"
+    "${CMAKE_CURRENT_SOURCE_DIR}/crates/dynibo-binding-support/src/*.rs"
     "${CMAKE_CURRENT_SOURCE_DIR}/bindings/c/src/*.rs")
 
 add_custom_command(
@@ -94,6 +95,7 @@ add_custom_command(
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     DEPENDS
         Cargo.toml Cargo.lock
+        crates/dynibo-binding-support/Cargo.toml
         bindings/c/Cargo.toml bindings/c/build.rs ${DYNIBO_RUST_SOURCES}
     COMMENT "Building dynibo C ABI with Cargo"
     VERBATIM)

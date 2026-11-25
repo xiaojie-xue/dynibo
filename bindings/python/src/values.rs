@@ -1,7 +1,8 @@
 //! Python spatial values and inverse-kinematics options.
 use crate::errors::core_error;
 use dynibo::{BaseState as CoreBaseState, Frame, InverseKinematicsOptions, Twist as CoreTwist};
-use nalgebra::{Quaternion, Translation3, UnitQuaternion, Vector3};
+use dynibo_binding_support::{frame_from_xyzw, xyzw_from_frame};
+use nalgebra::Vector3;
 use pyo3::{
     exceptions::{PyTypeError, PyValueError},
     prelude::*,
@@ -9,20 +10,7 @@ use pyo3::{
 };
 
 fn checked_frame(translation: [f64; 3], rotation_xyzw: [f64; 4]) -> PyResult<Frame> {
-    let [x, y, z, w] = rotation_xyzw;
-    let norm_squared = x * x + y * y + z * z + w * w;
-    if !translation.iter().all(|value| value.is_finite())
-        || !norm_squared.is_finite()
-        || norm_squared <= 1.0e-24
-    {
-        return Err(PyValueError::new_err(
-            "pose contains non-finite values or a zero quaternion",
-        ));
-    }
-    Ok(Frame::from_parts(
-        Translation3::from(Vector3::from(translation)),
-        UnitQuaternion::new_normalize(Quaternion::new(w, x, y, z)),
-    ))
+    frame_from_xyzw(translation, rotation_xyzw).map_err(PyValueError::new_err)
 }
 
 #[pyclass(name = "Pose", module = "dynibo", frozen, eq, skip_from_py_object)]
@@ -45,10 +33,10 @@ impl PyPose {
     }
 
     pub(super) fn from_frame(frame: &Frame) -> Self {
-        let quaternion = frame.rotation.quaternion();
+        let (translation, rotation_xyzw) = xyzw_from_frame(frame);
         Self {
-            translation: frame.translation.vector.into(),
-            rotation_xyzw: [quaternion.i, quaternion.j, quaternion.k, quaternion.w],
+            translation,
+            rotation_xyzw,
         }
     }
 }

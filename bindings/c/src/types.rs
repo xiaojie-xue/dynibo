@@ -1,7 +1,8 @@
 //! C-compatible value types and their core-library conversions.
 use crate::boundary::{CResult, core_error, invalid};
 use dynibo::{BaseState, Frame, InverseKinematicsOptions, Twist};
-use nalgebra::{Quaternion, Translation3, UnitQuaternion, Vector3};
+use dynibo_binding_support::{frame_from_xyzw, xyzw_from_frame};
+use nalgebra::Vector3;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -60,23 +61,13 @@ impl Default for DyniboIkOptions {
 }
 
 pub(super) fn frame_from_pose(p: &DyniboPose) -> CResult<Frame> {
-    let [x, y, z, w] = p.rotation_xyzw;
-    let norm = x * x + y * y + z * z + w * w;
-    if !p.translation.iter().all(|x| x.is_finite()) || !norm.is_finite() || norm <= 1e-24 {
-        return Err(invalid(
-            "pose contains non-finite values or a zero quaternion",
-        ));
-    }
-    Ok(Frame::from_parts(
-        Translation3::from(Vector3::from(p.translation)),
-        UnitQuaternion::new_normalize(Quaternion::new(w, x, y, z)),
-    ))
+    frame_from_xyzw(p.translation, p.rotation_xyzw).map_err(invalid)
 }
 pub(super) fn pose_from_frame(f: &Frame) -> DyniboPose {
-    let q = f.rotation.quaternion();
+    let (translation, rotation_xyzw) = xyzw_from_frame(f);
     DyniboPose {
-        translation: f.translation.vector.into(),
-        rotation_xyzw: [q.i, q.j, q.k, q.w],
+        translation,
+        rotation_xyzw,
     }
 }
 pub(super) fn twist_from_c(t: DyniboTwist) -> Twist {

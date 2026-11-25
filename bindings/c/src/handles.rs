@@ -3,8 +3,8 @@ use crate::boundary::{
     CResult, DyniboStatus, call, core_error, invalid, required_mut, required_ref,
 };
 use crate::types::{DyniboLoad, DyniboPose, frame_from_pose};
-use dynibo::{FloatingRobot, Frame, IndexedLoad, LinkId, Robot, RobotModel, Wrench};
-use nalgebra::Vector3;
+use dynibo::{FloatingRobot, Frame, IndexedLoad, LinkId, LoadBuffer, Robot, RobotModel};
+use dynibo_binding_support::{LinkTable, LoadInputError, aggregate_loads};
 use std::{
     ffi::{CStr, CString, c_char},
     ptr,
@@ -14,45 +14,43 @@ use std::{
 pub struct DyniboRobot {
     pub(super) inner: RobotModel,
     pub(super) base_frame: Frame,
-    pub(super) link_ids: Vec<LinkId>,
+    pub(super) link_ids: LinkTable,
     pub(super) name: CString,
 }
 /// Fixed-base calculation storage.
 pub struct DyniboWorkspace {
     pub(super) inner: Robot,
     pub(super) poses: Box<[Frame]>,
-    pub(super) converted_loads: Box<[IndexedLoad]>,
-    pub(super) load_positions: Box<[usize]>,
+    pub(super) loads: LoadBuffer,
 }
 /// Floating-base model and metadata. It intentionally contains no base state.
 pub struct DyniboFloatingRobot {
     pub(super) inner: RobotModel,
-    pub(super) link_ids: Vec<LinkId>,
+    pub(super) link_ids: LinkTable,
     pub(super) name: CString,
 }
 /// Floating-base calculation storage.
 pub struct DyniboFloatingWorkspace {
     pub(super) inner: FloatingRobot,
     pub(super) poses: Box<[Frame]>,
-    pub(super) converted_loads: Box<[IndexedLoad]>,
-    pub(super) load_positions: Box<[usize]>,
+    pub(super) loads: LoadBuffer,
 }
 
-/// Converts and aggregates C loads using preallocated workspace buffers.
+/// Converts and aggregates C loads using the workspace's reusable core [`LoadBuffer`].
 ///
 /// # Safety
 /// For nonzero `n`, a non-null `p` must describe `n` initialized, aligned loads
 /// in one allocation of at most `isize::MAX` bytes. It must remain readable and
-/// unmodified during this call, without aliasing `output` or `positions`.
+/// unmodified during this call.
 pub(super) unsafe fn loads<'a>(
-    ids: &[LinkId],
-    output: &'a mut [IndexedLoad],
-    positions: &mut [usize],
+    ids: &LinkTable,
+    buffer: &'a mut LoadBuffer,
     p: *const DyniboLoad,
     n: usize,
 ) -> CResult<&'a [IndexedLoad]> {
     if n == 0 {
-        return Ok(&output[..0]);
+        buffer.clear();
+        return Ok(buffer.as_slice());
     }
     if p.is_null() {
         return Err(invalid(
@@ -60,48 +58,15 @@ pub(super) unsafe fn loads<'a>(
         ));
     }
     let values = unsafe { std::slice::from_raw_parts(p, n) };
-    for load in values {
-        if load.link_id >= ids.len() {
-            return Err(invalid(format!("invalid link id {}", load.link_id)));
-        }
-        if !load
-            .torque
-            .iter()
-            .chain(load.force.iter())
-            .all(|v| v.is_finite())
-        {
-            return Err(core_error(dynibo::Error::NonFiniteInput { input: "load" }));
-        }
-    }
-    let mut used = 0;
-    for load in values {
-        let position = &mut positions[load.link_id];
-        if *position == usize::MAX {
-            *position = used;
-            output[used] = IndexedLoad {
-                link: ids[load.link_id],
-                wrench: Wrench::zeros(),
-            };
-            used += 1;
-        }
-        let converted = &mut output[*position].wrench;
-        *converted = Wrench::new(
-            converted.torque + Vector3::from(load.torque),
-            converted.force + Vector3::from(load.force),
-        );
-    }
-    for load in values {
-        positions[load.link_id] = usize::MAX;
-    }
-    // Restore the index map before reporting overflow, so a failed conversion
-    // cannot leave stale entries for the next call.
-    if output[..used].iter().any(|load| !load.wrench.is_finite()) {
-        return Err(core_error(dynibo::Error::NumericalFailure {
-            operation: "load aggregation",
-        }));
-    }
-    Ok(&output[..used])
+    aggregate_loads(buffer, ids, values, |load| {
+        (load.link_id, load.torque, load.force)
+    })
+    .map_err(|error| match error {
+        LoadInputError::InvalidLinkId(id) => invalid(format!("invalid link id {id}")),
+        LoadInputError::Core(err) => core_error(err),
+    })
 }
+
 /// Borrows fixed-base handles and synchronizes the instance's base frame.
 ///
 /// # Safety
@@ -123,6 +88,7 @@ pub(super) unsafe fn fixed_parts<'a>(
         .map_err(core_error)?;
     Ok((robot, workspace))
 }
+
 /// Borrows floating-base handles after checking their shared model identity.
 ///
 /// # Safety
@@ -140,33 +106,15 @@ pub(super) unsafe fn floating_parts<'a>(
     }
     Ok((robot, workspace))
 }
-pub(super) fn link(ids: &[LinkId], target: usize) -> CResult<LinkId> {
-    ids.get(target)
-        .copied()
+
+pub(super) fn link(ids: &LinkTable, target: usize) -> CResult<LinkId> {
+    ids.resolve(target)
         .ok_or_else(|| invalid(format!("invalid link id {target}")))
 }
-fn make_loads(ids: &[LinkId]) -> Box<[IndexedLoad]> {
-    ids.iter()
-        .copied()
-        .map(|link| IndexedLoad {
-            link,
-            wrench: Wrench::zeros(),
-        })
-        .collect()
-}
-fn make_load_positions(ids: &[LinkId]) -> Box<[usize]> {
-    vec![usize::MAX; ids.len()].into_boxed_slice()
-}
-fn info<R>(
-    robot: &R,
-    links: impl FnOnce(&R) -> usize,
-    at: impl Fn(&R, usize) -> dynibo::Result<LinkId>,
-    name: impl FnOnce(&R) -> &str,
-) -> CResult<(Vec<LinkId>, CString)> {
-    let ids = (0..links(robot))
-        .map(|i| at(robot, i).expect("enumerated link is valid"))
-        .collect();
-    let name = CString::new(name(robot))
+
+fn info(model: &RobotModel) -> CResult<(LinkTable, CString)> {
+    let ids = LinkTable::from_model(model);
+    let name = CString::new(model.name())
         .map_err(|_| (DyniboStatus::ModelError, "robot name contains NUL".into()))?;
     Ok((ids, name))
 }
@@ -186,12 +134,7 @@ pub unsafe extern "C" fn dynibo_robot_from_urdf(
             .to_str()
             .map_err(|_| invalid("path must be valid UTF-8"))?;
         let inner = RobotModel::from_urdf(path).map_err(core_error)?;
-        let (link_ids, name) = info(
-            &inner,
-            RobotModel::link_count,
-            RobotModel::link_id_at,
-            RobotModel::name,
-        )?;
+        let (link_ids, name) = info(&inner)?;
         *out = Box::into_raw(Box::new(DyniboRobot {
             inner,
             base_frame: Frame::identity(),
@@ -201,6 +144,7 @@ pub unsafe extern "C" fn dynibo_robot_from_urdf(
         Ok(())
     })
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_floating_robot_from_urdf(
     path: *const c_char,
@@ -217,12 +161,7 @@ pub unsafe extern "C" fn dynibo_floating_robot_from_urdf(
             .map_err(|_| invalid("path must be valid UTF-8"))?;
         let inner = RobotModel::from_urdf(path).map_err(core_error)?;
         inner.validate_floating_base().map_err(core_error)?;
-        let (link_ids, name) = info(
-            &inner,
-            RobotModel::link_count,
-            RobotModel::link_id_at,
-            RobotModel::name,
-        )?;
+        let (link_ids, name) = info(&inner)?;
         *out = Box::into_raw(Box::new(DyniboFloatingRobot {
             inner,
             link_ids,
@@ -231,54 +170,65 @@ pub unsafe extern "C" fn dynibo_floating_robot_from_urdf(
         Ok(())
     })
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_robot_destroy(p: *mut DyniboRobot) {
     if !p.is_null() {
         drop(unsafe { Box::from_raw(p) });
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_floating_robot_destroy(p: *mut DyniboFloatingRobot) {
     if !p.is_null() {
         drop(unsafe { Box::from_raw(p) });
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_robot_name(p: *const DyniboRobot) -> *const c_char {
     unsafe { p.as_ref() }.map_or(ptr::null(), |x| x.name.as_ptr())
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_floating_robot_name(
     p: *const DyniboFloatingRobot,
 ) -> *const c_char {
     unsafe { p.as_ref() }.map_or(ptr::null(), |x| x.name.as_ptr())
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_robot_joint_count(p: *const DyniboRobot) -> usize {
     unsafe { p.as_ref() }.map_or(0, |x| x.inner.joint_count())
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_robot_generalized_count(p: *const DyniboRobot) -> usize {
     unsafe { p.as_ref() }.map_or(0, |x| x.inner.joint_count())
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_robot_link_count(p: *const DyniboRobot) -> usize {
     unsafe { p.as_ref() }.map_or(0, |x| x.inner.link_count())
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_floating_robot_joint_count(p: *const DyniboFloatingRobot) -> usize {
     unsafe { p.as_ref() }.map_or(0, |x| x.inner.joint_count())
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_floating_robot_generalized_count(
     p: *const DyniboFloatingRobot,
 ) -> usize {
     unsafe { p.as_ref() }.map_or(0, |x| x.inner.joint_count() + 6)
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_floating_robot_link_count(p: *const DyniboFloatingRobot) -> usize {
     unsafe { p.as_ref() }.map_or(0, |x| x.inner.link_count())
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_robot_set_base_frame(
     p: *mut DyniboRobot,
@@ -290,11 +240,11 @@ pub unsafe extern "C" fn dynibo_robot_set_base_frame(
         Ok(())
     })
 }
-fn find_link(ids: &[LinkId], got: LinkId) -> usize {
-    ids.iter()
-        .position(|x| *x == got)
-        .expect("link belongs to model")
+
+fn find_link(ids: &LinkTable, got: LinkId) -> usize {
+    ids.index_of(got).expect("link belongs to model")
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_robot_link_id(
     p: *const DyniboRobot,
@@ -317,6 +267,7 @@ pub unsafe extern "C" fn dynibo_robot_link_id(
         Ok(())
     })
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_floating_robot_link_id(
     p: *const DyniboFloatingRobot,
@@ -339,6 +290,7 @@ pub unsafe extern "C" fn dynibo_floating_robot_link_id(
         Ok(())
     })
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_workspace_create(
     p: *const DyniboRobot,
@@ -351,12 +303,12 @@ pub unsafe extern "C" fn dynibo_workspace_create(
         *out = Box::into_raw(Box::new(DyniboWorkspace {
             inner: robot.inner.robot(),
             poses: vec![Frame::identity(); robot.inner.link_count()].into_boxed_slice(),
-            converted_loads: make_loads(&robot.link_ids),
-            load_positions: make_load_positions(&robot.link_ids),
+            loads: robot.inner.load_buffer(),
         }));
         Ok(())
     })
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_floating_workspace_create(
     p: *const DyniboFloatingRobot,
@@ -369,18 +321,19 @@ pub unsafe extern "C" fn dynibo_floating_workspace_create(
         *out = Box::into_raw(Box::new(DyniboFloatingWorkspace {
             inner: robot.inner.floating_robot().map_err(core_error)?,
             poses: vec![Frame::identity(); robot.inner.link_count()].into_boxed_slice(),
-            converted_loads: make_loads(&robot.link_ids),
-            load_positions: make_load_positions(&robot.link_ids),
+            loads: robot.inner.load_buffer(),
         }));
         Ok(())
     })
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_workspace_destroy(p: *mut DyniboWorkspace) {
     if !p.is_null() {
         drop(unsafe { Box::from_raw(p) });
     }
 }
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dynibo_floating_workspace_destroy(p: *mut DyniboFloatingWorkspace) {
     if !p.is_null() {

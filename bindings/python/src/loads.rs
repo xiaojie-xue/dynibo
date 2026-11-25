@@ -1,9 +1,9 @@
 //! Python load values, reusable load buffers, and input conversion.
 use crate::errors::core_error;
 use dynibo::{IndexedLoad, LinkId, LoadBuffer as CoreLoadBuffer, Wrench};
+use dynibo_binding_support::LinkTable;
 use nalgebra::Vector3;
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyAny};
-use std::sync::Arc;
 
 #[pyclass(name = "Load", module = "dynibo", frozen, eq, skip_from_py_object)]
 #[derive(Clone, Debug, PartialEq)]
@@ -41,10 +41,9 @@ impl PyLoad {
     }
 }
 
-pub(super) fn target_link(links: &[LinkId], target: usize) -> PyResult<LinkId> {
+pub(super) fn target_link(links: &LinkTable, target: usize) -> PyResult<LinkId> {
     links
-        .get(target)
-        .copied()
+        .resolve(target)
         .ok_or_else(|| PyValueError::new_err(format!("invalid link id {target}")))
 }
 
@@ -52,7 +51,7 @@ pub(super) fn target_link(links: &[LinkId], target: usize) -> PyResult<LinkId> {
 #[pyclass(name = "LoadBuffer", module = "dynibo")]
 pub(super) struct PyLoadBuffer {
     pub(super) inner: CoreLoadBuffer,
-    pub(super) links: Arc<[LinkId]>,
+    pub(super) links: LinkTable,
 }
 
 #[pymethods]
@@ -92,7 +91,7 @@ impl PyLoadBuffer {
 }
 
 pub(super) fn convert_loads(
-    links: &[LinkId],
+    links: &LinkTable,
     loads: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<Vec<IndexedLoad>> {
     let Some(loads) = loads else {
@@ -100,7 +99,7 @@ pub(super) fn convert_loads(
     };
     if let Ok(buffer) = loads.cast::<PyLoadBuffer>() {
         let buffer = buffer.try_borrow()?;
-        if buffer.links.first() != links.first() {
+        if !buffer.links.same_model(links) {
             return Err(core_error(dynibo::Error::InvalidLinkId));
         }
         return Ok(buffer.inner.as_slice().to_vec());

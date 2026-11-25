@@ -215,10 +215,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "dynibo-binding-support"
+version = "0.5.3"
+dependencies = [
+ "dynibo",
+ "nalgebra",
+]
+
+[[package]]
 name = "dynibo-c"
 version = "0.5.3"
 dependencies = [
  "dynibo",
+ "dynibo-binding-support",
  "nalgebra",
 ]
 
@@ -239,6 +248,7 @@ name = "dynibo-python"
 version = "0.5.3"
 dependencies = [
  "dynibo",
+ "dynibo-binding-support",
  "nalgebra",
  "numpy",
  "pyo3",

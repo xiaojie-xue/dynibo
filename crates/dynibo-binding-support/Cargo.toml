@@ -1,0 +1,14 @@
+[package]
+name = "dynibo-binding-support"
+version.workspace = true
+edition = "2024"
+description = "Shared link-table, pose conversion, and load aggregation helpers for dynibo language bindings"
+license = "MIT"
+publish = false
+
+[dependencies]
+dynibo = { path = "../.." }
+nalgebra = "0.34.1"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }

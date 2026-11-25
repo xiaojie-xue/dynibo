@@ -8,7 +8,8 @@ use crate::calculation::{
 use crate::errors::core_error;
 use crate::loads::{PyLoadBuffer, convert_loads, target_link};
 use crate::values::{PyIkOptions, PyPose, PyTwist};
-use dynibo::{Frame, LinkId, Robot as CoreRobot};
+use dynibo::{Frame, Robot as CoreRobot};
+use dynibo_binding_support::LinkTable;
 use numpy::PyArray1;
 use pyo3::{
     exceptions::PyValueError,
@@ -17,14 +18,8 @@ use pyo3::{
 };
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex, atomic::AtomicBool},
+    sync::{Mutex, atomic::AtomicBool},
 };
-
-fn collect_links(robot: &CoreRobot) -> Vec<LinkId> {
-    (0..robot.link_count())
-        .map(|index| robot.link_id_at(index).expect("enumerated link is valid"))
-        .collect()
-}
 
 #[pyclass(name = "Robot", module = "dynibo")]
 pub(super) struct PyRobot {
@@ -34,13 +29,13 @@ pub(super) struct PyRobot {
     joint_count: usize,
     generalized_count: usize,
     link_count: usize,
-    links: Arc<[LinkId]>,
+    links: LinkTable,
 }
 
 impl PyRobot {
     fn load(path: PathBuf) -> PyResult<Self> {
         let robot = CoreRobot::from_urdf(path).map_err(core_error)?;
-        let links = collect_links(&robot).into();
+        let links = LinkTable::from_robot(&robot);
         let link_count = robot.link_count();
         let generalized_count = robot.generalized_count();
         Ok(Self {
@@ -80,7 +75,7 @@ impl PyRobot {
                 joint_count: self.joint_count,
                 generalized_count: self.generalized_count,
                 link_count: self.link_count,
-                links: Arc::clone(&self.links),
+                links: self.links.clone(),
             })
         })
     }
@@ -141,8 +136,7 @@ impl PyRobot {
         with_robot(&self.inner, py, |robot| {
             let id = robot.link_id(name).map_err(core_error)?;
             self.links
-                .iter()
-                .position(|candidate| *candidate == id)
+                .index_of(id)
                 .ok_or_else(|| PyValueError::new_err("link does not belong to this robot"))
         })
     }
