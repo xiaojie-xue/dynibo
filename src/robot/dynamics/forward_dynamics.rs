@@ -1,6 +1,13 @@
-use nalgebra::{Matrix3, SMatrix, SVector, Vector3};
+use nalgebra::{SVector, Vector3};
 
-use crate::{BaseState, Error, Frame, JointType, Result, Twist, Wrench};
+use crate::{
+    BaseState, Error, Frame, JointType, Result, Twist, Wrench,
+    spatial::{
+        cross::{force_cross, motion_cross},
+        inertia::{ArticulatedInertia, Matrix6},
+        transform::{force_to_parent, motion_to_child},
+    },
+};
 
 use super::super::topology::{child_link_index, incoming_joint_index};
 use super::super::{
@@ -9,7 +16,6 @@ use super::super::{
 };
 
 const GRAVITY: f64 = 9.80665;
-type Matrix6 = SMatrix<f64, 6, 6>;
 type Vector6 = SVector<f64, 6>;
 
 impl Robot {
@@ -113,14 +119,10 @@ impl Model {
             root_rotation_inverse * base_velocity.linear,
         );
 
-        let root_link = self.link_dynamics[0];
-        let mut root_inertia = rigid_body_inertia(
-            root_link.mass,
-            root_link.first_moment,
-            root_link.origin_inertia,
-        );
-        let root_momentum = inertia_apply(&root_inertia, root_velocity);
-        let mut root_bias_force = add_wrench(force_cross(root_velocity, root_momentum), root_load);
+        let mut root_inertia =
+            ArticulatedInertia::from_spatial(self.link_dynamics[0].spatial_inertia);
+        let root_momentum = root_inertia.apply(root_velocity);
+        let mut root_bias_force = force_cross(root_velocity, root_momentum) + root_load;
 
         // First pass: transforms, velocities, velocity bias, body inertia, and bias force.
         for joint_index in 0..self.model_joint_count() {
@@ -133,20 +135,18 @@ impl Model {
                 workspace.spatial_velocities[incoming_joint_index(parent_link_index)]
             };
             let motion_subspace = joint_motion_subspace(joint.joint_type, *joint.axis.as_ref());
-            let joint_velocity = scale_twist(motion_subspace, self.joint_value(qd, joint_index));
-            let velocity = add_twist(motion_to_child(&transform, parent_velocity), joint_velocity);
+            let joint_velocity = self.joint_value(qd, joint_index) * motion_subspace;
+            let velocity = motion_to_child(&transform, parent_velocity) + joint_velocity;
             let link = self.link_dynamics[child_link_index(joint_index)];
-            let inertia = rigid_body_inertia(link.mass, link.first_moment, link.origin_inertia);
-            let momentum = inertia_apply(&inertia, velocity);
+            let inertia = ArticulatedInertia::from_spatial(link.spatial_inertia);
+            let momentum = inertia.apply(velocity);
 
             parent_from_child[joint_index] = transform;
             workspace.spatial_velocities[joint_index] = velocity;
             workspace.bias_accelerations[joint_index] = motion_cross(velocity, joint_velocity);
             workspace.articulated_inertias[joint_index] = inertia;
-            workspace.articulated_bias_forces[joint_index] = add_wrench(
-                force_cross(velocity, momentum),
-                workspace.link_loads[joint_index],
-            );
+            workspace.articulated_bias_forces[joint_index] =
+                force_cross(velocity, momentum) + workspace.link_loads[joint_index];
         }
 
         let joint_offset = base_dof_count(base_mode);
@@ -165,9 +165,8 @@ impl Model {
                 self.joint_dof_indices[joint_index]
             {
                 let motion_subspace = joint_motion_subspace(joint.joint_type, *joint.axis.as_ref());
-                let articulated_u =
-                    inertia_apply_joint(&inertia, joint.joint_type, *joint.axis.as_ref());
-                let articulated_d = motion_force_dot(motion_subspace, articulated_u);
+                let articulated_u = inertia.apply_joint(joint.joint_type, *joint.axis.as_ref());
+                let articulated_d = motion_subspace.dot_wrench(articulated_u);
                 if !articulated_d.is_finite() {
                     return Err(Error::NumericalFailure {
                         operation: "joint articulated inertia",
@@ -179,7 +178,7 @@ impl Model {
                     });
                 }
                 let joint_bias = generalized_forces[joint_offset + dof_index]
-                    - motion_force_dot(motion_subspace, bias_force);
+                    - motion_subspace.dot_wrench(bias_force);
                 workspace.articulated_u[joint_index] = articulated_u;
                 workspace.articulated_d[joint_index] = articulated_d;
                 workspace.articulated_joint_bias[joint_index] = joint_bias;
@@ -191,40 +190,31 @@ impl Model {
                     continue;
                 }
 
-                let u = wrench_vector(articulated_u);
-                let reduced_inertia = inertia - (u * u.transpose()) / articulated_d;
-                let reduced_bias_force = add_wrench(
-                    add_wrench(
-                        bias_force,
-                        inertia_apply(&reduced_inertia, bias_acceleration),
-                    ),
-                    scale_wrench(articulated_u, joint_bias / articulated_d),
-                );
+                let u = articulated_u.to_vector();
+                let reduced_inertia =
+                    ArticulatedInertia(inertia.0 - (u * u.transpose()) / articulated_d);
+                let reduced_bias_force = bias_force
+                    + reduced_inertia.apply(bias_acceleration)
+                    + (joint_bias / articulated_d) * articulated_u;
                 (reduced_inertia, reduced_bias_force)
             } else {
                 if skip_root_propagation {
                     continue;
                 }
-                (
-                    inertia,
-                    add_wrench(bias_force, inertia_apply(&inertia, bias_acceleration)),
-                )
+                (inertia, bias_force + inertia.apply(bias_acceleration))
             };
 
             let parent_inertia =
-                transform_inertia_to_parent(&parent_from_child[joint_index], &reduced_inertia);
+                reduced_inertia.transform_to_parent(&parent_from_child[joint_index]);
             let parent_bias_force =
-                super::wrench_to_parent(&parent_from_child[joint_index], reduced_bias_force);
+                force_to_parent(&parent_from_child[joint_index], reduced_bias_force);
             if parent_link_index == 0 {
                 root_inertia += parent_inertia;
-                root_bias_force = add_wrench(root_bias_force, parent_bias_force);
+                root_bias_force += parent_bias_force;
             } else {
                 let parent_joint_index = incoming_joint_index(parent_link_index);
                 workspace.articulated_inertias[parent_joint_index] += parent_inertia;
-                workspace.articulated_bias_forces[parent_joint_index] = add_wrench(
-                    workspace.articulated_bias_forces[parent_joint_index],
-                    parent_bias_force,
-                );
+                workspace.articulated_bias_forces[parent_joint_index] += parent_bias_force;
             }
         }
 
@@ -241,17 +231,17 @@ impl Model {
                     root_rotation_inverse * world_base_force.torque,
                     root_rotation_inverse * world_base_force.force,
                 );
-                let right_hand_side = wrench_vector(sub_wrench(local_base_force, root_bias_force));
+                let right_hand_side = (local_base_force - root_bias_force).to_vector();
                 // Average without overflowing a finite diagonal before scaling.
-                let symmetric_inertia = root_inertia * 0.5 + root_inertia.transpose() * 0.5;
+                let symmetric_inertia = root_inertia.0 * 0.5 + root_inertia.0.transpose() * 0.5;
                 let acceleration =
-                    twist_from_vector(solve_base_inertia(symmetric_inertia, right_hand_side)?);
+                    Twist::from_vector(solve_base_inertia(symmetric_inertia, right_hand_side)?);
 
                 let physical_linear_local = acceleration.linear - gravity_local
                     + root_velocity.angular.cross(&root_velocity.linear);
                 let world_angular = base_frame.rotation * acceleration.angular;
                 let world_linear = base_frame.rotation * physical_linear_local;
-                if !twist_is_finite(Twist::new(world_angular, world_linear)) {
+                if !Twist::new(world_angular, world_linear).is_finite() {
                     return Err(Error::NumericalFailure {
                         operation: "floating-base acceleration",
                     });
@@ -270,13 +260,12 @@ impl Model {
             } else {
                 workspace.spatial_accelerations[incoming_joint_index(parent_link_index)]
             };
-            let mut acceleration = add_twist(
-                motion_to_child(&parent_from_child[joint_index], parent_acceleration),
-                workspace.bias_accelerations[joint_index],
-            );
+            let mut acceleration =
+                motion_to_child(&parent_from_child[joint_index], parent_acceleration)
+                    + workspace.bias_accelerations[joint_index];
             if let Some(dof_index) = self.joint_dof_indices[joint_index] {
                 let joint_acceleration = (workspace.articulated_joint_bias[joint_index]
-                    - motion_force_dot(acceleration, workspace.articulated_u[joint_index]))
+                    - acceleration.dot_wrench(workspace.articulated_u[joint_index]))
                     / workspace.articulated_d[joint_index];
                 if !joint_acceleration.is_finite() {
                     return Err(Error::NumericalFailure {
@@ -287,10 +276,7 @@ impl Model {
                     self.joint_kinematics[joint_index].joint_type,
                     *self.joint_kinematics[joint_index].axis.as_ref(),
                 );
-                acceleration = add_twist(
-                    acceleration,
-                    scale_twist(motion_subspace, joint_acceleration),
-                );
+                acceleration += joint_acceleration * motion_subspace;
                 output[joint_offset + dof_index] = joint_acceleration;
             }
             workspace.spatial_accelerations[joint_index] = acceleration;
@@ -368,74 +354,6 @@ fn solve_base_inertia(inertia: Matrix6, rhs: Vector6) -> Result<Vector6> {
     Ok(solution)
 }
 
-fn rigid_body_inertia(mass: f64, moment: Vector3<f64>, inertia: Matrix3<f64>) -> Matrix6 {
-    let moment_cross = cross_matrix(moment);
-    let mut output = Matrix6::zeros();
-    output.fixed_view_mut::<3, 3>(0, 0).copy_from(&inertia);
-    output.fixed_view_mut::<3, 3>(0, 3).copy_from(&moment_cross);
-    output
-        .fixed_view_mut::<3, 3>(3, 0)
-        .copy_from(&(-moment_cross));
-    output
-        .fixed_view_mut::<3, 3>(3, 3)
-        .copy_from(&(mass * Matrix3::identity()));
-    output
-}
-
-fn cross_matrix(value: Vector3<f64>) -> Matrix3<f64> {
-    Matrix3::new(
-        0.0, -value.z, value.y, value.z, 0.0, -value.x, -value.y, value.x, 0.0,
-    )
-}
-
-fn transform_inertia_to_parent(transform: &Frame, inertia: &Matrix6) -> Matrix6 {
-    // Angular-first symmetric inertia is [A B; B^T D]. Rotate the three
-    // independent blocks, then translate them with P = [translation]x.
-    // This is X^T I X without constructing a dense spatial transform X.
-    let rotation = transform.rotation.to_rotation_matrix().into_inner();
-    let angular = rotation * inertia.fixed_view::<3, 3>(0, 0) * rotation.transpose();
-    let coupling = rotation * inertia.fixed_view::<3, 3>(0, 3) * rotation.transpose();
-    let linear = rotation * inertia.fixed_view::<3, 3>(3, 3) * rotation.transpose();
-    let position_cross = cross_matrix(transform.translation.vector);
-    let translated_coupling = coupling + position_cross * linear;
-    let translated_angular =
-        angular + position_cross * coupling.transpose() - translated_coupling * position_cross;
-    let mut output = Matrix6::zeros();
-    output
-        .fixed_view_mut::<3, 3>(0, 0)
-        .copy_from(&translated_angular);
-    output
-        .fixed_view_mut::<3, 3>(0, 3)
-        .copy_from(&translated_coupling);
-    output
-        .fixed_view_mut::<3, 3>(3, 0)
-        .copy_from(&translated_coupling.transpose());
-    output.fixed_view_mut::<3, 3>(3, 3).copy_from(&linear);
-    output
-}
-
-fn motion_to_child(transform: &Frame, value: Twist) -> Twist {
-    let rotation_inverse = transform.rotation.inverse();
-    Twist::new(
-        rotation_inverse * value.angular,
-        rotation_inverse * (value.linear + value.angular.cross(&transform.translation.vector)),
-    )
-}
-
-fn motion_cross(lhs: Twist, rhs: Twist) -> Twist {
-    Twist::new(
-        lhs.angular.cross(&rhs.angular),
-        lhs.linear.cross(&rhs.angular) + lhs.angular.cross(&rhs.linear),
-    )
-}
-
-fn force_cross(motion: Twist, force: Wrench) -> Wrench {
-    Wrench::new(
-        motion.angular.cross(&force.torque) + motion.linear.cross(&force.force),
-        motion.angular.cross(&force.force),
-    )
-}
-
 fn joint_motion_subspace(joint_type: JointType, axis: Vector3<f64>) -> Twist {
     match joint_type {
         JointType::Revolute => Twist::new(axis, Vector3::zeros()),
@@ -444,91 +362,11 @@ fn joint_motion_subspace(joint_type: JointType, axis: Vector3<f64>) -> Twist {
     }
 }
 
-fn inertia_apply(inertia: &Matrix6, motion: Twist) -> Wrench {
-    wrench_from_vector(inertia * motion.to_vector())
-}
-
-fn inertia_apply_joint(inertia: &Matrix6, joint_type: JointType, axis: Vector3<f64>) -> Wrench {
-    let offset = match joint_type {
-        JointType::Revolute => 0,
-        JointType::Prismatic => 3,
-        JointType::Fixed => return Wrench::zeros(),
-    };
-    // Match only exact cardinal axes, including their negative directions.
-    // Nearly aligned and arbitrary axes must retain all their components.
-    let aligned = if axis.x.abs() == 1.0 && axis.y == 0.0 && axis.z == 0.0 {
-        Some((0, axis.x))
-    } else if axis.y.abs() == 1.0 && axis.x == 0.0 && axis.z == 0.0 {
-        Some((1, axis.y))
-    } else if axis.z.abs() == 1.0 && axis.x == 0.0 && axis.y == 0.0 {
-        Some((2, axis.z))
-    } else {
-        None
-    };
-    let product = if let Some((index, sign)) = aligned {
-        inertia.column(offset + index) * sign
-    } else {
-        inertia.fixed_columns::<3>(offset) * axis
-    };
-    wrench_from_vector(product)
-}
-
-fn motion_force_dot(motion: Twist, force: Wrench) -> f64 {
-    motion.angular.dot(&force.torque) + motion.linear.dot(&force.force)
-}
-
-fn add_twist(lhs: Twist, rhs: Twist) -> Twist {
-    Twist::new(lhs.angular + rhs.angular, lhs.linear + rhs.linear)
-}
-
-fn scale_twist(value: Twist, scale: f64) -> Twist {
-    Twist::new(scale * value.angular, scale * value.linear)
-}
-
-fn add_wrench(lhs: Wrench, rhs: Wrench) -> Wrench {
-    Wrench::new(lhs.torque + rhs.torque, lhs.force + rhs.force)
-}
-
-fn sub_wrench(lhs: Wrench, rhs: Wrench) -> Wrench {
-    Wrench::new(lhs.torque - rhs.torque, lhs.force - rhs.force)
-}
-
-fn scale_wrench(value: Wrench, scale: f64) -> Wrench {
-    Wrench::new(scale * value.torque, scale * value.force)
-}
-
-fn wrench_vector(value: Wrench) -> Vector6 {
-    Vector6::from_iterator(value.torque.iter().chain(value.force.iter()).copied())
-}
-
-fn wrench_from_vector(value: Vector6) -> Wrench {
-    Wrench::new(
-        Vector3::new(value[0], value[1], value[2]),
-        Vector3::new(value[3], value[4], value[5]),
-    )
-}
-
-fn twist_from_vector(value: Vector6) -> Twist {
-    Twist::new(
-        Vector3::new(value[0], value[1], value[2]),
-        Vector3::new(value[3], value[4], value[5]),
-    )
-}
-
-fn twist_is_finite(value: Twist) -> bool {
-    value
-        .angular
-        .iter()
-        .chain(value.linear.iter())
-        .all(|component| component.is_finite())
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use approx::assert_relative_eq;
-    use nalgebra::{Translation3, UnitQuaternion};
 
     #[test]
     fn scaled_base_solve_is_invariant_to_diagonal_units_and_mass_scale() {
@@ -618,61 +456,5 @@ mod tests {
             solve_base_inertia(Matrix6::identity(), Vector6::repeat(2.0)).unwrap(),
             Vector6::repeat(2.0)
         );
-    }
-
-    #[test]
-    fn block_inertia_transform_matches_dense_spatial_congruence() {
-        for sample in 0..16 {
-            let t = (sample + 1) as f64;
-            // General symmetric positive-definite articulated inertia, not
-            // just the more restricted spatial inertia of a single rigid body.
-            let factor = Matrix6::from_fn(|row, column| {
-                (t * 0.13 + (row * 6 + column) as f64 * 0.27).sin()
-                    + if row == column { 2.0 } else { 0.0 }
-            });
-            let inertia = factor * factor.transpose();
-            let frame = Frame::from_parts(
-                Translation3::new(0.13 * t, -0.07 * t, 0.03 * t),
-                UnitQuaternion::from_euler_angles(0.11 * t, -0.17 * t, 0.23 * t),
-            );
-            // Assemble the reference transformation by acting on the six
-            // basis twists, independently of the optimized block expression.
-            let dense_transform = Matrix6::from_fn(|row, column| {
-                let mut basis = Vector6::zeros();
-                basis[column] = 1.0;
-                motion_to_child(&frame, twist_from_vector(basis)).to_vector()[row]
-            });
-            let expected = dense_transform.transpose() * inertia * dense_transform;
-            let actual = transform_inertia_to_parent(&frame, &inertia);
-            assert_relative_eq!(actual, expected, epsilon = 1e-11, max_relative = 1e-12);
-        }
-    }
-
-    #[test]
-    fn specialized_joint_product_preserves_signed_and_non_cardinal_axes() {
-        let factor = Matrix6::from_fn(|row, column| {
-            ((row * 6 + column + 1) as f64 * 0.19).cos() + if row == column { 3.0 } else { 0.0 }
-        });
-        let inertia = factor * factor.transpose();
-        let axes = [
-            Vector3::x(),
-            -Vector3::x(),
-            Vector3::y(),
-            -Vector3::y(),
-            Vector3::z(),
-            -Vector3::z(),
-            Vector3::new(1.0, 1e-9, 0.0).normalize(),
-            Vector3::new(0.0, -1.0, 1e-9).normalize(),
-            Vector3::new(1e-9, 0.0, 1.0).normalize(),
-            Vector3::new(0.3, -0.4, 0.5).normalize(),
-        ];
-        for joint_type in [JointType::Revolute, JointType::Prismatic, JointType::Fixed] {
-            for axis in axes {
-                let motion = joint_motion_subspace(joint_type, axis);
-                let expected = inertia * motion.to_vector();
-                let actual = wrench_vector(inertia_apply_joint(&inertia, joint_type, axis));
-                assert_relative_eq!(actual, expected, epsilon = 1e-12, max_relative = 1e-12);
-            }
-        }
     }
 }

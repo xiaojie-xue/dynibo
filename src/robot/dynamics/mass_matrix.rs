@@ -1,10 +1,10 @@
-use nalgebra::{Matrix3, Vector3};
+use nalgebra::Vector3;
 
-use crate::{BaseState, JointType, Result, Wrench};
+use crate::{BaseState, JointType, Result, Twist, Wrench, spatial::transform::force_to_parent};
 
 use super::super::topology::{child_link_index, incoming_joint_index};
 use super::super::{FLOATING_BASE_DOF, FloatingRobot, Model, Robot, Workspace};
-use super::{wrench_component, wrench_to_parent, write_wrench_to_column};
+use super::{wrench_component, write_wrench_to_column};
 
 impl Robot {
     /// Writes the `G x G` mass matrix in column-major order.
@@ -91,10 +91,8 @@ impl Model {
         for joint_index in 0..model_joint_count {
             parent_from_child[joint_index] =
                 self.joint_kinematics[joint_index].frame(self.joint_value(q, joint_index));
-            let link = self.link_dynamics[child_link_index(joint_index)];
-            workspace.composite_masses[joint_index] = link.mass;
-            workspace.composite_moments[joint_index] = link.first_moment;
-            workspace.composite_inertias[joint_index] = link.origin_inertia;
+            workspace.composite_inertias[joint_index] =
+                self.link_dynamics[child_link_index(joint_index)].spatial_inertia;
         }
         // Composite rigid-body pass: accumulate each subtree inertia, expressed
         // about the parent link origin, into the parent.
@@ -103,23 +101,10 @@ impl Model {
             if parent_link_index == 0 {
                 continue;
             }
-            let transform = &parent_from_child[joint_index];
-            let translation = transform.translation.vector;
-            let rotation = transform.rotation.to_rotation_matrix();
-            let rotated_moment = rotation * workspace.composite_moments[joint_index];
-            let rotated_inertia =
-                rotation * workspace.composite_inertias[joint_index] * rotation.transpose();
-            let mass = workspace.composite_masses[joint_index];
+            let transformed = workspace.composite_inertias[joint_index]
+                .transform_to_parent(&parent_from_child[joint_index]);
             let parent_joint_index = incoming_joint_index(parent_link_index);
-            workspace.composite_masses[parent_joint_index] += mass;
-            workspace.composite_moments[parent_joint_index] += mass * translation + rotated_moment;
-            // R I_o R^T - m[t]x[t]x - [t]x[h]x - [h]x[t]x with h = R h_child.
-            workspace.composite_inertias[parent_joint_index] += rotated_inertia
-                + (mass * translation.norm_squared() + 2.0 * translation.dot(&rotated_moment))
-                    * Matrix3::identity()
-                - mass * translation * translation.transpose()
-                - translation * rotated_moment.transpose()
-                - rotated_moment * translation.transpose();
+            workspace.composite_inertias[parent_joint_index] += transformed;
         }
         // Mass-matrix entries: F = I^c S in the child link frame, then F is
         // propagated up the ancestor chain while M(i, j) = S_j^T F.
@@ -127,15 +112,8 @@ impl Model {
             let dof_index =
                 self.joint_dof_indices[joint_index].expect("active joint has a DOF index");
             let joint = self.joint_kinematics[joint_index];
-            let axis: Vector3<f64> = *joint.axis.as_ref();
-            let mass = workspace.composite_masses[joint_index];
-            let moment = workspace.composite_moments[joint_index];
-            let inertia = workspace.composite_inertias[joint_index];
-            let mut force = match joint.joint_type {
-                JointType::Revolute => Wrench::new(inertia * axis, axis.cross(&moment)),
-                JointType::Prismatic => Wrench::new(moment.cross(&axis), mass * axis),
-                JointType::Fixed => unreachable!("fixed joints were skipped above"),
-            };
+            let mut force = workspace.composite_inertias[joint_index]
+                .apply_joint(joint.joint_type, *joint.axis.as_ref());
             let mut current_joint_index = joint_index;
             loop {
                 let current_joint = self.joint_kinematics[current_joint_index];
@@ -153,7 +131,7 @@ impl Model {
                 if parent_link_index == 0 {
                     break;
                 }
-                force = wrench_to_parent(&parent_from_child[current_joint_index], force);
+                force = force_to_parent(&parent_from_child[current_joint_index], force);
                 current_joint_index = incoming_joint_index(parent_link_index);
             }
         }
@@ -175,43 +153,22 @@ impl Model {
         let generalized_count = self.joint_count() + FLOATING_BASE_DOF;
         output.fill(0.0);
 
-        let root = self.link_dynamics[0];
-        let mut root_mass = root.mass;
-        let mut root_moment = root.first_moment;
-        let mut root_inertia = root.origin_inertia;
+        let mut root_inertia = self.link_dynamics[0].spatial_inertia;
         for joint_index in 0..model_joint_count {
             parent_from_child[joint_index] =
                 self.joint_kinematics[joint_index].frame(self.joint_value(q, joint_index));
-            let link = self.link_dynamics[child_link_index(joint_index)];
-            workspace.composite_masses[joint_index] = link.mass;
-            workspace.composite_moments[joint_index] = link.first_moment;
-            workspace.composite_inertias[joint_index] = link.origin_inertia;
+            workspace.composite_inertias[joint_index] =
+                self.link_dynamics[child_link_index(joint_index)].spatial_inertia;
         }
         for joint_index in (0..model_joint_count).rev() {
-            let transform = &parent_from_child[joint_index];
-            let translation = transform.translation.vector;
-            let rotation = transform.rotation.to_rotation_matrix();
-            let rotated_moment = rotation * workspace.composite_moments[joint_index];
-            let rotated_inertia =
-                rotation * workspace.composite_inertias[joint_index] * rotation.transpose();
-            let mass = workspace.composite_masses[joint_index];
-            let transformed_moment = mass * translation + rotated_moment;
-            let transformed_inertia = rotated_inertia
-                + (mass * translation.norm_squared() + 2.0 * translation.dot(&rotated_moment))
-                    * Matrix3::identity()
-                - mass * translation * translation.transpose()
-                - translation * rotated_moment.transpose()
-                - rotated_moment * translation.transpose();
+            let transformed = workspace.composite_inertias[joint_index]
+                .transform_to_parent(&parent_from_child[joint_index]);
             let parent_link_index = self.parent_link_indices[joint_index];
             if parent_link_index == 0 {
-                root_mass += mass;
-                root_moment += transformed_moment;
-                root_inertia += transformed_inertia;
+                root_inertia += transformed;
             } else {
                 let parent_joint_index = incoming_joint_index(parent_link_index);
-                workspace.composite_masses[parent_joint_index] += mass;
-                workspace.composite_moments[parent_joint_index] += transformed_moment;
-                workspace.composite_inertias[parent_joint_index] += transformed_inertia;
+                workspace.composite_inertias[parent_joint_index] += transformed;
             }
         }
 
@@ -219,11 +176,12 @@ impl Model {
         for column in 0..FLOATING_BASE_DOF {
             let world_axis = Vector3::ith(column % 3, 1.0);
             let local_axis = base_rotation.inverse() * world_axis;
-            let local_load = if column < 3 {
-                Wrench::new(root_inertia * local_axis, local_axis.cross(&root_moment))
+            let motion = if column < 3 {
+                Twist::new(local_axis, Vector3::zeros())
             } else {
-                Wrench::new(root_moment.cross(&local_axis), root_mass * local_axis)
+                Twist::new(Vector3::zeros(), local_axis)
             };
+            let local_load = root_inertia.apply(motion);
             let world_load = Wrench::new(
                 base_rotation * local_load.torque,
                 base_rotation * local_load.force,
@@ -235,15 +193,8 @@ impl Model {
             let dof_index =
                 self.joint_dof_indices[joint_index].expect("active joint has a DOF index");
             let joint = self.joint_kinematics[joint_index];
-            let axis: Vector3<f64> = *joint.axis.as_ref();
-            let mass = workspace.composite_masses[joint_index];
-            let moment = workspace.composite_moments[joint_index];
-            let inertia = workspace.composite_inertias[joint_index];
-            let mut force = match joint.joint_type {
-                JointType::Revolute => Wrench::new(inertia * axis, axis.cross(&moment)),
-                JointType::Prismatic => Wrench::new(moment.cross(&axis), mass * axis),
-                JointType::Fixed => unreachable!("fixed joints were skipped"),
-            };
+            let mut force = workspace.composite_inertias[joint_index]
+                .apply_joint(joint.joint_type, *joint.axis.as_ref());
             let joint_column = FLOATING_BASE_DOF + dof_index;
             let mut current_joint_index = joint_index;
             loop {
@@ -260,7 +211,7 @@ impl Model {
                     output[current_row * generalized_count + joint_column] = entry;
                 }
                 let parent_link_index = self.parent_link_indices[current_joint_index];
-                force = wrench_to_parent(&parent_from_child[current_joint_index], force);
+                force = force_to_parent(&parent_from_child[current_joint_index], force);
                 if parent_link_index == 0 {
                     break;
                 }

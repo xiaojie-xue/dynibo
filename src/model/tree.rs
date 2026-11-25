@@ -534,16 +534,23 @@ mod tests {
             robot.links[1].inertial.origin.xyz[0] = 1.0e200;
             let tree = convert_urdf(&robot).unwrap();
             let dynamics = tree.links[1].dynamics();
-            assert!(dynamics.first_moment.iter().all(|value| value.is_finite()));
             assert!(
                 dynamics
+                    .spatial_inertia
+                    .first_moment
+                    .iter()
+                    .all(|value| value.is_finite())
+            );
+            assert!(
+                dynamics
+                    .spatial_inertia
                     .origin_inertia
                     .iter()
                     .all(|value| value.is_finite())
             );
             let expected = if mass == 0.0 { 0.0 } else { 1.0e100 };
             assert_relative_eq!(
-                dynamics.origin_inertia[(1, 1)],
+                dynamics.spatial_inertia.origin_inertia[(1, 1)],
                 expected,
                 max_relative = 1.0e-14
             );

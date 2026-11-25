@@ -6,18 +6,6 @@ use crate::{Frame, Wrench};
 
 use super::FLOATING_BASE_DOF;
 
-fn wrench_to_parent(transform: &Frame, wrench: Wrench) -> Wrench {
-    let force = transform.rotation * wrench.force;
-    Wrench::new(
-        transform.rotation * wrench.torque + transform.translation.vector.cross(&force),
-        force,
-    )
-}
-
-fn add_wrench(lhs: Wrench, rhs: Wrench) -> Wrench {
-    Wrench::new(lhs.torque + rhs.torque, lhs.force + rhs.force)
-}
-
 fn write_world_wrench(base_frame: &Frame, local: Wrench, output: &mut [f64]) {
     let torque = base_frame.rotation * local.torque;
     let force = base_frame.rotation * local.force;

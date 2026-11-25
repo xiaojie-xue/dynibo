@@ -65,11 +65,7 @@ impl LoadBuffer {
         let value = if position == usize::MAX {
             wrench
         } else {
-            let previous = self.loads[position].wrench;
-            Wrench::new(
-                previous.torque + wrench.torque,
-                previous.force + wrench.force,
-            )
+            self.loads[position].wrench + wrench
         };
         if !value.is_finite() {
             return Err(Error::NumericalFailure {
