@@ -1,12 +1,13 @@
 //! Python Robot interface, keeping the class layout and construction local.
 use crate::arrays::{
-    prepare_input, require_same_length, run_with_output, validate_output, write_poses,
+    prepare_input, require_same_length, run_with_loads_and_output, run_with_output,
+    validate_output, write_poses,
 };
 use crate::calculation::{
     Calculation, close_calculation, ensure_open, lock_calculation, with_robot,
 };
 use crate::errors::core_error;
-use crate::loads::{PyLoadBuffer, convert_loads, make_py_link_id, target_link};
+use crate::loads::{PyLoadBuffer, make_py_link_id, target_link};
 use crate::values::{PyIkOptions, PyPose, PyTwist};
 use dynibo::{Frame, Robot as CoreRobot};
 use dynibo_binding_support::LinkTable;
@@ -301,12 +302,16 @@ impl PyRobot {
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         ensure_open(&self.closed)?;
         let q = prepare_input(q)?;
-        let loads = convert_loads(py, &self.links, loads.as_ref())?;
         let output = validate_output(self.generalized_count, out)?;
         let q = q.into_vec();
-        run_with_output(py, &self.inner, output, |state, scratch| {
-            state.robot.gravity(&q, &loads, scratch)
-        })
+        run_with_loads_and_output(
+            py,
+            &self.inner,
+            &self.links,
+            loads.as_ref(),
+            output,
+            |robot, loads, scratch| robot.gravity(&q, loads, scratch),
+        )
     }
 
     #[pyo3(signature = (q, qd, qdd, loads=None, out=None))]
@@ -325,12 +330,16 @@ impl PyRobot {
         let qdd = prepare_input(qdd)?;
         require_same_length(q.as_slice(), qd.as_slice(), "qd")?;
         require_same_length(q.as_slice(), qdd.as_slice(), "qdd")?;
-        let loads = convert_loads(py, &self.links, loads.as_ref())?;
         let output = validate_output(self.generalized_count, out)?;
         let (q, qd, qdd) = (q.into_vec(), qd.into_vec(), qdd.into_vec());
-        run_with_output(py, &self.inner, output, |state, scratch| {
-            state.robot.inverse_dynamics(&q, &qd, &qdd, &loads, scratch)
-        })
+        run_with_loads_and_output(
+            py,
+            &self.inner,
+            &self.links,
+            loads.as_ref(),
+            output,
+            |robot, loads, scratch| robot.inverse_dynamics(&q, &qd, &qdd, loads, scratch),
+        )
     }
 
     #[pyo3(signature = (q, qd, forces, loads=None, out=None))]
@@ -348,14 +357,16 @@ impl PyRobot {
         let qd = prepare_input(qd)?;
         let forces = prepare_input(forces)?;
         require_same_length(q.as_slice(), qd.as_slice(), "qd")?;
-        let loads = convert_loads(py, &self.links, loads.as_ref())?;
         let output = validate_output(self.generalized_count, out)?;
         let (q, qd, forces) = (q.into_vec(), qd.into_vec(), forces.into_vec());
-        run_with_output(py, &self.inner, output, |state, scratch| {
-            state
-                .robot
-                .forward_dynamics(&q, &qd, &forces, &loads, scratch)
-        })
+        run_with_loads_and_output(
+            py,
+            &self.inner,
+            &self.links,
+            loads.as_ref(),
+            output,
+            |robot, loads, scratch| robot.forward_dynamics(&q, &qd, &forces, loads, scratch),
+        )
     }
 
     #[pyo3(signature = (q, out=None))]

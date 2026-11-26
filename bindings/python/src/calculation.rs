@@ -5,7 +5,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use dynibo::Frame;
+use dynibo::{Frame, IndexedLoad};
 use pyo3::{exceptions::PyRuntimeError, prelude::*, sync::MutexExt};
 
 use crate::errors::{catch_panic, lock_error};
@@ -14,6 +14,7 @@ pub(super) struct Calculation<R> {
     pub(super) robot: R,
     pub(super) poses: Vec<Frame>,
     pub(super) output: Vec<f64>,
+    pub(super) loads: Vec<IndexedLoad>,
 }
 
 impl<R> Calculation<R> {
@@ -25,6 +26,7 @@ impl<R> Calculation<R> {
             robot,
             poses: vec![Frame::identity(); link_count],
             output: vec![0.0; output_len],
+            loads: Vec::with_capacity(link_count),
         }
     }
 }

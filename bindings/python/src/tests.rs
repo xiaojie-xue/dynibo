@@ -47,6 +47,7 @@ fn caught_calculation_panics_leave_the_robot_usable_and_closable() {
                 robot,
                 poses: Vec::new(),
                 output: Vec::new(),
+                loads: Vec::new(),
             }));
             let result: PyResult<()> = if through_robot {
                 with_robot(&inner, py, |robot| {
@@ -86,6 +87,7 @@ fn poisoned_locks_report_python_errors_for_calculation_and_close() {
         robot: (),
         poses: Vec::new(),
         output: Vec::new(),
+        loads: Vec::new(),
     }));
     assert!(
         catch_unwind(AssertUnwindSafe(|| {

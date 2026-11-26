@@ -62,11 +62,29 @@ impl SpatialInertia {
         let rotation = parent_from_child.rotation.to_rotation_matrix();
         let rotated_moment = rotation * self.first_moment;
         let rotated_inertia = rotation * self.origin_inertia * rotation.transpose();
-        // R I_o R^T - m[t]x[t]x - [t]x[h]x - [h]x[t]x with h = R h_child.
+        // Weight translation by sqrt(mass) before squaring so zero or tiny masses
+        // translated by large distances do not produce NaN or spurious infinity.
+        let weighted_translation = self.mass.sqrt() * translation;
+        let (x, y, z) = (
+            weighted_translation.x,
+            weighted_translation.y,
+            weighted_translation.z,
+        );
+        let parallel_axis = Matrix3::new(
+            y * y + z * z,
+            -x * y,
+            -x * z,
+            -x * y,
+            x * x + z * z,
+            -y * z,
+            -x * z,
+            -y * z,
+            x * x + y * y,
+        );
+        // R I_o R^T + m([t]x^T [t]x) + 2 (t . h) I - t h^T - h t^T with h = R h_child.
         let origin_inertia = rotated_inertia
-            + (self.mass * translation.norm_squared() + 2.0 * translation.dot(&rotated_moment))
-                * Matrix3::identity()
-            - self.mass * translation * translation.transpose()
+            + parallel_axis
+            + (2.0 * translation.dot(&rotated_moment)) * Matrix3::identity()
             - translation * rotated_moment.transpose()
             - rotated_moment * translation.transpose();
         Self {
@@ -311,6 +329,39 @@ mod tests {
             doubled.to_matrix6(),
             spatial.to_matrix6() * 2.0,
             epsilon = 1e-12
+        );
+    }
+
+    #[test]
+    fn parallel_axis_translation_avoids_overflow_and_nan_for_small_or_zero_mass() {
+        let large_shift = Frame::from_parts(
+            Translation3::new(1e200, 0.0, 0.0),
+            UnitQuaternion::identity(),
+        );
+
+        let massless = SpatialInertia::new(0.0, Vector3::zeros(), Matrix3::zeros());
+        let shifted_massless = massless.transform_to_parent(&large_shift);
+        assert!(
+            shifted_massless
+                .origin_inertia
+                .iter()
+                .all(|v| v.is_finite())
+        );
+        assert_eq!(shifted_massless.origin_inertia, Matrix3::zeros());
+
+        let tiny = SpatialInertia::new(1e-300, Vector3::zeros(), Matrix3::zeros());
+        let shifted_tiny = tiny.transform_to_parent(&large_shift);
+        assert!(shifted_tiny.origin_inertia.iter().all(|v| v.is_finite()));
+        assert_relative_eq!(shifted_tiny.origin_inertia[(0, 0)], 0.0, epsilon = 0.0);
+        assert_relative_eq!(
+            shifted_tiny.origin_inertia[(1, 1)],
+            1e100,
+            max_relative = 1e-14
+        );
+        assert_relative_eq!(
+            shifted_tiny.origin_inertia[(2, 2)],
+            1e100,
+            max_relative = 1e-14
         );
     }
 }

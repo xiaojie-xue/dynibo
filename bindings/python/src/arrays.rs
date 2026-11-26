@@ -1,7 +1,9 @@
 //! NumPy input adaptation and caller-owned output buffers.
 use crate::calculation::{Calculation, with_calculation};
 use crate::errors::core_error;
-use dynibo::Frame;
+use crate::loads::{PyLoadBuffer, convert_load_sequence, fill_from_load_buffer};
+use dynibo::{Frame, IndexedLoad};
+use dynibo_binding_support::LinkTable;
 use numpy::{AllowTypeChange, PyArray1, PyArrayLike1, PyArrayMethods, PyUntypedArray};
 use pyo3::{
     exceptions::{PyTypeError, PyValueError},
@@ -131,6 +133,67 @@ pub(super) fn run_with_output<'py, R: Send>(
             Ok(None)
         } else {
             Ok(Some(state.output[..length].to_vec()))
+        }
+    })?;
+    if let Some(target) = array {
+        Ok(target)
+    } else {
+        Ok(PyArray1::from_vec(
+            py,
+            allocated.expect("allocated output returned when out is None"),
+        ))
+    }
+}
+
+/// Runs a load-bearing dynamics calculation reusing per-calculation load and
+/// output scratch capacity when `loads` is `None` or a `LoadBuffer`.
+pub(super) fn run_with_loads_and_output<'py, R: Send>(
+    py: Python<'py>,
+    inner: &Mutex<Option<Calculation<R>>>,
+    links: &LinkTable,
+    loads: Option<&Bound<'py, PyAny>>,
+    output: ValidatedOutput<'py>,
+    calculate: impl FnOnce(&mut R, &[IndexedLoad], &mut [f64]) -> dynibo::Result<()> + Send,
+) -> PyResult<Bound<'py, PyArray1<f64>>> {
+    let (load_buffer, sequence_loads) = match loads {
+        None => (None, None),
+        Some(value) => match value.cast::<PyLoadBuffer>() {
+            Ok(buffer) => (Some(buffer), None),
+            Err(_) => (None, Some(convert_load_sequence(py, links, value)?)),
+        },
+    };
+    let ValidatedOutput { array, length } = output;
+    let allocated = with_calculation(inner, py, |state| {
+        if state.output.len() < length {
+            state.output.resize(length, 0.0);
+        }
+        let Calculation {
+            robot,
+            loads: loads_buf,
+            output: scratch,
+            ..
+        } = state;
+        if let Some(buffer) = load_buffer {
+            fill_from_load_buffer(links, buffer, loads_buf)?;
+        } else if let Some(ref seq) = sequence_loads {
+            loads_buf.clear();
+            loads_buf.extend_from_slice(seq);
+        } else {
+            loads_buf.clear();
+        }
+        let result = py.detach(|| calculate(robot, loads_buf.as_slice(), &mut scratch[..length]));
+        result.map_err(core_error)?;
+        if let Some(ref target) = array {
+            let mut writable = target
+                .try_readwrite()
+                .map_err(|error| PyValueError::new_err(error.to_string()))?;
+            let slice = writable
+                .as_slice_mut()
+                .map_err(|_| PyValueError::new_err("out must be a contiguous float64 array"))?;
+            slice.copy_from_slice(&scratch[..length]);
+            Ok(None)
+        } else {
+            Ok(Some(scratch[..length].to_vec()))
         }
     })?;
     if let Some(target) = array {

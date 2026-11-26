@@ -225,6 +225,20 @@ int main(int argc, char **argv) {
         assigned_floating = std::move(moved_floating);
         CHECK(assigned_floating.generalized_count() == q.size() + 6);
         static_cast<void>(assigned_floating.forward_kinematics(base, q, floating_target));
+
+        // LinkIds from a destroyed robot must remain rejected even if a new robot reuses memory.
+        dynibo::LinkId stale_id = assigned_fixed.link_id("test_link_4");
+        {
+            dynibo::Robot temp(argv[1]);
+            stale_id = temp.link_id("test_link_4");
+        }
+        for (int attempt = 0; attempt < 8; ++attempt) {
+            dynibo::Robot fresh(argv[1]);
+            bool stale_rejected = false;
+            try { static_cast<void>(fresh.forward_kinematics(q, stale_id)); }
+            catch (const dynibo::Error& e) { stale_rejected = e.status() == DYNIBO_STATUS_INVALID_ARGUMENT; }
+            CHECK(stale_rejected);
+        }
     } catch (const dynibo::Error& error) {
         std::fprintf(stderr, "dynibo error: %s\n", error.what());
         return 1;

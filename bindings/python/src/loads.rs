@@ -196,21 +196,28 @@ impl PyLoadBuffer {
     }
 }
 
-pub(super) fn convert_loads(
+/// Copies a reusable `PyLoadBuffer` into `dst` while retaining its allocation.
+pub(super) fn fill_from_load_buffer(
+    links: &LinkTable,
+    buffer: &Bound<'_, PyLoadBuffer>,
+    dst: &mut Vec<IndexedLoad>,
+) -> PyResult<()> {
+    dst.clear();
+    let buffer = buffer.try_borrow()?;
+    if !buffer.links.same_model(links) {
+        return Err(core_error(dynibo::Error::InvalidLinkId));
+    }
+    dst.extend_from_slice(buffer.inner.as_slice());
+    Ok(())
+}
+
+/// Converts a Python sequence of `Load` values into owned `IndexedLoad` entries
+/// before acquiring the calculation lock.
+pub(super) fn convert_load_sequence(
     py: Python<'_>,
     links: &LinkTable,
-    loads: Option<&Bound<'_, PyAny>>,
+    loads: &Bound<'_, PyAny>,
 ) -> PyResult<Vec<IndexedLoad>> {
-    let Some(loads) = loads else {
-        return Ok(Vec::new());
-    };
-    if let Ok(buffer) = loads.cast::<PyLoadBuffer>() {
-        let buffer = buffer.try_borrow()?;
-        if !buffer.links.same_model(links) {
-            return Err(core_error(dynibo::Error::InvalidLinkId));
-        }
-        return Ok(buffer.inner.as_slice().to_vec());
-    }
     let values = loads.extract::<Vec<PyRef<'_, PyLoad>>>()?;
     values
         .iter()
