@@ -54,8 +54,11 @@ outputs. Matrix storage and floating-base ordering are defined in
 [Joint and Generalized Coordinates](../user-guide/joint-and-generalized-coordinates.md).
 
 A workspace is mutable. Use a separate workspace for every simultaneous
-calculation. Fixed `DyniboRobot` stores its frame; `DyniboFloatingRobot` never
-stores base state and instead receives `DyniboBaseState` in every calculation.
+calculation. Configure fixed base frames per workspace with
+`dynibo_workspace_set_base_frame()` (`dynibo_robot_set_base_frame()` is
+deprecated) and gravity per workspace with `dynibo_workspace_set_gravity()` /
+`dynibo_floating_workspace_set_gravity()`. `DyniboFloatingRobot` never stores
+base state and instead receives `DyniboBaseState` in every calculation.
 
 ## Floating bases
 

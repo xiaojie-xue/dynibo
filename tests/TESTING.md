@@ -8,15 +8,17 @@ building blocks:
 - absolute-plus-relative numerical assertions with complete case context;
 - algorithm-matrix and workspace-sequence runners.
 
-The `robot_arm` and `pinocchio_oracle` integration targets retain their root `.rs`
-entry points and group test cases in same-named subdirectories. This keeps each
-suite a single test executable. C ABI unit tests similarly share helpers in
-`bindings/c/src/tests.rs` and group calculations, overlap checks, and ownership
-checks under `bindings/c/src/tests/`.
+The `robot_arm` integration target in the root crate and the `pinocchio_oracle`
+target in `crates/dynibo-oracle` retain their root `.rs` entry points and group
+test cases in same-named subdirectories. This keeps each suite a single test
+executable. C ABI unit tests similarly share helpers in `bindings/c/src/tests.rs`
+and group calculations, overlap checks, and ownership checks under
+`bindings/c/src/tests/`.
 
 `support/model_gen/` separates model specifications and validation, seeded
 generation, corpus selection, temporary fixtures, and URDF serialization.
-`support/pinocchio/` separates bridge declarations and calculation wrappers.
+`crates/dynibo-oracle/src/pinocchio/` separates Pinocchio bridge declarations
+and calculation wrappers.
 The installed Python suite still runs through `python/test_package.py`, with
 test classes and shared fixtures in `python/package_cases/`. Allocation tests
 remain independent targets with their own global allocators.
@@ -37,16 +39,16 @@ Run the default suite with:
 cargo test --workspace --all-targets --locked
 ```
 
-When Pinocchio is available through `pkg-config`, the `pinocchio-tests` feature
-adds two independent oracle layers. `pinocchio_oracle` exercises the maintained
-serial, mixed-joint, branched, and free-flyer fixtures, including single- and
-multi-link external loads in RNEA and ABA. `generated_pinocchio` runs the same
-24 models and eight states per model through FK, velocity and acceleration
-kinematics, Jacobian and its derivative, mass matrix, gravity,
-velocity-product forces, RNEA, and ABA:
+When Pinocchio is available through `pkg-config`, the workspace-internal
+`dynibo-oracle` crate (`pinocchio` feature) adds two independent oracle layers.
+`pinocchio_oracle` exercises the maintained serial, mixed-joint, branched, and
+free-flyer fixtures, including single- and multi-link external loads in RNEA and
+ABA. `generated_pinocchio` runs the same 24 models and eight states per model
+through FK, velocity and acceleration kinematics, Jacobian and its derivative,
+mass matrix, gravity, velocity-product forces, RNEA, and ABA:
 
 ```bash
-cargo test -p dynibo --locked --features pinocchio-tests --tests
+cargo test -p dynibo-oracle --locked --features pinocchio --tests
 ```
 
 The generated conformance suites accept the reproduction and corpus-size

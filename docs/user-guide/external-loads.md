@@ -45,11 +45,8 @@ wrench at the link origin. Components use torque-first order.
 === "C++"
 
     ```cpp
-    DyniboLoad load{
-        tool,
-        {0.0, 0.0, 0.0},
-        {0.0, 0.0, -10.0},
-    };
+    const DyniboLoad load =
+        robot.make_load(tool, {0.0, 0.0, 0.0}, {0.0, 0.0, -10.0});
     const auto gravity = robot.gravity(q, {load});
     ```
 

@@ -20,6 +20,8 @@ different numerical API.
 | Fixed mass/dynamics | `Robot` methods | `Robot` methods | `Robot` methods | `dynibo_mass_matrix`, `dynibo_inverse_dynamics`, `dynibo_forward_dynamics` |
 | Floating mass/dynamics | `FloatingRobot` methods with `base` | `FloatingRobot` methods with `base` | `FloatingRobot` methods with `base` | `dynibo_floating_mass_matrix`, `dynibo_floating_inverse_dynamics`, `dynibo_floating_forward_dynamics` |
 | Fixed/floating workspace | Owned by typed robot | Owned by typed robot | Owned by typed robot | `DyniboWorkspace` / `DyniboFloatingWorkspace` |
+| Configure gravity | `set_gravity` / `gravity_vector` | `set_gravity` / `gravity_vector` | `set_gravity` / `gravity_vector` | `dynibo_[floating_]workspace_set_gravity` / `dynibo_[floating_]workspace_gravity` |
+| State snapshot | `Robot::state` / `FloatingRobot::state` | — | — | — |
 | Matrix output | Caller buffer | Flat NumPy array or reusable `out=` | Flat `std::vector` | Caller buffer |
 | Errors | `Result<T>` | Exceptions | `dynibo::Error` | `DyniboStatus` |
 
@@ -31,7 +33,7 @@ different numerical API.
 | Spatial motion | `Twist` | `Twist` | `DyniboTwist` | `DyniboTwist` |
 | External load | `IndexedLoad` | `Load` | `DyniboLoad` | `DyniboLoad` |
 | IK options | `InverseKinematicsOptions` | `IkOptions` | `DyniboIkOptions` | `DyniboIkOptions` |
-| Link identifier | `LinkId` | `int` | `std::size_t` | `size_t` |
+| Link identifier | `LinkId` | `LinkId` (`int` subclass) | `dynibo::LinkId` | `size_t` |
 
 The C++ wrapper deliberately reuses ABI-compatible C value structs while
 adding RAII, methods, move semantics, and exceptions around object handles.

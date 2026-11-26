@@ -1,6 +1,6 @@
 pub mod dynibo
+pub use dynibo::nalgebra
 #[non_exhaustive] pub enum dynibo::Error
-pub dynibo::Error::FloatingBaseIkUnsupported
 pub dynibo::Error::ForwardDynamicsIllConditionedBaseInertia
 pub dynibo::Error::ForwardDynamicsSingularBaseInertia
 pub dynibo::Error::ForwardDynamicsSingularJointInertia
@@ -40,7 +40,7 @@ pub dynibo::Error::UnknownLink::name: alloc::string::String
 pub dynibo::Error::UnsupportedJointType
 pub dynibo::Error::UnsupportedJointType::joint: alloc::string::String
 pub dynibo::Error::UnsupportedJointType::joint_type: alloc::string::String
-pub dynibo::Error::Urdf(urdf_rs::errors::UrdfError)
+pub dynibo::Error::Urdf(dynibo::UrdfError)
 pub dynibo::Error::WrongSliceLength
 pub dynibo::Error::WrongSliceLength::actual: usize
 pub dynibo::Error::WrongSliceLength::expected: usize
@@ -129,7 +129,9 @@ impl dynibo::FloatingRobot
 pub fn dynibo::FloatingRobot::fork(&self) -> Self
 pub fn dynibo::FloatingRobot::from_urdf(impl core::convert::AsRef<std::path::Path>) -> dynibo::Result<Self>
 pub fn dynibo::FloatingRobot::generalized_count(&self) -> usize
+pub const fn dynibo::FloatingRobot::gravity_vector(&self) -> &nalgebra::base::alias::Vector3<f64>
 pub fn dynibo::FloatingRobot::model(&self) -> dynibo::RobotModel
+pub fn dynibo::FloatingRobot::set_gravity(&mut self, nalgebra::base::alias::Vector3<f64>) -> dynibo::Result<()>
 impl dynibo::FloatingRobot
 pub fn dynibo::FloatingRobot::forward_acceleration_kinematics(&mut self, &dynibo::BaseState, &[f64], &[f64], &[f64], dynibo::LinkId) -> dynibo::Result<dynibo::Twist>
 pub fn dynibo::FloatingRobot::forward_kinematics(&mut self, &dynibo::BaseState, &[f64], dynibo::LinkId) -> dynibo::Result<dynibo::Frame>
@@ -164,6 +166,8 @@ impl dynibo::FloatingRobot
 pub fn dynibo::FloatingRobot::load_buffer(&self) -> dynibo::LoadBuffer
 impl dynibo::FloatingRobot
 pub fn dynibo::FloatingRobot::mass_matrix(&mut self, &dynibo::BaseState, &[f64], &mut [f64]) -> dynibo::Result<()>
+impl dynibo::FloatingRobot
+pub fn dynibo::FloatingRobot::state<'a>(&'a mut self, &dynibo::BaseState, &[f64], &[f64]) -> dynibo::Result<dynibo::FloatingRobotState<'a>>
 impl core::fmt::Debug for dynibo::FloatingRobot
 pub fn dynibo::FloatingRobot::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for dynibo::FloatingRobot
@@ -173,6 +177,28 @@ impl core::marker::Unpin for dynibo::FloatingRobot
 impl core::marker::UnsafeUnpin for dynibo::FloatingRobot
 impl core::panic::unwind_safe::RefUnwindSafe for dynibo::FloatingRobot
 impl core::panic::unwind_safe::UnwindSafe for dynibo::FloatingRobot
+pub struct dynibo::FloatingRobotState<'a>
+impl dynibo::FloatingRobotState<'_>
+pub fn dynibo::FloatingRobotState<'_>::forward_acceleration_kinematics(&mut self, &[f64], dynibo::LinkId) -> dynibo::Result<dynibo::Twist>
+pub fn dynibo::FloatingRobotState<'_>::forward_dynamics(&mut self, &[f64], &[dynibo::IndexedLoad], &mut [f64]) -> dynibo::Result<()>
+pub fn dynibo::FloatingRobotState<'_>::forward_kinematics(&self, dynibo::LinkId) -> dynibo::Result<dynibo::Frame>
+pub fn dynibo::FloatingRobotState<'_>::forward_kinematics_all(&self, &mut [dynibo::Frame]) -> dynibo::Result<()>
+pub fn dynibo::FloatingRobotState<'_>::forward_velocity_kinematics(&self, dynibo::LinkId, &dynibo::Frame) -> dynibo::Result<dynibo::Twist>
+pub fn dynibo::FloatingRobotState<'_>::gravity(&mut self, &[dynibo::IndexedLoad], &mut [f64]) -> dynibo::Result<()>
+pub fn dynibo::FloatingRobotState<'_>::inverse_dynamics(&mut self, &[f64], &[dynibo::IndexedLoad], &mut [f64]) -> dynibo::Result<()>
+pub fn dynibo::FloatingRobotState<'_>::jacobian(&self, dynibo::LinkId, &mut [f64]) -> dynibo::Result<()>
+pub fn dynibo::FloatingRobotState<'_>::jacobian_derivative(&self, dynibo::LinkId, &mut [f64]) -> dynibo::Result<()>
+pub fn dynibo::FloatingRobotState<'_>::mass_matrix(&mut self, &mut [f64]) -> dynibo::Result<()>
+pub fn dynibo::FloatingRobotState<'_>::velocity_product_forces(&mut self, &mut [f64]) -> dynibo::Result<()>
+impl<'a> core::fmt::Debug for dynibo::FloatingRobotState<'a>
+pub fn dynibo::FloatingRobotState<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Freeze for dynibo::FloatingRobotState<'a>
+impl<'a> core::marker::Send for dynibo::FloatingRobotState<'a>
+impl<'a> core::marker::Sync for dynibo::FloatingRobotState<'a>
+impl<'a> core::marker::Unpin for dynibo::FloatingRobotState<'a>
+impl<'a> core::marker::UnsafeUnpin for dynibo::FloatingRobotState<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for dynibo::FloatingRobotState<'a>
+impl<'a> !core::panic::unwind_safe::UnwindSafe for dynibo::FloatingRobotState<'a>
 pub struct dynibo::IndexedLoad
 pub dynibo::IndexedLoad::link: dynibo::LinkId
 pub dynibo::IndexedLoad::wrench: dynibo::Wrench
@@ -257,8 +283,10 @@ pub const fn dynibo::Robot::base_frame(&self) -> &dynibo::Frame
 pub fn dynibo::Robot::fork(&self) -> Self
 pub fn dynibo::Robot::from_urdf(impl core::convert::AsRef<std::path::Path>) -> dynibo::Result<Self>
 pub fn dynibo::Robot::generalized_count(&self) -> usize
+pub const fn dynibo::Robot::gravity_vector(&self) -> &nalgebra::base::alias::Vector3<f64>
 pub fn dynibo::Robot::model(&self) -> dynibo::RobotModel
 pub fn dynibo::Robot::set_base_frame(&mut self, dynibo::Frame) -> dynibo::Result<()>
+pub fn dynibo::Robot::set_gravity(&mut self, nalgebra::base::alias::Vector3<f64>) -> dynibo::Result<()>
 impl dynibo::Robot
 pub fn dynibo::Robot::forward_acceleration_kinematics(&mut self, &[f64], &[f64], &[f64], dynibo::LinkId) -> dynibo::Result<dynibo::Twist>
 pub fn dynibo::Robot::forward_kinematics(&mut self, &[f64], dynibo::LinkId) -> dynibo::Result<dynibo::Frame>
@@ -295,6 +323,8 @@ impl dynibo::Robot
 pub fn dynibo::Robot::load_buffer(&self) -> dynibo::LoadBuffer
 impl dynibo::Robot
 pub fn dynibo::Robot::mass_matrix(&mut self, &[f64], &mut [f64]) -> dynibo::Result<()>
+impl dynibo::Robot
+pub fn dynibo::Robot::state<'a>(&'a mut self, &[f64], &[f64]) -> dynibo::Result<dynibo::RobotState<'a>>
 impl core::fmt::Debug for dynibo::Robot
 pub fn dynibo::Robot::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for dynibo::Robot
@@ -338,10 +368,33 @@ impl core::marker::Unpin for dynibo::RobotModel
 impl core::marker::UnsafeUnpin for dynibo::RobotModel
 impl core::panic::unwind_safe::RefUnwindSafe for dynibo::RobotModel
 impl core::panic::unwind_safe::UnwindSafe for dynibo::RobotModel
+pub struct dynibo::RobotState<'a>
+impl dynibo::RobotState<'_>
+pub fn dynibo::RobotState<'_>::forward_acceleration_kinematics(&mut self, &[f64], dynibo::LinkId) -> dynibo::Result<dynibo::Twist>
+pub fn dynibo::RobotState<'_>::forward_dynamics(&mut self, &[f64], &[dynibo::IndexedLoad], &mut [f64]) -> dynibo::Result<()>
+pub fn dynibo::RobotState<'_>::forward_kinematics(&self, dynibo::LinkId) -> dynibo::Result<dynibo::Frame>
+pub fn dynibo::RobotState<'_>::forward_kinematics_all(&self, &mut [dynibo::Frame]) -> dynibo::Result<()>
+pub fn dynibo::RobotState<'_>::forward_velocity_kinematics(&self, dynibo::LinkId, &dynibo::Frame) -> dynibo::Result<dynibo::Twist>
+pub fn dynibo::RobotState<'_>::gravity(&mut self, &[dynibo::IndexedLoad], &mut [f64]) -> dynibo::Result<()>
+pub fn dynibo::RobotState<'_>::inverse_dynamics(&mut self, &[f64], &[dynibo::IndexedLoad], &mut [f64]) -> dynibo::Result<()>
+pub fn dynibo::RobotState<'_>::jacobian(&self, dynibo::LinkId, &mut [f64]) -> dynibo::Result<()>
+pub fn dynibo::RobotState<'_>::jacobian_derivative(&self, dynibo::LinkId, &mut [f64]) -> dynibo::Result<()>
+pub fn dynibo::RobotState<'_>::mass_matrix(&mut self, &mut [f64]) -> dynibo::Result<()>
+pub fn dynibo::RobotState<'_>::velocity_product_forces(&mut self, &mut [f64]) -> dynibo::Result<()>
+impl<'a> core::fmt::Debug for dynibo::RobotState<'a>
+pub fn dynibo::RobotState<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Freeze for dynibo::RobotState<'a>
+impl<'a> core::marker::Send for dynibo::RobotState<'a>
+impl<'a> core::marker::Sync for dynibo::RobotState<'a>
+impl<'a> core::marker::Unpin for dynibo::RobotState<'a>
+impl<'a> core::marker::UnsafeUnpin for dynibo::RobotState<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for dynibo::RobotState<'a>
+impl<'a> !core::panic::unwind_safe::UnwindSafe for dynibo::RobotState<'a>
 pub struct dynibo::Twist
 pub dynibo::Twist::angular: nalgebra::base::alias::Vector3<f64>
 pub dynibo::Twist::linear: nalgebra::base::alias::Vector3<f64>
 impl dynibo::Twist
+pub fn dynibo::Twist::is_finite(&self) -> bool
 pub const fn dynibo::Twist::new(nalgebra::base::alias::Vector3<f64>, nalgebra::base::alias::Vector3<f64>) -> Self
 pub fn dynibo::Twist::to_vector(self) -> nalgebra::base::alias::SVector<f64, 6>
 pub fn dynibo::Twist::zeros() -> Self
@@ -355,6 +408,25 @@ impl core::fmt::Debug for dynibo::Twist
 pub fn dynibo::Twist::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for dynibo::Twist
 impl core::marker::StructuralPartialEq for dynibo::Twist
+impl core::ops::arith::Add for dynibo::Twist
+pub type dynibo::Twist::Output = dynibo::Twist
+pub fn dynibo::Twist::add(self, Self) -> Self
+impl core::ops::arith::AddAssign for dynibo::Twist
+pub fn dynibo::Twist::add_assign(&mut self, Self)
+impl core::ops::arith::Mul<dynibo::Twist> for f64
+pub type f64::Output = dynibo::Twist
+pub fn f64::mul(self, dynibo::Twist) -> dynibo::Twist
+impl core::ops::arith::Mul<f64> for dynibo::Twist
+pub type dynibo::Twist::Output = dynibo::Twist
+pub fn dynibo::Twist::mul(self, f64) -> Self
+impl core::ops::arith::Neg for dynibo::Twist
+pub type dynibo::Twist::Output = dynibo::Twist
+pub fn dynibo::Twist::neg(self) -> Self
+impl core::ops::arith::Sub for dynibo::Twist
+pub type dynibo::Twist::Output = dynibo::Twist
+pub fn dynibo::Twist::sub(self, Self) -> Self
+impl core::ops::arith::SubAssign for dynibo::Twist
+pub fn dynibo::Twist::sub_assign(&mut self, Self)
 impl core::marker::Freeze for dynibo::Twist
 impl core::marker::Send for dynibo::Twist
 impl core::marker::Sync for dynibo::Twist
@@ -362,12 +434,27 @@ impl core::marker::Unpin for dynibo::Twist
 impl core::marker::UnsafeUnpin for dynibo::Twist
 impl core::panic::unwind_safe::RefUnwindSafe for dynibo::Twist
 impl core::panic::unwind_safe::UnwindSafe for dynibo::Twist
+pub struct dynibo::UrdfError(_)
+impl core::error::Error for dynibo::UrdfError
+pub fn dynibo::UrdfError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for dynibo::UrdfError
+pub fn dynibo::UrdfError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for dynibo::UrdfError
+pub fn dynibo::UrdfError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for dynibo::UrdfError
+impl core::marker::Send for dynibo::UrdfError
+impl core::marker::Sync for dynibo::UrdfError
+impl core::marker::Unpin for dynibo::UrdfError
+impl core::marker::UnsafeUnpin for dynibo::UrdfError
+impl !core::panic::unwind_safe::RefUnwindSafe for dynibo::UrdfError
+impl !core::panic::unwind_safe::UnwindSafe for dynibo::UrdfError
 pub struct dynibo::Wrench
 pub dynibo::Wrench::force: nalgebra::base::alias::Vector3<f64>
 pub dynibo::Wrench::torque: nalgebra::base::alias::Vector3<f64>
 impl dynibo::Wrench
 pub fn dynibo::Wrench::is_finite(&self) -> bool
 pub const fn dynibo::Wrench::new(nalgebra::base::alias::Vector3<f64>, nalgebra::base::alias::Vector3<f64>) -> Self
+pub fn dynibo::Wrench::to_vector(self) -> nalgebra::base::alias::SVector<f64, 6>
 pub fn dynibo::Wrench::zeros() -> Self
 impl core::clone::Clone for dynibo::Wrench
 pub fn dynibo::Wrench::clone(&self) -> dynibo::Wrench
@@ -379,6 +466,25 @@ impl core::fmt::Debug for dynibo::Wrench
 pub fn dynibo::Wrench::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for dynibo::Wrench
 impl core::marker::StructuralPartialEq for dynibo::Wrench
+impl core::ops::arith::Add for dynibo::Wrench
+pub type dynibo::Wrench::Output = dynibo::Wrench
+pub fn dynibo::Wrench::add(self, Self) -> Self
+impl core::ops::arith::AddAssign for dynibo::Wrench
+pub fn dynibo::Wrench::add_assign(&mut self, Self)
+impl core::ops::arith::Mul<dynibo::Wrench> for f64
+pub type f64::Output = dynibo::Wrench
+pub fn f64::mul(self, dynibo::Wrench) -> dynibo::Wrench
+impl core::ops::arith::Mul<f64> for dynibo::Wrench
+pub type dynibo::Wrench::Output = dynibo::Wrench
+pub fn dynibo::Wrench::mul(self, f64) -> Self
+impl core::ops::arith::Neg for dynibo::Wrench
+pub type dynibo::Wrench::Output = dynibo::Wrench
+pub fn dynibo::Wrench::neg(self) -> Self
+impl core::ops::arith::Sub for dynibo::Wrench
+pub type dynibo::Wrench::Output = dynibo::Wrench
+pub fn dynibo::Wrench::sub(self, Self) -> Self
+impl core::ops::arith::SubAssign for dynibo::Wrench
+pub fn dynibo::Wrench::sub_assign(&mut self, Self)
 impl core::marker::Freeze for dynibo::Wrench
 impl core::marker::Send for dynibo::Wrench
 impl core::marker::Sync for dynibo::Wrench

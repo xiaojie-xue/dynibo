@@ -50,8 +50,11 @@ API 会验证输入和输出长度。关节状态数组长度使用
 `dynibo_robot_generalized_count()`。矩阵存储和浮动基顺序定义在
 [关节与广义坐标](../user-guide/joint-and-generalized-coordinates.md)中。
 
-Workspace 是可变的。每个并行计算需要独立 workspace。固定 `DyniboRobot` 保存
-frame；`DyniboFloatingRobot` 不保存基座状态，而是在每次计算时接收 `DyniboBaseState`。
+Workspace 是可变的。每个并行计算需要独立 workspace。固定基座世界位姿请通过
+`dynibo_workspace_set_base_frame()` 按 workspace 配置（`dynibo_robot_set_base_frame()`
+已弃用），重力加速度通过 `dynibo_workspace_set_gravity()` /
+`dynibo_floating_workspace_set_gravity()` 按 workspace 配置。`DyniboFloatingRobot`
+不保存基座状态，而是在每次计算时接收 `DyniboBaseState`。
 
 ## 浮动基
 

@@ -57,6 +57,11 @@ with FloatingRobot.from_urdf("robot.urdf") as robot:
 ```
 
 浮动基满足 `generalized_count == joint_count + 6`；广义输出先是世界坐标系下的
-角分量，再是线分量。只有固定 `Robot` 提供 `set_base_frame()`。
+角分量，再是线分量。只有固定 `Robot` 提供 `set_base_frame()`；`Robot` 和
+`FloatingRobot` 均提供 `gravity_vector` 和 `set_gravity()`。
+
+`link_id()` 与 `link_id_at()` 返回模型作用域的 `LinkId`（`int` 子类），既可直接用于
+NumPy 数组索引，又能拒绝跨模型误用；传入普通 `int` 仍兼容并会触发 `DeprecationWarning`。
+安装包内置 PEP 561 类型存根（`py.typed` 与 `__init__.pyi`）。
 
 [打开 Python API 参考](../reference/python.md){ .md-button }

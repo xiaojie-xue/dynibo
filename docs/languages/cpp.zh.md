@@ -33,13 +33,15 @@ try {
 
 | 含义 | 类型 |
 |---|---|
+| Link 标识 | `dynibo::LinkId`（模型作用域，提供 `.index()`、`make_load(...)`） |
 | 位姿 | `DyniboPose` |
 | 空间运动 | `DyniboTwist` |
 | 外部载荷 | `DyniboLoad` |
 | IK 配置 | `DyniboIkOptions` |
 | 浮动状态 | 每次计算传入 `dynibo::BaseState` |
 
-矩阵操作返回 column-major 顺序的一维 `std::vector<double>`，详见
+`dynibo::Robot` 和 `dynibo::FloatingRobot` 均提供 `set_gravity()` 与
+`gravity_vector()`。矩阵操作返回 column-major 顺序的一维 `std::vector<double>`，详见
 [参考系与空间向量](../user-guide/frames-and-spatial-vectors.md)。
 
 ## 与 C API 互操作
