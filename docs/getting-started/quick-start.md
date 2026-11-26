@@ -4,7 +4,9 @@ All interfaces follow the same workflow:
 
 1. Load a robot from URDF.
 2. Resolve a target link by name.
-3. Create a joint-position vector in non-fixed URDF joint order.
+3. Create a joint-position vector for the non-fixed joints in Dynibo's breadth-first
+   topological order from the root link (preserving URDF joint order among children
+   of the same parent; inspect with `joint_name(i)` in Rust).
 4. Run a calculation.
 
 === "Rust"

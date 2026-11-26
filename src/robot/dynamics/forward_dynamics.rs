@@ -65,7 +65,18 @@ impl Robot {
 }
 
 impl FloatingRobot {
-    /// Writes generalized accelerations computed with the articulated-body algorithm.
+    /// Writes generalized accelerations computed with the articulated-body algorithm (ABA).
+    ///
+    /// `generalized_forces` and `output` have length `G = J + 6`, prepending
+    /// world-frame angular then linear base components before the `J` joints.
+    /// Uses `base.frame()` and `base.velocity()`; `base.acceleration()` is ignored.
+    /// External loads use the same resisting-wrench convention as
+    /// [`FloatingRobot::inverse_dynamics`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid lengths or load link IDs, or when an
+    /// articulated inertia is singular or ill-conditioned.
     #[allow(clippy::too_many_arguments)]
     pub fn forward_dynamics(
         &mut self,

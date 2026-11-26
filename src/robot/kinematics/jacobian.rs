@@ -61,6 +61,14 @@ impl Robot {
 
 impl FloatingRobot {
     /// Writes a world-expressed `6 x G` geometric Jacobian in column-major order.
+    ///
+    /// The first six columns correspond to world-frame angular then linear base
+    /// velocity at the root origin, followed by the `J` joint columns.
+    /// `output` must contain `6 * self.generalized_count()` elements.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid input, an invalid output length or link ID, or a non-finite result.
     pub fn jacobian(
         &mut self,
         base: &BaseState,
@@ -72,7 +80,14 @@ impl FloatingRobot {
             .jacobian::<Floating>(base.frame(), q, target, &mut self.workspace, output)
     }
 
-    /// Writes the time derivative of the geometric Jacobian in column-major order.
+    /// Writes the time derivative of the `6 x G` geometric Jacobian in column-major order.
+    ///
+    /// Uses `base.frame()` and `base.velocity()`; `output` must contain
+    /// `6 * self.generalized_count()` elements.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid input, an invalid output length or link ID, or a non-finite result.
     pub fn jacobian_derivative(
         &mut self,
         base: &BaseState,

@@ -1,11 +1,11 @@
 # Python 指南
 
-Python binding 在 dynibo 原生库之上提供面向对象接口。使用
-`python -m pip install dynibo` 安装，并从 `dynibo` 导入公开类型。
+Python 绑定在 dynibo 原生库之上提供面向对象接口。使用 `python -m pip install dynibo`
+安装，并从 `dynibo` 导入公开类型。
 
 ## 生命周期与错误
 
-建议将 `Robot` 用作 context manager，以便确定性地释放原生资源：
+建议将 `Robot` 用作上下文管理器，以便确定性地释放原生资源：
 
 ```python
 from dynibo import DyniboError, Robot
@@ -22,12 +22,13 @@ except DyniboError as error:
 
 ## 数组与结果
 
-关节输入接受 NumPy 数组或由数字组成的 Python sequence；连续 `float64` 数组走
-零拷贝路径。Pose 和 twist 是不可变的值对象。向量和矩阵方法返回 `float64`
-NumPy 数组，矩阵仍使用 column-major 顺序的一维布局，详见
+关节输入接受 NumPy 数组或数值序列；连续 `float64` 数组在拷贝到原生 Rust 缓冲区执行
+释放 GIL 的计算前，无需额外的 dtype 转换或步长重排。`Pose` 和 `Twist` 是不可变的
+值对象。向量和矩阵方法返回 `float64` NumPy 数组，矩阵采用列主序的一维布局，转为二维
+视图时请使用 `arr.reshape((rows, cols), order="F")`，详见
 [参考系与空间向量](../user-guide/frames-and-spatial-vectors.md)。
 
-控制循环可以通过 `out=` 复用调用方分配的存储：
+控制循环可通过 `out=` 复用调用方预先分配的输出缓冲区：
 
 ```python
 import numpy as np
@@ -37,12 +38,12 @@ gravity = np.empty(robot.generalized_count)
 robot.gravity(q, out=gravity)
 ```
 
-每个 `Robot` 持有一个原生 workspace，同一实例上的调用会被串行化。需要并行计算时，
-请使用相互独立的 robot 实例。
+每个 `Robot` 持有一个原生 workspace，同一实例上的调用会按顺序串行执行。需要并行计算时，
+请使用 `fork()` 或独立的机器人实例。
 
-## 浮动基
+## 浮动基座
 
-`FloatingRobot` 拥有独立 workspace，且不保存可变的基座状态。每次计算都将
+`FloatingRobot` 拥有独立 workspace，且不保存可变的基座状态。每次计算都需将
 `BaseState` 作为第一个参数传入：
 
 ```python
@@ -56,12 +57,12 @@ with FloatingRobot.from_urdf("robot.urdf") as robot:
     mass = robot.mass_matrix(base, q)
 ```
 
-浮动基满足 `generalized_count == joint_count + 6`；广义输出先是世界坐标系下的
-角分量，再是线分量。只有固定 `Robot` 提供 `set_base_frame()`；`Robot` 和
-`FloatingRobot` 均提供 `gravity_vector` 和 `set_gravity()`。
+浮动基座满足 `generalized_count == joint_count + 6`；广义输出先是世界坐标系下的角分量，
+再是线分量。只有固定基座 `Robot` 提供 `set_base_frame()`；`Robot` 和 `FloatingRobot`
+均提供 `gravity_vector` 和 `set_gravity()`。
 
-`link_id()` 与 `link_id_at()` 返回模型作用域的 `LinkId`（`int` 子类），既可直接用于
-NumPy 数组索引，又能拒绝跨模型误用；传入普通 `int` 仍兼容并会触发 `DeprecationWarning`。
-安装包内置 PEP 561 类型存根（`py.typed` 与 `__init__.pyi`）。
+`link_id()` 与 `link_id_at()` 返回绑定到所属模型的 `LinkId`（`int` 子类），既可直接用于
+NumPy 数组索引，又能拒绝跨模型误用；传入普通 `int` 仍兼容，但会触发 `DeprecationWarning`。
+软件包内置 PEP 561 类型存根（`py.typed` 与 `__init__.pyi`）。
 
 [打开 Python API 参考](../reference/python.md){ .md-button }

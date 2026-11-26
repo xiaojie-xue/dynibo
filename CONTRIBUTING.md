@@ -41,7 +41,11 @@ bash ci/test-all.sh
   runtime model data, shared handles, and metadata queries.
 - `src/robot/topology.rs` owns link identifiers and index conversions;
   `loads.rs` owns public load values and reusable load buffers; `workspace.rs`
-  owns internal calculation storage. Kinematics and dynamics stay grouped by algorithm.
+  owns internal calculation storage; `state.rs` owns zero-allocation
+  `RobotState` and `FloatingRobotState` kinematic snapshots. Kinematics and
+  dynamics stay grouped by algorithm.
+- `crates/dynibo-binding-support/` shares link-table, pose-conversion, and
+  load-aggregation helpers across the C and Python bindings.
 - `bindings/c/src/` separates ABI values, boundary checks, model/workspace handles,
   kinematics, and dynamics. `lib.rs` preserves the public Rust and C entry points.
 - `bindings/python/src/` separates spatial values, arrays, errors, loads, and the

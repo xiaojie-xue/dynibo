@@ -71,7 +71,9 @@ The table below shows Dynibo's speedup over Pinocchio for each operation.
   </tbody>
 </table>
 
-Source code to reproduce these results is available in [`crates/dynibo-bench/`](crates/dynibo-bench/).
+Source code to reproduce these results is available in
+[`crates/dynibo-bench/`](https://github.com/xiaojie-xue/dynibo/tree/main/crates/dynibo-bench)
+(Rust) and [`benches/`](https://github.com/xiaojie-xue/dynibo/tree/main/benches) (Python).
 
 ### Reliable
 
@@ -143,13 +145,13 @@ import numpy as np
 
 from dynibo import Robot
 
-robot = Robot.from_urdf("robot.urdf")
-tool = robot.link_id("tool")
-q = np.zeros(robot.joint_count)
-pose = robot.forward_kinematics(q, tool)
-jacobian = np.empty(6 * robot.generalized_count)
-robot.jacobian(q, tool, out=jacobian)
-print(pose.translation)
+with Robot.from_urdf("robot.urdf") as robot:
+    tool = robot.link_id("tool")
+    q = np.zeros(robot.joint_count)
+    pose = robot.forward_kinematics(q, tool)
+    jacobian = np.empty(6 * robot.generalized_count)
+    robot.jacobian(q, tool, out=jacobian)
+    print(pose.translation)
 ```
 
 ### C/C++

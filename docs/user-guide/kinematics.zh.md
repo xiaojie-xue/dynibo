@@ -1,7 +1,7 @@
 # 运动学
 
-运动学描述关节及基座状态与 link 位姿、速度和加速度之间的关系。所有 target ID 都是
-由 `link_id` 返回的模型局部标识。
+运动学描述关节及基座状态与 link 位姿、速度和加速度之间的关系。所有目标 link ID 均为
+由 `link_id` 返回、绑定到所属模型的标识。
 
 ## 正运动学
 
@@ -93,5 +93,5 @@ $$
         dynibo_ik_options_default(), solution, J));
     ```
 
-精确函数签名和验证错误请查看对应的 [API 参考](../reference/python.md)或 docs.rs 上的
-Rust reference。
+精确的函数签名和校验错误请查看对应的 [API 参考](../reference/python.md) 或 docs.rs 上的
+Rust API 参考。

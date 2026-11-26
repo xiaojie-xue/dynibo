@@ -55,6 +55,7 @@ nav:
       - C++: languages/cpp.md
       - C: languages/c.md
   - API Reference:
+      - Quick Reference: reference/quick-reference.md
       - Python: reference/python.md
       - C++: cpp-api/dynibo_8hpp.md
       - C: c-api/dynibo_8h.md
@@ -95,6 +96,7 @@ plugins:
             Language APIs: 语言接口
             API Mapping: API 对照
             API Reference: API 参考
+            Quick Reference: 约定与 API 速查
             Python: Python
             C++: C++
             C: C

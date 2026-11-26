@@ -5,21 +5,22 @@ of freedom.
 
 ## Fixed base
 
-A fixed-base [`Robot`] has `G = J`. It starts with an identity root pose; use
-[`Robot::set_base_frame`] to prescribe another world pose. "Fixed" means the
+A fixed-base `Robot` has `G = J`. It starts with an identity root pose; use
+`Robot::set_base_frame` to prescribe another world pose. "Fixed" means the
 pose is prescribed rather than solved as a generalized coordinate.
 
 ## Floating base
 
 A floating-base robot has `G = J + 6`. Its generalized ordering begins with
-world-expressed angular and linear base motion. Supply the complete base state
-to calculations that depend on velocity or acceleration:
+world-expressed angular and linear base motion. The URDF root link must declare
+an inertial block with strictly positive mass. Models with a massless root
+remain valid in fixed-base mode, but are rejected when loaded as a
+`FloatingRobot`. A positive root mass is a load-time requirement; forward
+dynamics additionally checks the complete articulated inertia for rotational or
+joint-subtree singularities.
 
-The URDF root link must declare an inertial block with strictly positive mass.
-Models with a massless root remain valid in fixed-base mode, but are rejected
-when loaded as a [`FloatingRobot`]. A positive root mass is a load-time
-requirement; forward dynamics additionally checks the complete articulated
-inertia for rotational or joint-subtree singularities.
+Supply the complete base state to calculations that depend on velocity or
+acceleration:
 
 === "Rust"
 

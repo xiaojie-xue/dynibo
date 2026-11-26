@@ -1,7 +1,8 @@
 # Examples
 
-The examples use the bundled 7-DOF Franka model and exercise every main
-kinematics and dynamics calculation:
+The Franka examples use the bundled 7-DOF Franka model and exercise the main
+fixed-base kinematics and dynamics calculations (`forward_dynamics` is
+demonstrated in the Unitree G1 examples below):
 
 - `forward_kinematics`
 - `jacobian`

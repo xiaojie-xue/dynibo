@@ -1,8 +1,8 @@
 # 外部载荷
 
-重力、逆动力学和正动力学可以包含 link 原点处的阻力 wrench。每个载荷由模型局部
-link ID、torque 和 force 分量组成。逆动力学会把该 wrench 加到所需广义力中，正动力学
-会从可用广义力中减去它；如果输入的是实际作用于机器人的物理外力，应使用相反符号。
+重力、逆动力学和正动力学均支持在 link 原点处施加阻力 wrench。每个载荷由绑定到所属模型的
+link ID、力矩（torque）和力（force）分量组成。逆动力学会将该 wrench 加到所需广义力中，
+正动力学会从可用广义力中减去它；如果你从“作用在机器人上的物理外力”出发，需取相反符号。
 
 ## 参考系与作用点
 
@@ -14,8 +14,8 @@ link ID、torque 和 force 分量组成。逆动力学会把该 wrench 加到所
 === "Rust"
 
     ```rust
+    use dynibo::nalgebra::Vector3;
     use dynibo::{IndexedLoad, Wrench};
-    use nalgebra::Vector3;
 
     let load = IndexedLoad {
         link: tool,
@@ -66,7 +66,7 @@ dynibo 会累加它们的影响。
 
 Rust 和 Python robot 提供 `load_buffer()`，创建时为每个 link 预留一个载荷的容量。
 `set` 替换载荷，`add` 累加载荷，`remove` 和 `clear` 保留容量。更新失败时原有
-载荷保持不变。Rust 向动力学方法传入 `buffer.as_slice()`；Python 直接传入 buffer：
+载荷保持不变。Rust 向动力学方法传入 `buffer.as_slice()`；Python 则直接传入该缓冲区对象：
 
 ```python
 loads = robot.load_buffer()
@@ -75,11 +75,11 @@ robot.gravity(q, loads=loads, out=output)
 loads.clear()
 ```
 
-Python `LoadBuffer` 属于创建它的模型，可供该模型的 `fork()` 实例共享。独立加载的 robot
-会拒绝它，即使 buffer 为空。原生计算期间会借用 buffer，并拒绝并发修改。
-原有 `Load` 列表接口仍然支持，列表会在每次调用时转换。
+Python `LoadBuffer` 归属于创建它的模型，可供该模型的 `fork()` 实例共享；独立加载的
+机器人实例会拒绝它（即使缓冲区为空）。原生计算期间会借用缓冲区，同时拒绝并发修改。
+你也可以直接传入 `Load` 序列，但每次调用都会重新转换。
 
 ## 无载荷调用
 
-Rust、Python 和 C++ 可以传入空 collection。C 只有在 `load_count` 为零时才可以将
-载荷指针设为 `NULL`。载荷数组由调用方持有，dynibo 不会在调用结束后保存它。
+Rust、Python 和 C++ 可以直接传入空集合。C 只有在 `load_count` 为零时才可将载荷指针
+设为 `NULL`。载荷数组由调用方持有，dynibo 不会在调用结束后保留引用。

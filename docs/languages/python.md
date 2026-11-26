@@ -26,9 +26,11 @@ All inherit from `DyniboError`.
 ## Arrays and results
 
 Joint inputs accept NumPy arrays or Python sequences of numbers. Contiguous
-`float64` arrays use the zero-copy path. Poses and twists are immutable value
-objects. Vector and matrix methods return `float64` NumPy arrays; matrices stay
-flat and column-major. See
+`float64` arrays avoid dtype conversion and strided copies before being copied
+into an owned Rust buffer for the GIL-free calculation. Poses and twists are
+immutable value objects. Vector and matrix methods return `float64` NumPy
+arrays; matrices stay flat and column-major—reshape them with
+`arr.reshape((rows, cols), order="F")`. See
 [Frames and Spatial Vectors](../user-guide/frames-and-spatial-vectors.md).
 
 Reuse caller-owned storage in control loops with `out=`:

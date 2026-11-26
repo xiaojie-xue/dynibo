@@ -80,6 +80,10 @@ impl FloatingRobot {
     ///
     /// `output` must contain exactly [`FloatingRobot::link_count`] poses. Only the
     /// pose component of `base` is used; no memory is allocated.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid input, an invalid output length, or a non-finite numerical result.
     pub fn forward_kinematics_all(
         &mut self,
         base: &BaseState,
@@ -90,7 +94,11 @@ impl FloatingRobot {
             .forward_kinematics_all(base.frame(), q, &mut self.workspace, output)
     }
 
-    /// Computes the world frame of a target link.
+    /// Computes the world frame of a target link using `base.frame()`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid input, an invalid link ID, or a non-finite numerical result.
     pub fn forward_kinematics(
         &mut self,
         base: &BaseState,
@@ -101,7 +109,14 @@ impl FloatingRobot {
             .forward_kinematics(base.frame(), q, target, &mut self.workspace)
     }
 
-    /// Computes the world-expressed spatial velocity of a target-link point.
+    /// Computes the world-expressed classical velocity of a target-link point.
+    ///
+    /// `tool` selects a point rigidly attached to the target link. Uses
+    /// `base.frame()` and `base.velocity()`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid input, an invalid link ID, or a non-finite numerical result.
     pub fn forward_velocity_kinematics(
         &mut self,
         base: &BaseState,
@@ -121,7 +136,13 @@ impl FloatingRobot {
         )
     }
 
-    /// Computes the world-expressed spatial acceleration of a target-link origin.
+    /// Computes the world-expressed classical acceleration of a target-link origin.
+    ///
+    /// Uses `base.frame()`, `base.velocity()`, and `base.acceleration()`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid input, an invalid link ID, or a non-finite numerical result.
     pub fn forward_acceleration_kinematics(
         &mut self,
         base: &BaseState,

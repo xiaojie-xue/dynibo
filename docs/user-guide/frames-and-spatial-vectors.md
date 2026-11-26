@@ -24,8 +24,10 @@ Spatial motion vectors use angular-first order:
 [angular_x, angular_y, angular_z, linear_x, linear_y, linear_z]
 ```
 
-Kinematic velocity and acceleration results are expressed in the world frame
-at the documented target origin or tool point. A tool pose is relative to the
+Kinematic velocity and acceleration results are **classical** velocities and
+**classical** accelerations (not Featherstone spatial accelerations, which
+differ in the linear term by $\omega \times v$), expressed in the world frame at
+the documented target origin or tool point. A tool pose is relative to the
 target-link frame and selects another rigidly attached point.
 
 ## Wrenches and loads
@@ -49,5 +51,6 @@ values[column * rows + row]
 ```
 
 For a Jacobian, each six-element contiguous column is one angular-first spatial
-motion response. Convert explicitly when passing a result to a row-major
-library.
+motion response. In Python/NumPy, reshape flat matrices with `order="F"` (for
+example `J.reshape((6, robot.generalized_count), order="F")`). Convert
+explicitly when passing a result to a row-major library.

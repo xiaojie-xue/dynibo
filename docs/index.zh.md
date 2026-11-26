@@ -13,20 +13,21 @@ C++ 和 C 接口。
 
 ### 快速
 
-核心算法使用 Rust 编写，并以复用内存为设计目标。创建 `Workspace` 和所需的输出
-buffer 后，主要运动学与动力学接口不会在计算循环中分配内存或调整容量。在项目公布的
-benchmark 中，所测核心操作的运行速度是 Pinocchio 的 1.19–2.51 倍。
+核心算法基于 Rust 编写，并以复用每个机器人的内部存储为设计目标。创建 `Robot`
+（或 `FloatingRobot`）及所需的输出缓冲区后，主要运动学与动力学接口不会在计算循环中
+分配内存或调整容量。在项目公布的基准测试中，所测操作的运行速度在 Rust 下是
+Pinocchio 的 1.14–1.80 倍，在 Python 下是 1.19–1.94 倍。
 
 ### 轻量
 
-Dynibo 专注于一组紧凑、常用的机器人算法，而不是构建庞大的框架。API 围绕少量共同
-概念组织：`Robot`、`Workspace`、`LinkId`、`Frame`、`Twist` 和 `Wrench`；四种
-语言接口共享这套词汇。
+Dynibo 聚焦于一组紧凑、常用的机器人算法，而不是构建庞大的框架。API 围绕少量核心概念
+展开：`Robot`、`FloatingRobot`、`LinkId`、`Frame`、`Twist` 和 `Wrench`，四种语言
+接口共享同一套抽象。
 
 ### 可靠
 
-测试覆盖有限差分运动学、动力学回归、树状机器人、外部载荷、逆运动学、非法输入、
-Workspace 复用和内存分配行为。核心数值结果还会与独立的 Pinocchio oracle 进行对比。
+测试覆盖有限差分运动学、动力学回归、分支树机器人、外部载荷、逆运动学、非法输入、
+workspace 复用与内存分配行为，核心数值结果还会与独立的 Pinocchio 参考实现逐项比对。
 
 ## 可以计算什么
 
@@ -35,32 +36,32 @@ Workspace 复用和内存分配行为。核心数值结果还会与独立的 Pin
 | 模型 | 加载 URDF、查询 link、配置固定基座或浮动基座 | [机器人模型与 URDF](user-guide/robot-model-and-urdf.md) |
 | 运动学 | 位姿、雅可比矩阵、雅可比时间导数、空间速度与加速度 | [运动学](user-guide/kinematics.md) |
 | 逆运动学 | 使用阻尼最小二乘法求解目标位姿 | [运动学](user-guide/kinematics.md#inverse-kinematics) |
-| 动力学 | 质量矩阵、速度乘积力、重力项与逆动力学 | [动力学](user-guide/dynamics.md) |
+| 动力学 | 质量矩阵、速度乘积力、重力项、逆动力学（RNEA）与正动力学（ABA） | [动力学](user-guide/dynamics.md) |
 | 载荷 | 向 link 施加外部 wrench | [外部载荷](user-guide/external-loads.md) |
 
-在解释数值结果前，请先阅读[参考系与空间向量](user-guide/frames-and-spatial-vectors.md)，
-了解各语言接口共同使用的顺序、矩阵布局、单位和参考系约定。
+在解释数值结果前，请先阅读[参考系与空间向量](user-guide/frames-and-spatial-vectors.md)
+或单页[约定与 API 速查](reference/quick-reference.md)，了解各语言接口共同使用的顺序、
+矩阵布局、单位和参考系约定。
 
 ## 选择接口
 
 | 接口 | 适用场景 | API 风格 |
 |---|---|---|
-| [Rust](languages/rust.md) | 原生 Rust 应用和显式内存控制 | `Robot` 方法，显式复用 `Workspace` |
+| [Rust](languages/rust.md) | 原生 Rust 应用和显式内存控制 | `Robot` / `FloatingRobot` 持有可复用存储，支持 `state()` 状态快照 |
 | [Python](languages/python.md) | 科研、脚本和快速原型 | `Robot` 方法，内部持有 workspace |
 | [C++](languages/cpp.md) | 需要 RAII 和异常处理的 C++ 应用 | 只可移动的 `dynibo::Robot` 封装 |
-| [C](languages/c.md) | 稳定 ABI 和其他语言集成 | opaque handle 与 `dynibo_*` 函数 |
+| [C](languages/c.md) | 稳定 ABI 和跨语言集成 | 不透明句柄与 `dynibo_*` 函数 |
 
-四种接口遵循各自语言的惯用表达，同时保留相同的概念和操作。[API 对照](languages/api-mapping.md)
-并排展示了对应的名称、所有权规则和错误模型。
+四种接口遵循各自语言的惯用写法，同时保持一致的概念与数值语义。[API 对照](languages/api-mapping.md)
+并排展示了对应的名称、所有权规则和错误处理方式。
 
 ## 浏览文档
 
-- [安装](getting-started/installation.md) — 选择并安装适合的 package。
+- [安装](getting-started/installation.md) — 选择并安装对应的软件包。
 - [快速上手](getting-started/quick-start.md) — 分别用 Rust、Python、C++ 或 C 完成第一次计算。
-- [使用指南](user-guide/index.md) — 理解各接口共享的模型、坐标、参考系、Workspace、
+- [使用指南](user-guide/index.md) — 了解各接口共享的模型、坐标、参考系、workspace、
   运动学与动力学语义。
 - [API 对照](languages/api-mapping.md) — 查看同一操作在不同语言中的写法。
-- API 参考 — 浏览 [Python](reference/python.md)、[C++](cpp-api/dynibo_8hpp.md)、
-  [C](c-api/dynibo_8h.md) 或 [Rust](https://docs.rs/dynibo)。
-- [GitHub 源代码](https://github.com/xiaojie-xue/dynibo) — 查看示例、issue、benchmark
-  和开发信息。
+- API 参考 — 浏览[约定与 API 速查](reference/quick-reference.md)、[Python](reference/python.md)、
+  [C++](cpp-api/dynibo_8hpp.md)、[C](c-api/dynibo_8h.md) 或 [Rust](https://docs.rs/dynibo)。
+- [GitHub 源代码](https://github.com/xiaojie-xue/dynibo) — 查看示例、issue、基准测试和开发信息。

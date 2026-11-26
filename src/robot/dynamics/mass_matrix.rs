@@ -28,7 +28,15 @@ impl Robot {
 }
 
 impl FloatingRobot {
-    /// Writes the `G x G` mass matrix in column-major order.
+    /// Writes the symmetric `G x G` mass matrix in column-major order.
+    ///
+    /// Rows and columns prepend world-frame angular then linear base components
+    /// before the `J` non-fixed joints (`G = J + 6`). `output` must contain
+    /// `G * G` elements.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid input, an invalid output length, or a non-finite numerical result.
     pub fn mass_matrix(&mut self, base: &BaseState, q: &[f64], output: &mut [f64]) -> Result<()> {
         self.model
             .mass_matrix::<Floating>(base.frame(), q, &mut self.workspace, output)

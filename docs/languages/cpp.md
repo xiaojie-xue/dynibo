@@ -35,7 +35,7 @@ The wrapper intentionally reuses ABI-compatible C value types:
 
 | Meaning | Type |
 |---|---|
-| Link identifier | `dynibo::LinkId` (model-scoped, `.index()`, `make_load(...)`) |
+| Link identifier | `dynibo::LinkId` (model-scoped, `.index()`; pass to `robot.make_load(...)`) |
 | Pose | `DyniboPose` |
 | Spatial motion | `DyniboTwist` |
 | External load | `DyniboLoad` |
@@ -44,7 +44,10 @@ The wrapper intentionally reuses ABI-compatible C value types:
 
 Both `dynibo::Robot` and `dynibo::FloatingRobot` support `set_gravity()` and
 `gravity_vector()`. Matrix operations return flat `std::vector<double>` values in
-column-major order. See [Frames and Spatial Vectors](../user-guide/frames-and-spatial-vectors.md).
+column-major order; use the `*_into` overloads (such as `jacobian_into`,
+`mass_matrix_into`, `inverse_dynamics_into`, `forward_dynamics_into`, and
+`forward_kinematics_all_into`) to write into preallocated, exactly sized output
+buffers without allocating. See [Frames and Spatial Vectors](../user-guide/frames-and-spatial-vectors.md).
 
 ## Native interoperation
 
