@@ -39,6 +39,14 @@
 #  define DYNIBO_API
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+#  define DYNIBO_DEPRECATED(msg) __attribute__((deprecated(msg)))
+#elif defined(_MSC_VER)
+#  define DYNIBO_DEPRECATED(msg) __declspec(deprecated(msg))
+#else
+#  define DYNIBO_DEPRECATED(msg)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -92,10 +100,17 @@ DYNIBO_API size_t dynibo_robot_generalized_count(const DyniboRobot *robot);
 DYNIBO_API size_t dynibo_robot_link_count(const DyniboRobot *robot);
 /** Resolves UTF-8 `name` to a link ID valid only for `robot`. */
 DYNIBO_API DyniboStatus dynibo_robot_link_id(const DyniboRobot *robot, const char *name, size_t *output);
-/** Stores the fixed root world frame used by later calculations. Must not be called concurrently with calculations using `robot`. */
+/** Deprecated: stores a base frame on the shared robot handle. Use `dynibo_workspace_set_base_frame` instead. Must not be called concurrently with calculations using `robot`. */
+DYNIBO_DEPRECATED("use dynibo_workspace_set_base_frame instead")
 DYNIBO_API DyniboStatus dynibo_robot_set_base_frame(DyniboRobot *robot, const DyniboPose *frame);
 /** Allocates a workspace belonging to `robot` and writes it to `output` (null on failure). */
 DYNIBO_API DyniboStatus dynibo_workspace_create(const DyniboRobot *robot, DyniboWorkspace **output);
+/** Replaces the fixed root world frame on this workspace only. */
+DYNIBO_API DyniboStatus dynibo_workspace_set_base_frame(DyniboWorkspace *workspace, const DyniboPose *frame);
+/** Replaces the world-frame gravitational acceleration `[gx, gy, gz]` (m/s^2) on this workspace. */
+DYNIBO_API DyniboStatus dynibo_workspace_set_gravity(DyniboWorkspace *workspace, const double gravity[3]);
+/** Writes this workspace's world-frame gravitational acceleration `[gx, gy, gz]` (m/s^2) to `output`. */
+DYNIBO_API DyniboStatus dynibo_workspace_gravity(const DyniboWorkspace *workspace, double output[3]);
 /** Destroys a fixed workspace; null is accepted. */
 DYNIBO_API void dynibo_workspace_destroy(DyniboWorkspace *workspace);
 /**@}*/
@@ -115,6 +130,10 @@ DYNIBO_API size_t dynibo_floating_robot_link_count(const DyniboFloatingRobot *ro
 DYNIBO_API DyniboStatus dynibo_floating_robot_link_id(const DyniboFloatingRobot *robot, const char *name, size_t *output);
 /** Allocates a floating workspace belonging to `robot` and writes it to `output` (null on failure). */
 DYNIBO_API DyniboStatus dynibo_floating_workspace_create(const DyniboFloatingRobot *robot, DyniboFloatingWorkspace **output);
+/** Replaces the world-frame gravitational acceleration `[gx, gy, gz]` (m/s^2) on this workspace. */
+DYNIBO_API DyniboStatus dynibo_floating_workspace_set_gravity(DyniboFloatingWorkspace *workspace, const double gravity[3]);
+/** Writes this workspace's world-frame gravitational acceleration `[gx, gy, gz]` (m/s^2) to `output`. */
+DYNIBO_API DyniboStatus dynibo_floating_workspace_gravity(const DyniboFloatingWorkspace *workspace, double output[3]);
 DYNIBO_API void dynibo_floating_workspace_destroy(DyniboFloatingWorkspace *workspace);
 /**@}*/
 

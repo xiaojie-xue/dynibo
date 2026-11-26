@@ -106,6 +106,12 @@ int main(int argc, char **argv) {
         fixed.set_base_frame(shift);
         CHECK(std::abs(fixed.forward_kinematics(q, target).translation[0] - pose.translation[0] - 0.2) < 1e-12);
 
+        const auto default_gravity = fixed.gravity_vector();
+        CHECK(std::abs(default_gravity[2] + 9.80665) < 1e-12);
+        fixed.set_gravity({0.0, 0.0, 0.0});
+        for (double v : fixed.gravity(q)) CHECK(v == 0.0);
+        fixed.set_gravity(default_gravity);
+
         const std::vector<double> short_q{0.0, 0.0, 0.0};
         bool invalid_length = false;
         try { static_cast<void>(fixed.jacobian(short_q, target)); } catch (const dynibo::Error& error) { invalid_length = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT; }

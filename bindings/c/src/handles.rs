@@ -5,21 +5,24 @@ use crate::boundary::{
 use crate::types::{DyniboLoad, DyniboPose, frame_from_pose};
 use dynibo::{FloatingRobot, Frame, IndexedLoad, LinkId, LoadBuffer, Robot, RobotModel};
 use dynibo_binding_support::{LinkTable, LoadInputError, aggregate_loads};
+use nalgebra::Vector3;
 use std::{
     ffi::{CStr, CString, c_char},
     ptr,
 };
 
-/// Fixed-base model handle and metadata, plus its persistent base frame.
+/// Fixed-base model handle and metadata, plus its deprecated persistent base frame.
 pub struct DyniboRobot {
     pub(super) inner: RobotModel,
     pub(super) base_frame: Frame,
+    pub(super) base_frame_version: u64,
     pub(super) link_ids: LinkTable,
     pub(super) name: CString,
 }
 /// Fixed-base calculation storage.
 pub struct DyniboWorkspace {
     pub(super) inner: Robot,
+    pub(super) synced_base_version: u64,
     pub(super) poses: Box<[Frame]>,
     pub(super) loads: LoadBuffer,
 }
@@ -82,10 +85,13 @@ pub(super) unsafe fn fixed_parts<'a>(
     if robot.inner.root_link_id() != workspace.inner.root_link_id() {
         return Err(invalid("workspace does not belong to this robot model"));
     }
-    workspace
-        .inner
-        .set_base_frame(robot.base_frame)
-        .map_err(core_error)?;
+    if workspace.synced_base_version != robot.base_frame_version {
+        workspace
+            .inner
+            .set_base_frame(robot.base_frame)
+            .map_err(core_error)?;
+        workspace.synced_base_version = robot.base_frame_version;
+    }
     Ok((robot, workspace))
 }
 
@@ -138,6 +144,7 @@ pub unsafe extern "C" fn dynibo_robot_from_urdf(
         *out = Box::into_raw(Box::new(DyniboRobot {
             inner,
             base_frame: Frame::identity(),
+            base_frame_version: 0,
             link_ids,
             name,
         }));
@@ -237,6 +244,75 @@ pub unsafe extern "C" fn dynibo_robot_set_base_frame(
     call(|| {
         let robot = unsafe { required_mut(p, "robot") }?;
         robot.base_frame = frame_from_pose(unsafe { required_ref(frame, "frame") }?)?;
+        robot.base_frame_version = robot.base_frame_version.wrapping_add(1);
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dynibo_workspace_set_base_frame(
+    w: *mut DyniboWorkspace,
+    frame: *const DyniboPose,
+) -> DyniboStatus {
+    call(|| {
+        let workspace = unsafe { required_mut(w, "workspace") }?;
+        let frame = frame_from_pose(unsafe { required_ref(frame, "frame") }?)?;
+        workspace.inner.set_base_frame(frame).map_err(core_error)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dynibo_workspace_set_gravity(
+    w: *mut DyniboWorkspace,
+    gravity: *const [f64; 3],
+) -> DyniboStatus {
+    call(|| {
+        let workspace = unsafe { required_mut(w, "workspace") }?;
+        let gravity = *unsafe { required_ref(gravity, "gravity") }?;
+        workspace
+            .inner
+            .set_gravity(Vector3::from(gravity))
+            .map_err(core_error)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dynibo_workspace_gravity(
+    w: *const DyniboWorkspace,
+    output: *mut [f64; 3],
+) -> DyniboStatus {
+    call(|| {
+        let workspace = unsafe { required_ref(w, "workspace") }?;
+        let output = unsafe { required_mut(output, "output") }?;
+        *output = (*workspace.inner.gravity_vector()).into();
+        Ok(())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dynibo_floating_workspace_set_gravity(
+    w: *mut DyniboFloatingWorkspace,
+    gravity: *const [f64; 3],
+) -> DyniboStatus {
+    call(|| {
+        let workspace = unsafe { required_mut(w, "workspace") }?;
+        let gravity = *unsafe { required_ref(gravity, "gravity") }?;
+        workspace
+            .inner
+            .set_gravity(Vector3::from(gravity))
+            .map_err(core_error)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dynibo_floating_workspace_gravity(
+    w: *const DyniboFloatingWorkspace,
+    output: *mut [f64; 3],
+) -> DyniboStatus {
+    call(|| {
+        let workspace = unsafe { required_ref(w, "workspace") }?;
+        let output = unsafe { required_mut(output, "output") }?;
+        *output = (*workspace.inner.gravity_vector()).into();
         Ok(())
     })
 }
@@ -300,8 +376,11 @@ pub unsafe extern "C" fn dynibo_workspace_create(
         let out = unsafe { required_mut(out, "output") }?;
         *out = ptr::null_mut();
         let robot = unsafe { required_ref(p, "robot") }?;
+        let mut inner = robot.inner.robot();
+        inner.set_base_frame(robot.base_frame).map_err(core_error)?;
         *out = Box::into_raw(Box::new(DyniboWorkspace {
-            inner: robot.inner.robot(),
+            inner,
+            synced_base_version: robot.base_frame_version,
             poses: vec![Frame::identity(); robot.inner.link_count()].into_boxed_slice(),
             loads: robot.inner.load_buffer(),
         }));

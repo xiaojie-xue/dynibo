@@ -6,6 +6,7 @@ cd "${repo_root}"
 
 python_command="${PYTHON:-python3}"
 
+"${python_command}" ci/check-c-abi.py
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 PYTHONHOME="$("${python_command}" -c 'import sys; print(sys.base_prefix)')" \

@@ -10,6 +10,7 @@ use crate::loads::{PyLoadBuffer, convert_loads, target_link};
 use crate::values::{PyBaseState, PyPose, PyTwist};
 use dynibo::{FloatingRobot as CoreFloatingRobot, Frame};
 use dynibo_binding_support::LinkTable;
+use nalgebra::Vector3;
 use numpy::PyArray1;
 use pyo3::{
     exceptions::PyValueError,
@@ -138,6 +139,22 @@ impl PyFloatingRobot {
             self.links
                 .index_of(id)
                 .ok_or_else(|| PyValueError::new_err("link does not belong to this robot"))
+        })
+    }
+
+    #[getter]
+    fn gravity_vector(&self, py: Python<'_>) -> PyResult<(f64, f64, f64)> {
+        with_robot(&self.inner, py, |robot| {
+            let g = robot.gravity_vector();
+            Ok((g.x, g.y, g.z))
+        })
+    }
+
+    fn set_gravity(&self, py: Python<'_>, gravity: [f64; 3]) -> PyResult<()> {
+        with_robot(&self.inner, py, |robot| {
+            robot
+                .set_gravity(Vector3::from(gravity))
+                .map_err(core_error)
         })
     }
 

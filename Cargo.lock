@@ -196,7 +196,7 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "dynibo"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "approx",
  "getrandom",
@@ -206,7 +206,7 @@ dependencies = [
 
 [[package]]
 name = "dynibo-bench"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "criterion",
  "dynibo",
@@ -216,7 +216,7 @@ dependencies = [
 
 [[package]]
 name = "dynibo-binding-support"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "dynibo",
  "nalgebra",
@@ -224,7 +224,7 @@ dependencies = [
 
 [[package]]
 name = "dynibo-c"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "dynibo",
  "dynibo-binding-support",
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "dynibo-oracle"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "approx",
  "cc",
@@ -245,7 +245,7 @@ dependencies = [
 
 [[package]]
 name = "dynibo-python"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "dynibo",
  "dynibo-binding-support",

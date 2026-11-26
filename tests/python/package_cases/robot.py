@@ -295,6 +295,25 @@ class PackageTests(unittest.TestCase):
         self.assertNotEqual(tool_velocity, origin_velocity)
         self.assertFalse(np.array_equal(self.robot.gravity(self.q), identity_gravity))
 
+        self.assertEqual(self.robot.gravity_vector, (0.0, 0.0, -9.80665))
+        self.robot.set_gravity((0.0, 0.0, 0.0))
+        self.assertEqual(self.robot.gravity_vector, (0.0, 0.0, 0.0))
+        np.testing.assert_array_equal(self.robot.gravity(self.q), np.zeros(self.robot.joint_count))
+        with self.assertRaises(ValueError):
+            self.robot.set_gravity((float("nan"), 0.0, 0.0))
+        self.robot.set_gravity((0.0, 0.0, -9.80665))
+
+        with dynibo.FloatingRobot.from_urdf(URDF) as floating:
+            self.assertEqual(floating.gravity_vector, (0.0, 0.0, -9.80665))
+            floating.set_gravity((0.0, 0.0, 0.0))
+            self.assertEqual(floating.gravity_vector, (0.0, 0.0, 0.0))
+            np.testing.assert_array_equal(
+                floating.gravity(dynibo.BaseState(), self.q),
+                np.zeros(floating.generalized_count),
+            )
+            with self.assertRaises(ValueError):
+                floating.set_gravity((0.0, float("inf"), 0.0))
+
         pose = self.robot.forward_kinematics(self.q, self.target)
         options = dynibo.IkOptions(
             max_iterations=1,

@@ -2,6 +2,7 @@
 #define DYNIBO_DYNIBO_HPP
 
 #include "dynibo.h"
+#include <array>
 #include <cstddef>
 #include <stdexcept>
 #include <string>
@@ -110,7 +111,15 @@ public:
         return value;
     }
     void set_base_frame(const DyniboPose &frame) {
-        check(dynibo_robot_set_base_frame(robot_, &frame));
+        check(dynibo_workspace_set_base_frame(workspace_, &frame));
+    }
+    void set_gravity(const std::array<double, 3> &gravity) {
+        check(dynibo_workspace_set_gravity(workspace_, gravity.data()));
+    }
+    std::array<double, 3> gravity_vector() const {
+        std::array<double, 3> value{};
+        check(dynibo_workspace_gravity(workspace_, value.data()));
+        return value;
     }
     /** Writes all link poses, including the root, in link-ID order. */
     void forward_kinematics_all_into(const std::vector<double> &q, std::vector<DyniboPose> &out) {
@@ -310,6 +319,14 @@ public:
     std::size_t link_id(const std::string &name) const {
         std::size_t value{};
         check(dynibo_floating_robot_link_id(robot_, name.c_str(), &value));
+        return value;
+    }
+    void set_gravity(const std::array<double, 3> &gravity) {
+        check(dynibo_floating_workspace_set_gravity(workspace_, gravity.data()));
+    }
+    std::array<double, 3> gravity_vector() const {
+        std::array<double, 3> value{};
+        check(dynibo_floating_workspace_gravity(workspace_, value.data()));
         return value;
     }
     /** Writes all link poses, including the root, in link-ID order. */

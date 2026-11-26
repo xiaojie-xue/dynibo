@@ -9,8 +9,10 @@ mod model;
 mod robot;
 mod spatial;
 
+pub use nalgebra;
+
 pub use base::BaseState;
-pub use error::{Error, ErrorCategory, Result};
+pub use error::{Error, ErrorCategory, Result, UrdfError};
 pub use model::JointType;
 pub use robot::{
     FloatingRobot, IndexedLoad, InverseKinematicsOptions, LinkId, LoadBuffer, Robot, RobotModel,

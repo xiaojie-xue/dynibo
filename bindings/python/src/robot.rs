@@ -10,6 +10,7 @@ use crate::loads::{PyLoadBuffer, convert_loads, target_link};
 use crate::values::{PyIkOptions, PyPose, PyTwist};
 use dynibo::{Frame, Robot as CoreRobot};
 use dynibo_binding_support::LinkTable;
+use nalgebra::Vector3;
 use numpy::PyArray1;
 use pyo3::{
     exceptions::PyValueError,
@@ -145,6 +146,22 @@ impl PyRobot {
         let frame = frame.to_frame()?;
         with_robot(&self.inner, py, |robot| {
             robot.set_base_frame(frame).map_err(core_error)
+        })
+    }
+
+    #[getter]
+    fn gravity_vector(&self, py: Python<'_>) -> PyResult<(f64, f64, f64)> {
+        with_robot(&self.inner, py, |robot| {
+            let g = robot.gravity_vector();
+            Ok((g.x, g.y, g.z))
+        })
+    }
+
+    fn set_gravity(&self, py: Python<'_>, gravity: [f64; 3]) -> PyResult<()> {
+        with_robot(&self.inner, py, |robot| {
+            robot
+                .set_gravity(Vector3::from(gravity))
+                .map_err(core_error)
         })
     }
 

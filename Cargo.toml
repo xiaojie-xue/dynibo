@@ -38,13 +38,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.5.3"
-
-[features]
-default = []
-core-bench = []
-pinocchio-tests = []
-pinocchio-bench = []
+version = "0.5.4"
 
 [dependencies]
 nalgebra = "0.34.1"
