@@ -10,7 +10,8 @@ Add dynibo from crates.io:
 cargo add dynibo
 ```
 
-The supported Rust version and crate features are listed in the
+The crate uses Rust edition 2024 (requiring Rust 1.85 or newer) and has no
+optional Cargo features. Browse the complete Rust API in the
 [Rust API reference](https://docs.rs/dynibo).
 
 ## Python

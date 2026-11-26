@@ -1,7 +1,7 @@
 # 参考系与空间向量
 
-参考系约定是 API contract 的一部分。即使一个向量的数值正确，如果使用了错误的
-参考系或作用点，结果仍然是错误的。
+参考系约定是 API 契约的重要组成部分。即使数值本身计算无误，如果放错了参考系或作用点，
+最终结果仍然是错的。
 
 ## 位姿
 
@@ -23,8 +23,9 @@ $$
 [angular_x, angular_y, angular_z, linear_x, linear_y, linear_z]
 ```
 
-运动学速度和加速度结果在世界坐标系下表达，作用点是函数文档指定的目标原点或工具点。
-Tool pose 相对于目标 link frame 定义，用于选择另一个刚性连接点。
+运动学速度和加速度结果均为**经典速度**与**经典加速度**（而非 Featherstone 空间加速度，
+后者在线加速度项上相差 $\omega \times v$），在世界坐标系下表达，作用点是函数文档指定的
+目标原点或工具点。Tool pose 相对于目标 link frame 定义，用于选择另一个刚性连接点。
 
 ## Wrench 与载荷
 
@@ -39,12 +40,14 @@ Wrench 使用 torque 在前的顺序：
 
 ## 矩阵布局
 
-雅可比矩阵尺寸为 `6 x G`，质量矩阵尺寸为 `G x G`。所有语言接口的一维矩阵 buffer
-均使用 column-major 存储。对于行数为 `rows` 的矩阵：
+雅可比矩阵尺寸为 `6 x G`，质量矩阵尺寸为 `G x G`。所有语言接口的一维矩阵缓冲区
+均采用列主序（column-major）存储。对于行数为 `rows` 的矩阵：
 
 ```text
 values[column * rows + row]
 ```
 
-雅可比矩阵中，每个连续的六元素列表示一个 angular-first 空间运动响应。将结果传给
-row-major 线性代数库时应显式转换。
+雅可比矩阵中，每个连续的六元素列表示角分量在前的空间运动响应。在 Python/NumPy
+中将一维矩阵转为二维视图时应指定 `order="F"`（例如
+`J.reshape((6, robot.generalized_count), order="F")`）。将结果传给行主序（row-major）
+线性代数库时应显式转换。

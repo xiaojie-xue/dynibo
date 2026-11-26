@@ -112,10 +112,14 @@ C ABI 测试覆盖切片构造前的输出地址和结构体输入长度溢出�
 不进入报告；生产代码中的参数校验、panic 处理和数值保护仍保留统计。
 LLVM 与 Codecov 导出使用相同的文件过滤规则。
 
-CI 门槛依据 `coverage.json` 中 LLVM 的行覆盖率和分支覆盖率。
-`codecov.json` 是上传格式，本地计算其完整命中条目比例，既不是 LLVM 分支率，
-也不是 Codecov 服务端最终结果，应分别展示。暂时保持行覆盖率 85%、分支覆盖率
-75% 的门槛。调整统计范围后建立新基线，不能将百分比变化直接当作测试改进。
+CI 在 PR、主分支推送与手动触发时收集覆盖率并上传 `codecov.json`。Codecov 依据根目录
+`codecov.yml` 中的配置，以固定 90% 目标与零容差评估整体覆盖率（`codecov/project`）和
+变更代码覆盖率（`codecov/patch`）。这些检查异步返回，上传成功并不代表覆盖率检查通过；
+如需在合并前强制校验，应在 GitHub 分支保护中将两项 Codecov 检查设为必过项。
+
+`coverage.json` 中的 LLVM 行覆盖率和分支覆盖率仍保留作诊断参考，不再设置单独的 CI
+门槛。本地计算 `codecov.json` 中完全命中条目的比例既不是 LLVM 分支覆盖率，也不是
+Codecov 服务端最终结果。调整统计范围只会建立新基线，不能当作测试覆盖率提升。
 
 本地与 CI 共用 `ci/coverage.env` 中精确的 Rust、Python 和 cargo-llvm-cov 版本，
 Python 依赖固定在 `ci/coverage-requirements.txt`；其他 CI 任务的工具链不变。

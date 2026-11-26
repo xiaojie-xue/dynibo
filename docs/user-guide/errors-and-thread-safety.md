@@ -49,4 +49,5 @@ and must only be consumed after success.
 Argument and solver errors do not invalidate a robot or workspace. Correct the
 input and call again. A caught ABI panic is reported instead of unwinding across
 the foreign-language boundary, but it indicates an unexpected internal failure;
-record the message and dynibo version before deciding whether to continue.
+record the message and dynibo version, and in the C ABI destroy and recreate the
+affected workspace before continuing.

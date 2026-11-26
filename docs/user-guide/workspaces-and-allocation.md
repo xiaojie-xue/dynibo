@@ -31,16 +31,35 @@ Rust and C give direct control over output allocation:
         robot, workspace, q, J, target, jacobian, 6 * G));
     ```
 
-Creating a workspace allocates all internal scratch buffers. Reusing it does not
-resize those buffers. Python can reuse an `out=` NumPy array; without one it
-allocates a result array. A Python `LoadBuffer` also avoids rebuilding the native
-load vector on each call; Python object handling is not an allocation-free API.
-C++ return-container methods allocate, while `jacobian_into`,
-`jacobian_derivative_into`, `mass_matrix_into`, `velocity_product_forces_into`,
-`gravity_into`, `inverse_dynamics_into`, `forward_dynamics_into`, and fixed-base
-`inverse_kinematics_into` accept an exactly sized output vector. They never resize
-it. Put the output after required inputs and before optional loads/IK options,
-for example `robot.inverse_dynamics_into(q, qd, qdd, output, loads)`.
+Creating a workspace allocates all internal scratch buffers once; reusing it
+never resizes them. Allocation behavior for outputs and loads depends on the
+binding:
+
+- **Rust & C**: Caller-owned output buffers allow completely allocation-free
+  calculation loops.
+- **Python**: Pass a preallocated NumPy array via `out=` to avoid allocating a
+  new output array on each call, and use `LoadBuffer` to avoid rebuilding native
+  load storage. (Python object handling itself is not strictly allocation-free.)
+- **C++**: Container-returning methods allocate a `std::vector`, while the
+  `*_into` overloads—`forward_kinematics_all_into`, `jacobian_into`,
+  `jacobian_derivative_into`, `mass_matrix_into`,
+  `velocity_product_forces_into`, `gravity_into`, `inverse_dynamics_into`,
+  `forward_dynamics_into`, and fixed-base `inverse_kinematics_into`—write into
+  an exactly sized output vector without resizing or allocating. Pass the output
+  after required inputs and before optional loads or IK options, e.g.
+  `robot.inverse_dynamics_into(q, qd, qdd, output, loads)`.
+
+## State snapshots (Rust)
+
+When a control step queries multiple kinematics and dynamics quantities at the
+same `(q, qd)` state, Rust's `robot.state(&q, &qd)` (and
+`floating_robot.state(&base, &q, &qd)`) returns a borrowed `RobotState` or
+`FloatingRobotState` backed by the instance's preallocated cache. Joint
+transforms, link poses, and link velocities are computed once and reused without
+allocation across `forward_kinematics`, `forward_kinematics_all`,
+`forward_velocity_kinematics`, `forward_acceleration_kinematics`, `jacobian`,
+`jacobian_derivative`, `mass_matrix`, `gravity`, `velocity_product_forces`,
+`inverse_dynamics`, and `forward_dynamics`.
 
 ## Model scope
 

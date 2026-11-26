@@ -30,7 +30,8 @@ bases.
 ### Fast
 
 Each robot owns reusable storage for native calculations. Contiguous `float64`
-NumPy inputs avoid copies, and array-returning methods accept reusable `out=`
+NumPy inputs avoid dtype conversion and strided copies before entering the
+GIL-free native call, and array-returning methods accept reusable `out=`
 buffers to avoid allocating a new output array on every call.
 
 To put computation speed in context, we benchmark Dynibo against

@@ -22,7 +22,7 @@ different numerical API.
 | Fixed/floating workspace | Owned by typed robot | Owned by typed robot | Owned by typed robot | `DyniboWorkspace` / `DyniboFloatingWorkspace` |
 | Configure gravity | `set_gravity` / `gravity_vector` | `set_gravity` / `gravity_vector` | `set_gravity` / `gravity_vector` | `dynibo_[floating_]workspace_set_gravity` / `dynibo_[floating_]workspace_gravity` |
 | State snapshot | `Robot::state` / `FloatingRobot::state` | — | — | — |
-| Matrix output | Caller buffer | Flat NumPy array or reusable `out=` | Flat `std::vector` | Caller buffer |
+| Matrix output | Caller buffer | Flat NumPy array or reusable `out=` | Flat `std::vector` or reusable `*_into` | Caller buffer |
 | Errors | `Result<T>` | Exceptions | `dynibo::Error` | `DyniboStatus` |
 
 ## Value types

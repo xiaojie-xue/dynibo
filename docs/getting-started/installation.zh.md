@@ -10,8 +10,8 @@
 cargo add dynibo
 ```
 
-支持的 Rust 版本和 crate features 可以在
-[Rust API 参考](https://docs.rs/dynibo)中查看。
+该 crate 使用 Rust 2024 edition（要求 Rust 1.85 或更高版本），没有可选 Cargo
+feature。完整 Rust API 可在 [Rust API 参考](https://docs.rs/dynibo)中查看。
 
 ## Python
 

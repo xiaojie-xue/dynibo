@@ -4,7 +4,7 @@
 
 <h1>dynibo</h1>
 
-<p><strong>a fast, reliable and easy to use library for robot kinematics and dynamics</strong></p>
+<p><strong>快速、可靠、易用的机器人运动学与动力学库</strong></p>
 
 <p>
   <a href="https://dynibo.readthedocs.io/en/latest/zh/">文档</a> &nbsp;&middot;&nbsp;
@@ -28,7 +28,7 @@
 
 ### 快速
 
-Dynibo 基于 Rust 实现，并复用每个机器人的内部存储。创建 `Robot` 和输出 buffer 后，
+Dynibo 基于 Rust 实现，并复用每个机器人的内部存储。创建 `Robot` 和输出缓冲区后，
 主要运动学与动力学接口不会在计算循环中分配内存或调整容量。
 
 为直观展示计算性能，我们选用开源机器人运动学与动力学库
@@ -67,7 +67,7 @@ Dynibo 基于 Rust 实现，并复用每个机器人的内部存储。创建 `Ro
   </tbody>
 </table>
 
-复现上述结果的源码见 [`crates/dynibo-bench/`](crates/dynibo-bench/)。
+复现上述结果的源码见 [`crates/dynibo-bench/`](crates/dynibo-bench/)（Rust）和 [`benches/`](benches/)（Python）。
 
 ### 可靠
 
@@ -94,7 +94,7 @@ Python wheel 已包含原生库，运行时需要 NumPy 1.23 或更高版本。
 
 ### Rust
 
-添加 Cargo package：
+添加 Cargo 软件包：
 
 ```bash
 cargo add dynibo
@@ -118,7 +118,7 @@ fn main() -> dynibo::Result<()> {
 
 ### Python
 
-从 PyPI 安装 Python package：
+从 PyPI 安装 Python 软件包：
 
 ```bash
 python -m pip install dynibo
@@ -175,8 +175,8 @@ Rust、Python、C++ 和 C 的完整调用示例见 [`examples/`](examples/) 目�
 ## 支持的模型
 
 Dynibo 支持**固定基座（fixed-base）机器人**和**浮动基座（floating-base）机器人**，
-模型采用运行时尺寸的树状 URDF，支持 revolute、continuous、prismatic 和 fixed joint。
-无效拓扑、错误输入长度、模型不匹配的 handle 和求解失败都会返回结构化错误。
+模型采用运行时尺寸的树状 URDF，支持 revolute、continuous、prismatic 和 fixed 关节。
+无效拓扑、错误输入长度、跨模型句柄和求解失败都会返回结构化错误。
 
 ## 测试
 

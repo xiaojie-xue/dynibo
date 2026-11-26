@@ -1,0 +1,46 @@
+# dynibo
+
+> Fast, reliable, and easy-to-use tree-structured robot kinematics and dynamics library written in Rust with Rust, Python, C++, and C interfaces. Supports fixed-base and floating-base URDF robots with reusable calculation storage.
+
+## Critical Conventions (Read Before Generating Code)
+
+- **Units**: SI (`m`, `rad`, `s`, `kg`, `N`, `N*m`). Default gravity: `[0.0, 0.0, -9.80665]` m/s^2.
+- **Joint order**: `q`, `qd`, `qdd` always have length `J = joint_count` (non-fixed URDF joints only: revolute, continuous, prismatic) in **breadth-first topological order** from the root link (preserving URDF declaration order among children of the same parent). For branched robots, this can differ from raw URDF file order (inspect with `robot.joint_name(i)` in Rust).
+- **Generalized coordinates**: Fixed-base `Robot` has `G == J`. Floating-base `FloatingRobot` has `G == J + 6`, prepending world-frame **angular then linear** base components at the root-link origin before the `J` joints. Never prepend base pose/velocity to `q`/`qd`/`qdd`; pass an explicit `BaseState` to every `FloatingRobot` call.
+- **Quaternions**: `(x, y, z, w)` unit quaternion in Python, C++, and C; `nalgebra::Isometry3<f64>` (`dynibo::Frame`) in Rust.
+- **Twists**: Angular-first `[wx, wy, wz, vx, vy, vz]` representing world-frame **classical** velocity or **classical** acceleration (not Featherstone spatial acceleration).
+- **External loads**: Torque-first `[tx, ty, tz, fx, fy, fz]` expressed in the **target link's local frame at its origin**, as a **resisting** wrench (`+` in `gravity`/`inverse_dynamics`, `-` in `forward_dynamics`; opposite sign to a physical force applied to the robot).
+- **Matrices**: Flat 1-D **column-major** (`values[col * rows + row]`): Jacobians `6 * G` (angular rows `0..3`, linear rows `3..6`), mass matrices `G * G`. In Python/NumPy: `arr.reshape((rows, cols), order="F")`.
+- **Forward dynamics (`ABA`)**: Uses `BaseState.frame` and `BaseState.velocity`; ignores `BaseState.acceleration`. Set the first 6 generalized forces to zero for an unactuated floating base.
+- **Inverse kinematics**: Fixed-base `Robot` only; damped least squares. Defaults: `max_iterations=100`, `translation_tolerance=1e-6`, `rotation_tolerance=1e-6`, `damping=1e-3`, `max_step_norm=0.5`.
+- **Rust crate re-export**: Use `dynibo::nalgebra` (no need to add `nalgebra` separately). Rust has no standalone public `Workspace` type; `Robot` and `FloatingRobot` own reusable storage, `fork()` creates parallel copies, and `robot.state(&q, &qd)` / `floating_robot.state(&base, &q, &qd)` creates zero-allocation kinematic snapshots for repeated queries at one state.
+- **C++ zero-allocation**: Use `*_into` overloads (`forward_kinematics_all_into`, `jacobian_into`, `jacobian_derivative_into`, `mass_matrix_into`, `velocity_product_forces_into`, `gravity_into`, `inverse_dynamics_into`, `forward_dynamics_into`, `inverse_kinematics_into`) with preallocated, exactly sized `std::vector` buffers.
+- **Python**: Use `with Robot.from_urdf(path) as robot:`, pass `out=` contiguous 1-D `float64` NumPy arrays to avoid output allocations, and `robot.load_buffer()` for reusable loads. `link_id()` returns a model-scoped `LinkId` (`int` subclass); plain `int` is deprecated.
+
+## Documentation Pages
+
+- [Home](https://dynibo.readthedocs.io/en/latest/)
+- [Installation](https://dynibo.readthedocs.io/en/latest/getting-started/installation/)
+- [Quick Start](https://dynibo.readthedocs.io/en/latest/getting-started/quick-start/)
+- [Conventions and API Quick Reference](https://dynibo.readthedocs.io/en/latest/reference/quick-reference/)
+- [Robot Model and URDF](https://dynibo.readthedocs.io/en/latest/user-guide/robot-model-and-urdf/)
+- [Joint and Generalized Coordinates](https://dynibo.readthedocs.io/en/latest/user-guide/joint-and-generalized-coordinates/)
+- [Frames and Spatial Vectors](https://dynibo.readthedocs.io/en/latest/user-guide/frames-and-spatial-vectors/)
+- [Fixed and Floating Bases](https://dynibo.readthedocs.io/en/latest/user-guide/fixed-and-floating-bases/)
+- [Workspaces and Allocation](https://dynibo.readthedocs.io/en/latest/user-guide/workspaces-and-allocation/)
+- [Kinematics](https://dynibo.readthedocs.io/en/latest/user-guide/kinematics/)
+- [Dynamics](https://dynibo.readthedocs.io/en/latest/user-guide/dynamics/)
+- [External Loads](https://dynibo.readthedocs.io/en/latest/user-guide/external-loads/)
+- [Errors and Thread Safety](https://dynibo.readthedocs.io/en/latest/user-guide/errors-and-thread-safety/)
+- [API Mapping](https://dynibo.readthedocs.io/en/latest/languages/api-mapping/)
+- [Rust Guide](https://dynibo.readthedocs.io/en/latest/languages/rust/)
+- [Python Guide](https://dynibo.readthedocs.io/en/latest/languages/python/)
+- [C++ Guide](https://dynibo.readthedocs.io/en/latest/languages/cpp/)
+- [C Guide](https://dynibo.readthedocs.io/en/latest/languages/c/)
+
+## API References
+
+- [Python API Reference](https://dynibo.readthedocs.io/en/latest/reference/python/)
+- [C++ API Reference](https://dynibo.readthedocs.io/en/latest/cpp-api/dynibo_8hpp/)
+- [C API Reference](https://dynibo.readthedocs.io/en/latest/c-api/dynibo_8h/)
+- [Rust API Reference (docs.rs)](https://docs.rs/dynibo)

@@ -94,7 +94,15 @@ impl Robot {
 }
 
 impl FloatingRobot {
-    /// Writes velocity-product generalized forces `C(q, qd) * qd`.
+    /// Writes velocity-product generalized forces `C(q, nu) * nu`.
+    ///
+    /// Gravity, prescribed base acceleration, and external loads are excluded.
+    /// `output` has length `G = J + 6`, prepending the world-frame root wrench
+    /// `[torque, force]` before joint forces.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid input, an invalid output length, or a non-finite numerical result.
     pub fn velocity_product_forces(
         &mut self,
         base: &BaseState,
@@ -111,7 +119,15 @@ impl FloatingRobot {
         )
     }
 
-    /// Writes Newton-Euler generalized forces into caller-owned output.
+    /// Writes Newton-Euler generalized forces (RNEA) into caller-owned output.
+    ///
+    /// Uses `base.frame()`, `base.velocity()`, and `base.acceleration()`, plus
+    /// gravity and link-local resisting `loads`. `output` has length `G = J + 6`
+    /// (world-frame root wrench then joint forces).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid input, an invalid output length or load link ID, or a non-finite result.
     #[allow(clippy::too_many_arguments)]
     pub fn inverse_dynamics(
         &mut self,
@@ -135,6 +151,13 @@ impl FloatingRobot {
     }
 
     /// Writes gravity and external-load generalized forces into caller-owned output.
+    ///
+    /// Uses `base.frame()` and link-local resisting `loads`. `output` has length
+    /// `G = J + 6` (world-frame root wrench then joint forces).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for invalid input, an invalid output length or load link ID, or a non-finite result.
     pub fn gravity(
         &mut self,
         base: &BaseState,

@@ -12,10 +12,13 @@
  *
  * Let `J` be a robot's joint count and `G` its generalized count. Fixed-base
  * robots have `G == J`; floating-base robots have `G == J + 6`. `q`, `qd`, and
- * `qdd` always contain exactly `J` non-fixed URDF joint values. Floating
- * generalized vectors prepend world-frame angular then linear base values.
- * Matrices are column-major. Jacobians are `6 x G`; mass matrices are `G x G`.
- * Spatial values use angular-before-linear ordering.
+ * `qdd` always contain exactly `J` non-fixed URDF joint values in breadth-first
+ * topological order from the root link (preserving URDF joint order among
+ * children of the same parent). Floating generalized vectors prepend
+ * world-frame angular then linear base values. Matrices are column-major.
+ * Jacobians are `6 x G`; mass matrices are `G x G`. Spatial values use
+ * angular-before-linear ordering, and twists represent classical velocities or
+ * classical accelerations.
  *
  * Unless explicitly documented otherwise, all pointer arguments are non-null,
  * and string paths and link names must be valid UTF-8. Input arrays have their

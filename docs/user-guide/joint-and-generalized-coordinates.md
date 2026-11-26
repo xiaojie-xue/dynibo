@@ -13,10 +13,14 @@ Let:
 
 For a fixed base, `G = J`. For a floating base, `G = J + 6`.
 
-Inputs `q`, `qd`, and `qdd` always contain exactly `J` values in non-fixed URDF
-joint order. Floating-base coordinates are not prepended to these arrays. A
-fixed `Robot` stores its root frame; a `FloatingRobot` receives pose, velocity,
-and acceleration through an explicit `BaseState` on every calculation.
+Inputs `q`, `qd`, and `qdd` always contain exactly `J` values for the non-fixed
+joints in Dynibo's **breadth-first topological order** starting from the root
+link (children of the same parent preserve their URDF joint declaration order).
+For branched robots, this can differ from the raw URDF file order; in Rust,
+inspect the order with `joint_name(i)`. Floating-base coordinates are not
+prepended to these arrays. A fixed `Robot` stores its root frame; a
+`FloatingRobot` receives pose, velocity, and acceleration through an explicit
+`BaseState` on every calculation.
 
 ## Generalized ordering
 
@@ -47,8 +51,9 @@ The same ordering defines Jacobian columns and both axes of the mass matrix.
 | Generalized force | `G` |
 
 C and Rust require caller-provided output buffers for matrix and generalized
-force operations. Python returns NumPy arrays or writes into `out=`, while C++
-allocates a vector; the result has the same dimensions.
+force operations. Python returns NumPy arrays or writes into `out=`, and C++
+returns a `std::vector` or writes into a preallocated vector via `*_into`; the
+result has the same dimensions.
 
 ## Joint limits
 

@@ -1,7 +1,7 @@
 # Rust 指南
 
-Rust crate 是 dynibo 的原生接口，提供强类型 link ID、调用方持有的输出 buffer，以及
-详细的 `Error` variant。
+Rust crate 是 dynibo 的原生接口，提供强类型 link ID、每个实例独立的 workspace、
+调用方持有的输出缓冲区，以及详细的 `Error` 枚举变体。
 
 ```bash
 cargo add dynibo
@@ -25,21 +25,21 @@ fn main() -> dynibo::Result<()> {
 
 ## 内存分配、状态快照与并发
 
-重复计算矩阵或广义力时，应预先创建并复用输出 buffer。如果在控制循环的同一 `(q, qd)`
+重复计算矩阵或广义力时，应预先创建并复用输出缓冲区。如果在控制循环的同一 `(q, qd)`
 状态下连续查询多项运动学与动力学结果，可以使用 `robot.state(&q, &qd)`（或
 `floating_robot.state(&base, &q, &qd)`）一次性预计算关节变换、位姿和速度，再零分配地
-复用在 `forward_kinematics`、`jacobian`、`mass_matrix`、`inverse_dynamics` 和
+复用于 `forward_kinematics`、`jacobian`、`mass_matrix`、`inverse_dynamics` 和
 `forward_dynamics` 等查询中。
 
-每个并发计算需要独立的 `Robot::fork()` 实例。`set_gravity(...)` 可按实例配置重力加速度
-（默认 `[0.0, 0.0, -9.80665]` m/s²），并由 `fork()` 继承。`LinkId` 同样属于模型，不能与
-独立加载的其他模型混用。
+每个并发计算都需要独立的 `Robot::fork()` 实例。`set_gravity(...)` 按实例配置重力加速度
+（默认 `[0.0, 0.0, -9.80665]` m/s²），并由 `fork()` 继承。`LinkId` 绑定到所属模型，不能
+与独立加载的其他模型混用。
 
 ## 类型与错误
 
-`Frame` 是 nalgebra 的三维 isometry（crate 同步重导出了 `dynibo::nalgebra`）。`Twist`
-和 `Wrench` 提供有名称的 angular/linear 与 torque/force 分量及算术运算符。可能失败的调用
-返回 `dynibo::Result<T>`；`Error::category()` 提供稳定的粗粒度类别，具体 error variant 则
+`Frame` 是 nalgebra 的三维刚体变换 `Isometry3<f64>`（crate 已重导出 `dynibo::nalgebra`）。
+`Twist` 和 `Wrench` 提供具名的 angular/linear 与 torque/force 分量及算术运算符。可能失败的
+调用返回 `dynibo::Result<T>`；`Error::category()` 提供稳定的粗粒度分类，具体错误变体则
 保留详细信息。
 
 [打开 Rust API 参考](https://docs.rs/dynibo){ .md-button }

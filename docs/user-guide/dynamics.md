@@ -34,8 +34,8 @@ joint velocity or acceleration.
 
 ## Inverse dynamics
 
-`inverse_dynamics` uses recursive Newton--Euler dynamics and includes joint
-state, supplied base motion, gravity, and optional external loads. With a
+`inverse_dynamics` uses the recursive Newton-Euler algorithm (RNEA) and includes
+joint state, supplied base motion, gravity, and optional external loads. With a
 stationary base and no loads, it satisfies the manipulator equation above.
 
 ## Forward dynamics
@@ -50,16 +50,15 @@ $$
 For a floating base, input forces and output accelerations begin with
 world-frame angular and linear base components. The supplied `BaseState` pose
 and velocity participate in the calculation; its acceleration is ignored
-because acceleration is the result. A singular joint or floating-base articulated
-inertia produces a solver error rather than non-finite acceleration.
+because acceleration is the solved output. A singular joint or floating-base
+articulated inertia produces a solver error rather than non-finite acceleration.
 
-The floating-base solve equilibrates the six inertia coordinates by their
-diagonal scales before Cholesky factorization. Cholesky solves also estimate
-the scaled reciprocal one-norm condition number, which must exceed
-`sqrt(f64::EPSILON)`; an ill-conditioned scaled matrix has a distinct
-Rust error from a singular matrix. A normalized residual check rejects
-inaccurate solves, and non-finite intermediate results are numerical errors.
-Small rotational inertia relative to mass alone does not imply singularity.
+The floating-base solver equilibrates the six inertia coordinates by their
+diagonal scales before Cholesky factorization so small rotational inertia
+relative to mass is handled cleanly. It rejects singular matrices,
+ill-conditioned scaled matrices (reciprocal 1-norm condition number below
+`sqrt(f64::EPSILON)`, reported as a distinct Rust error), inaccurate residuals,
+and non-finite intermediate results.
 
 ## Calling the operations
 

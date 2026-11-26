@@ -61,17 +61,22 @@ data or use it with an independently loaded robot.
 
 ## Model state and calculation state
 
-Rust can load `RobotModel::from_urdf(path)` without allocating calculation
-storage. Its metadata methods match those on a robot. `model.robot()` creates
-a fixed instance at the world origin, and `model.floating_robot()?` creates a
-floating instance after checking positive root mass. `robot.model()` and
-`model.clone()` share the immutable model without allocating a workspace.
-All these instances share link IDs, while independent URDF loads have distinct
-ID scopes. A model handle contains no fixed-base pose; use `robot.fork()` to
-copy the current fixed pose together with independent calculation storage.
+In Rust, you can separate immutable model loading from mutable calculation storage:
 
-Topology and inertial data come from URDF. Joint position, velocity, and
-acceleration are supplied to each calculation. A fixed `Robot` persists its
-base frame; floating pose, velocity, and acceleration are the `BaseState`
-passed to each `FloatingRobot` calculation. See [Fixed and Floating
+- `RobotModel::from_urdf(path)` loads and validates the model without allocating
+  a workspace, and exposes the same metadata queries as a robot.
+- `model.robot()` creates a fixed-base instance at the world origin;
+  `model.floating_robot()?` checks that the root link has positive mass and
+  creates a floating-base instance.
+- `robot.model()` and `model.clone()` share the immutable model without
+  allocating a workspace. All instances derived from the same model share link
+  IDs, whereas independently loaded URDFs have distinct ID scopes.
+- `RobotModel` does not store a fixed-base pose; use `robot.fork()` to copy the
+  current fixed-base pose and gravity vector into an independent instance with
+  fresh calculation storage.
+
+Topology and inertial data come from URDF, while joint position, velocity, and
+acceleration are supplied to each calculation. A fixed `Robot` persists its base
+frame; a `FloatingRobot` takes pose, velocity, and acceleration explicitly via
+`BaseState` on every call. See [Fixed and Floating
 Bases](fixed-and-floating-bases.md).

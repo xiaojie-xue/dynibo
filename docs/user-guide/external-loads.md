@@ -17,8 +17,8 @@ wrench at the link origin. Components use torque-first order.
 === "Rust"
 
     ```rust
+    use dynibo::nalgebra::Vector3;
     use dynibo::{IndexedLoad, Wrench};
-    use nalgebra::Vector3;
 
     let load = IndexedLoad {
         link: tool,
@@ -79,11 +79,11 @@ robot.gravity(q, loads=loads, out=output)
 loads.clear()
 ```
 
-A Python `LoadBuffer` belongs to its creating model.
-It can be shared by `fork()` instances of that model.
-An independently loaded robot rejects it, even when empty. The
-buffer is borrowed during a native call; concurrent mutation is rejected.
-Existing Python lists of `Load` remain supported and are converted per call.
+A Python `LoadBuffer` belongs to its creating model and can be shared across
+`fork()` instances of that model. An independently loaded robot rejects it,
+even when empty. The buffer is borrowed during a native call, so concurrent
+mutation is rejected. Passing a plain Python sequence of `Load` objects is also
+supported and converts the list on each call.
 
 ## No-load calls
 
