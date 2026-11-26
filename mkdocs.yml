@@ -102,6 +102,8 @@ plugins:
             C: C
             Rust: Rust
             GitHub source code: GitHub 源代码
+  - autorefs:
+      resolve_closest: true
   - mkdocstrings:
       handlers:
         python:
