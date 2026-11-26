@@ -226,3 +226,34 @@ impl Mul<Wrench> for f64 {
         Wrench::new(self * rhs.torque, self * rhs.force)
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn twist_and_wrench_operators_behave_componentwise() {
+        let a = Twist::new(Vector3::new(1.0, 2.0, 3.0), Vector3::new(4.0, 5.0, 6.0));
+        let b = Twist::new(Vector3::new(-1.0, 0.5, 2.0), Vector3::new(1.0, -2.0, 3.0));
+        assert!(a.is_finite());
+        assert!(!Twist::new(Vector3::new(f64::NAN, 0.0, 0.0), Vector3::zeros()).is_finite());
+        assert_eq!(a - b, a + (-b));
+        let mut t = a;
+        t += b;
+        t -= b;
+        assert_eq!(t, a);
+        assert_eq!(a * 2.5, 2.5 * a);
+        assert_eq!((-a).to_vector(), -a.to_vector());
+
+        let w1 = Wrench::new(Vector3::new(1.0, -2.0, 3.0), Vector3::new(0.5, 1.5, -2.5));
+        let w2 = Wrench::new(Vector3::new(0.2, 0.4, -0.6), Vector3::new(-1.0, 2.0, 0.5));
+        assert_eq!(w1 - w2, w1 + (-w2));
+        let mut w = w1;
+        w += w2;
+        w -= w2;
+        assert_eq!(w, w1);
+        assert_eq!(w1 * 3.0, 3.0 * w1);
+        assert_eq!((-w1).to_vector(), -w1.to_vector());
+    }
+}

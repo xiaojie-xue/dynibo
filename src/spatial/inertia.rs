@@ -301,5 +301,16 @@ mod tests {
                 assert_relative_eq!(actual, expected, epsilon = 1e-12, max_relative = 1e-12);
             }
         }
+        let spatial = SpatialInertia::new(2.0, Vector3::new(0.1, -0.2, 0.3), Matrix3::identity());
+        assert_eq!(
+            spatial.apply_joint(JointType::Fixed, Vector3::x()),
+            Wrench::zeros()
+        );
+        let doubled = spatial + spatial;
+        assert_relative_eq!(
+            doubled.to_matrix6(),
+            spatial.to_matrix6() * 2.0,
+            epsilon = 1e-12
+        );
     }
 }

@@ -492,11 +492,21 @@ class PackageTests(unittest.TestCase):
 
                 with self.assertRaises(ValueError):
                     robot.link_id_at(robot.link_count)
+                with self.assertRaises(ValueError):
+                    robot.forward_kinematics(*prefix, q, -1)
                 with self.assertRaises(TypeError):
                     robot.forward_kinematics(*prefix, q, True)
+
+                tagged_load = dynibo.Load(target, force=(1.0, 0.0, 0.0))
+                self.assertIsInstance(tagged_load.link_id, dynibo.LinkId)
+                self.assertEqual(tagged_load.link_id, target)
 
                 with warnings.catch_warnings(record=True) as caught:
                     warnings.simplefilter("always", DeprecationWarning)
                     deprecated_pose = robot.forward_kinematics(*prefix, q, int(target))
+                    untagged_pose = robot.forward_kinematics(*prefix, q, dynibo.LinkId(int(target)))
                 self.assertEqual(deprecated_pose, pose)
-                self.assertTrue(any(issubclass(w.category, DeprecationWarning) for w in caught))
+                self.assertEqual(untagged_pose, pose)
+                self.assertGreaterEqual(
+                    sum(1 for w in caught if issubclass(w.category, DeprecationWarning)), 2
+                )

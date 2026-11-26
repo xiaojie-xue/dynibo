@@ -297,4 +297,116 @@ fn state_validates_inputs() {
         robot.state(&[0.0; 4], &[f64::NAN, 0.0, 0.0, 0.0]),
         Err(Error::NonFiniteInput { input: "qd" })
     ));
+
+    let target = robot.link_id("test_link_4").unwrap();
+    let state = robot.state(&[0.0; 4], &[0.0; 4]).unwrap();
+    let bad_tool = Frame::from_parts(
+        Translation3::new(f64::NAN, 0.0, 0.0),
+        UnitQuaternion::identity(),
+    );
+    assert!(matches!(
+        state.forward_velocity_kinematics(target, &bad_tool),
+        Err(Error::NonFiniteInput {
+            input: "tool frame"
+        })
+    ));
+    assert!(matches!(
+        state.forward_kinematics_all(&mut []),
+        Err(Error::WrongSliceLength { .. })
+    ));
+    assert!(matches!(
+        state.jacobian(target, &mut [0.0; 1]),
+        Err(Error::WrongSliceLength { .. })
+    ));
+    assert!(matches!(
+        state.jacobian_derivative(target, &mut [0.0; 1]),
+        Err(Error::WrongSliceLength { .. })
+    ));
+}
+
+#[test]
+fn state_matches_standalone_on_mixed_revolute_prismatic_and_fixed_joints() {
+    let mut robot = Robot::from_urdf(fixture_path("oracle_mixed.urdf")).unwrap();
+    let mut reference_robot = robot.fork();
+    let n = robot.joint_count();
+    let g = robot.generalized_count();
+    let q: Vec<f64> = (0..n).map(|i| 0.15 * (i as f64 + 1.0)).collect();
+    let qd: Vec<f64> = (0..n).map(|i| -0.2 + 0.12 * (i as f64)).collect();
+    let qdd: Vec<f64> = (0..n).map(|i| 0.3 - 0.1 * (i as f64)).collect();
+    let tool = Frame::from_parts(
+        Translation3::new(0.05, -0.02, 0.04),
+        UnitQuaternion::identity(),
+    );
+
+    let mut state = robot.state(&q, &qd).unwrap();
+    let mut ref_j = vec![0.0; 6 * g];
+    let mut state_j = vec![0.0; 6 * g];
+    let mut ref_jd = vec![0.0; 6 * g];
+    let mut state_jd = vec![0.0; 6 * g];
+    let mut ref_m = vec![0.0; g * g];
+    let mut state_m = vec![0.0; g * g];
+    let mut ref_tau = vec![0.0; g];
+    let mut state_tau = vec![0.0; g];
+    state.mass_matrix(&mut state_m).unwrap();
+    reference_robot.mass_matrix(&q, &mut ref_m).unwrap();
+    assert_slice_eq(&state_m, &ref_m, 1e-12);
+    state.inverse_dynamics(&qdd, &[], &mut state_tau).unwrap();
+    reference_robot
+        .inverse_dynamics(&q, &qd, &qdd, &[], &mut ref_tau)
+        .unwrap();
+    assert_slice_eq(&state_tau, &ref_tau, 1e-12);
+
+    for i in 0..reference_robot.link_count() {
+        let link = reference_robot.link_id_at(i).unwrap();
+        assert_frame_eq(
+            &state.forward_kinematics(link).unwrap(),
+            &reference_robot.forward_kinematics(&q, link).unwrap(),
+            1e-12,
+        );
+        assert_twist_eq(
+            state.forward_velocity_kinematics(link, &tool).unwrap(),
+            reference_robot
+                .forward_velocity_kinematics(&q, &qd, link, &tool)
+                .unwrap(),
+            1e-12,
+        );
+        assert_twist_eq(
+            state.forward_acceleration_kinematics(&qdd, link).unwrap(),
+            reference_robot
+                .forward_acceleration_kinematics(&q, &qd, &qdd, link)
+                .unwrap(),
+            1e-12,
+        );
+        state.jacobian(link, &mut state_j).unwrap();
+        reference_robot.jacobian(&q, link, &mut ref_j).unwrap();
+        assert_slice_eq(&state_j, &ref_j, 1e-12);
+        state.jacobian_derivative(link, &mut state_jd).unwrap();
+        reference_robot
+            .jacobian_derivative(&q, &qd, link, &mut ref_jd)
+            .unwrap();
+        assert_slice_eq(&state_jd, &ref_jd, 1e-12);
+    }
+
+    // Overflow in velocity/acceleration kinematics must be reported as NumericalFailure.
+    let target = reference_robot.link_id("tool").unwrap();
+    let huge_base = Frame::from_parts(
+        Translation3::new(1.0e308, 1.0e308, 1.0e308),
+        UnitQuaternion::from_euler_angles(0.5, 0.5, 0.5),
+    );
+    robot.set_base_frame(huge_base).unwrap();
+    let huge_q = vec![0.0, 1.0e308, 0.0];
+    let huge_qd = vec![1.0e308; n];
+    let mut overflow_state = robot.state(&huge_q, &huge_qd).unwrap();
+    assert!(matches!(
+        overflow_state.forward_kinematics(target),
+        Err(Error::NumericalFailure { .. })
+    ));
+    assert!(matches!(
+        overflow_state.forward_velocity_kinematics(target, &tool),
+        Err(Error::NumericalFailure { .. })
+    ));
+    assert!(matches!(
+        overflow_state.forward_acceleration_kinematics(&qdd, target),
+        Err(Error::NumericalFailure { .. })
+    ));
 }

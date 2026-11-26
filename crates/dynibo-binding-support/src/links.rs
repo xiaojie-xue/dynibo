@@ -61,3 +61,22 @@ impl LinkTable {
         self.links.is_empty()
     }
 }
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn link_table_tracks_length_and_identity() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/data/test_arm.urdf");
+        let model = RobotModel::from_urdf(&path).unwrap();
+        let table = LinkTable::from_model(&model);
+        assert_eq!(table.len(), model.link_count());
+        assert!(!table.is_empty());
+        assert_eq!(table.resolve(0), table.root());
+        assert_eq!(table.index_of(table.root().unwrap()), Some(0));
+    }
+}

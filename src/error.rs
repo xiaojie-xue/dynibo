@@ -400,5 +400,12 @@ mod tests {
             Error::ForwardDynamicsSingularBaseInertia.category(),
             ErrorCategory::Solver
         );
+        let urdf_err = crate::Robot::from_urdf("/nonexistent/dynibo_missing.urdf").unwrap_err();
+        assert_eq!(urdf_err.category(), ErrorCategory::Model);
+        if let Error::Urdf(inner) = &urdf_err {
+            assert!(std::error::Error::source(inner).is_some());
+        } else {
+            panic!("expected Error::Urdf");
+        }
     }
 }

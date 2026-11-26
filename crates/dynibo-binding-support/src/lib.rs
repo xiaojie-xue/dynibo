@@ -1,4 +1,5 @@
 //! Shared helpers for C/C++ and Python language bindings.
+#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 
 pub mod links;
 pub mod loads;
