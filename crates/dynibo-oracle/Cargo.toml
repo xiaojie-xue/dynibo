@@ -1,0 +1,23 @@
+[package]
+name = "dynibo-oracle"
+version.workspace = true
+edition = "2024"
+description = "Pinocchio numerical reference bridge and oracle tests for dynibo"
+license = "MIT"
+publish = false
+
+[features]
+default = []
+pinocchio = ["dep:cc", "dep:pkg-config"]
+
+[dependencies]
+dynibo = { path = "../.." }
+nalgebra = "0.34.1"
+
+[dev-dependencies]
+approx = "0.5.1"
+getrandom = "0.3.4"
+
+[build-dependencies]
+cc = { version = "1.2.49", optional = true }
+pkg-config = { version = "0.3.32", optional = true }

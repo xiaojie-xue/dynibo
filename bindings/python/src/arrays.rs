@@ -1,22 +1,61 @@
 //! NumPy input adaptation and caller-owned output buffers.
+use crate::calculation::{Calculation, with_calculation};
 use crate::errors::core_error;
-use dynibo::Frame;
-use numpy::{AllowTypeChange, PyArray1, PyArrayLike1, PyArrayMethods};
-use pyo3::{exceptions::PyValueError, prelude::*};
-use std::borrow::Cow;
+use crate::loads::{PyLoadBuffer, convert_load_sequence, fill_from_load_buffer};
+use dynibo::{Frame, IndexedLoad};
+use dynibo_binding_support::LinkTable;
+use numpy::{AllowTypeChange, PyArray1, PyArrayLike1, PyArrayMethods, PyUntypedArray};
+use pyo3::{
+    exceptions::{PyTypeError, PyValueError},
+    prelude::*,
+    types::PyAny,
+};
+use std::sync::Mutex;
 
 pub(super) type ArrayInput<'py> = PyArrayLike1<'py, f64, AllowTypeChange>;
 
-pub(super) fn input_slice<'a>(value: &'a ArrayInput<'_>) -> PyResult<Cow<'a, [f64]>> {
-    if let Ok(slice) = value.as_slice() {
-        return Ok(Cow::Borrowed(slice));
+/// Input vector copied into Rust memory while keeping the NumPy readonly borrow
+/// alive until output overlap checks complete.
+pub(super) struct PreparedInput<'py> {
+    _borrow: ArrayInput<'py>,
+    values: Vec<f64>,
+}
+
+impl PreparedInput<'_> {
+    pub(super) fn as_slice(&self) -> &[f64] {
+        &self.values
     }
-    // NumPy must interpret byte strides and unaligned data before Rust borrows it.
-    let contiguous = value.cast_array::<f64>(false)?;
-    contiguous
-        .to_vec()
-        .map(Cow::Owned)
-        .map_err(|error| PyValueError::new_err(error.to_string()))
+
+    /// Drops the NumPy readonly borrow and returns the owned Rust copy for use
+    /// while the GIL is released.
+    pub(super) fn into_vec(self) -> Vec<f64> {
+        self.values
+    }
+}
+
+pub(super) fn prepare_input<'py>(value: &Bound<'py, PyAny>) -> PyResult<PreparedInput<'py>> {
+    if let Ok(untyped) = value.cast::<PyUntypedArray>() {
+        let kind: String = untyped.getattr("dtype")?.getattr("kind")?.extract()?;
+        if !matches!(kind.as_str(), "f" | "i" | "u") {
+            return Err(PyTypeError::new_err(
+                "array input must have a real numeric dtype",
+            ));
+        }
+    }
+    let array: ArrayInput<'py> = value.extract()?;
+    let values = if let Ok(slice) = array.as_slice() {
+        slice.to_vec()
+    } else {
+        // NumPy must interpret byte strides and unaligned data before Rust borrows it.
+        let contiguous = array.cast_array::<f64>(false)?;
+        contiguous
+            .to_vec()
+            .map_err(|error| PyValueError::new_err(error.to_string()))?
+    };
+    Ok(PreparedInput {
+        _borrow: array,
+        values,
+    })
 }
 
 pub(super) fn require_same_length(q: &[f64], other: &[f64], name: &str) -> PyResult<()> {
@@ -29,31 +68,142 @@ pub(super) fn require_same_length(q: &[f64], other: &[f64], name: &str) -> PyRes
     }
 }
 
-pub(super) fn calculate_output<'py>(
-    py: Python<'py>,
+pub(super) struct ValidatedOutput<'py> {
+    array: Option<Bound<'py, PyArray1<f64>>>,
+    length: usize,
+}
+
+/// Validates caller-supplied `out` while input NumPy borrows remain active so
+/// overlapping input/output buffers are rejected before releasing the GIL.
+pub(super) fn validate_output<'py>(
     length: usize,
     out: Option<Bound<'py, PyArray1<f64>>>,
-    calculate: impl FnOnce(&mut [f64]) -> dynibo::Result<()> + Send,
-) -> PyResult<Bound<'py, PyArray1<f64>>> {
-    let array = out.unwrap_or_else(|| {
-        // SAFETY: every dynibo calculation writes the complete output slice
-        // before this array can be returned to Python.
-        unsafe { PyArray1::new(py, length, false) }
-    });
-    if array.len()? != length {
-        return Err(PyValueError::new_err(format!(
-            "out must contain exactly {length} elements"
-        )));
+) -> PyResult<ValidatedOutput<'py>> {
+    if let Some(array) = out {
+        if array.len()? != length {
+            return Err(PyValueError::new_err(format!(
+                "out must contain exactly {length} elements"
+            )));
+        }
+        {
+            let mut writable = array
+                .try_readwrite()
+                .map_err(|error| PyValueError::new_err(error.to_string()))?;
+            let _ = writable
+                .as_slice_mut()
+                .map_err(|_| PyValueError::new_err("out must be a contiguous float64 array"))?;
+        }
+        Ok(ValidatedOutput {
+            array: Some(array),
+            length,
+        })
+    } else {
+        Ok(ValidatedOutput {
+            array: None,
+            length,
+        })
     }
-    let mut writable = array
-        .try_readwrite()
-        .map_err(|error| PyValueError::new_err(error.to_string()))?;
-    let slice = writable
-        .as_slice_mut()
-        .map_err(|_| PyValueError::new_err("out must be a contiguous float64 array"))?;
-    py.detach(|| calculate(slice)).map_err(core_error)?;
-    drop(writable);
-    Ok(array)
+}
+
+/// Runs a calculation into an owned Rust scratch buffer with the GIL released,
+/// then writes into `out` (or allocates a new array after releasing the mutex).
+pub(super) fn run_with_output<'py, R: Send>(
+    py: Python<'py>,
+    inner: &Mutex<Option<Calculation<R>>>,
+    output: ValidatedOutput<'py>,
+    calculate: impl FnOnce(&mut Calculation<R>, &mut [f64]) -> dynibo::Result<()> + Send,
+) -> PyResult<Bound<'py, PyArray1<f64>>> {
+    let ValidatedOutput { array, length } = output;
+    let allocated = with_calculation(inner, py, |state| {
+        if state.output.len() < length {
+            state.output.resize(length, 0.0);
+        }
+        let mut scratch = std::mem::take(&mut state.output);
+        let result = py.detach(|| calculate(state, &mut scratch[..length]));
+        state.output = scratch;
+        result.map_err(core_error)?;
+        if let Some(ref target) = array {
+            let mut writable = target
+                .try_readwrite()
+                .map_err(|error| PyValueError::new_err(error.to_string()))?;
+            let slice = writable
+                .as_slice_mut()
+                .map_err(|_| PyValueError::new_err("out must be a contiguous float64 array"))?;
+            slice.copy_from_slice(&state.output[..length]);
+            Ok(None)
+        } else {
+            Ok(Some(state.output[..length].to_vec()))
+        }
+    })?;
+    if let Some(target) = array {
+        Ok(target)
+    } else {
+        Ok(PyArray1::from_vec(
+            py,
+            allocated.expect("allocated output returned when out is None"),
+        ))
+    }
+}
+
+/// Runs a load-bearing dynamics calculation reusing per-calculation load and
+/// output scratch capacity when `loads` is `None` or a `LoadBuffer`.
+pub(super) fn run_with_loads_and_output<'py, R: Send>(
+    py: Python<'py>,
+    inner: &Mutex<Option<Calculation<R>>>,
+    links: &LinkTable,
+    loads: Option<&Bound<'py, PyAny>>,
+    output: ValidatedOutput<'py>,
+    calculate: impl FnOnce(&mut R, &[IndexedLoad], &mut [f64]) -> dynibo::Result<()> + Send,
+) -> PyResult<Bound<'py, PyArray1<f64>>> {
+    let (load_buffer, sequence_loads) = match loads {
+        None => (None, None),
+        Some(value) => match value.cast::<PyLoadBuffer>() {
+            Ok(buffer) => (Some(buffer), None),
+            Err(_) => (None, Some(convert_load_sequence(py, links, value)?)),
+        },
+    };
+    let ValidatedOutput { array, length } = output;
+    let allocated = with_calculation(inner, py, |state| {
+        if state.output.len() < length {
+            state.output.resize(length, 0.0);
+        }
+        let Calculation {
+            robot,
+            loads: loads_buf,
+            output: scratch,
+            ..
+        } = state;
+        if let Some(buffer) = load_buffer {
+            fill_from_load_buffer(links, buffer, loads_buf)?;
+        } else if let Some(ref seq) = sequence_loads {
+            loads_buf.clear();
+            loads_buf.extend_from_slice(seq);
+        } else {
+            loads_buf.clear();
+        }
+        let result = py.detach(|| calculate(robot, loads_buf.as_slice(), &mut scratch[..length]));
+        result.map_err(core_error)?;
+        if let Some(ref target) = array {
+            let mut writable = target
+                .try_readwrite()
+                .map_err(|error| PyValueError::new_err(error.to_string()))?;
+            let slice = writable
+                .as_slice_mut()
+                .map_err(|_| PyValueError::new_err("out must be a contiguous float64 array"))?;
+            slice.copy_from_slice(&scratch[..length]);
+            Ok(None)
+        } else {
+            Ok(Some(scratch[..length].to_vec()))
+        }
+    })?;
+    if let Some(target) = array {
+        Ok(target)
+    } else {
+        Ok(PyArray1::from_vec(
+            py,
+            allocated.expect("allocated output returned when out is None"),
+        ))
+    }
 }
 
 pub(super) fn write_poses(poses: &[Frame], output: &mut [f64]) {

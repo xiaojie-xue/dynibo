@@ -18,6 +18,8 @@ Rust 使用 crate 和 type namespace，Python 使用 module 和 class，C++ 使�
 | 固定基质量/动力学 | `Robot` methods | `Robot` methods | `Robot` methods | `dynibo_mass_matrix`, `dynibo_inverse_dynamics`, `dynibo_forward_dynamics` |
 | 浮动基质量/动力学 | 带 `base` 的 `FloatingRobot` methods | 带 `base` 的 `FloatingRobot` methods | 带 `base` 的 `FloatingRobot` methods | `dynibo_floating_mass_matrix`, `dynibo_floating_inverse_dynamics`, `dynibo_floating_forward_dynamics` |
 | fixed/floating workspace | 由 typed robot 持有 | 由 typed robot 持有 | 由 typed robot 持有 | `DyniboWorkspace` / `DyniboFloatingWorkspace` |
+| 配置重力向量 | `set_gravity` / `gravity_vector` | `set_gravity` / `gravity_vector` | `set_gravity` / `gravity_vector` | `dynibo_[floating_]workspace_set_gravity` / `dynibo_[floating_]workspace_gravity` |
+| 状态快照复用 | `Robot::state` / `FloatingRobot::state` | — | — | — |
 | 矩阵输出 | 调用方 buffer | 一维 NumPy 数组或可复用的 `out=` | 一维 `std::vector` | 调用方 buffer |
 | 错误 | `Result<T>` | 异常 | `dynibo::Error` | `DyniboStatus` |
 
@@ -29,7 +31,7 @@ Rust 使用 crate 和 type namespace，Python 使用 module 和 class，C++ 使�
 | 空间运动 | `Twist` | `Twist` | `DyniboTwist` | `DyniboTwist` |
 | 外部载荷 | `IndexedLoad` | `Load` | `DyniboLoad` | `DyniboLoad` |
 | IK 配置 | `InverseKinematicsOptions` | `IkOptions` | `DyniboIkOptions` | `DyniboIkOptions` |
-| Link 标识 | `LinkId` | `int` | `std::size_t` | `size_t` |
+| Link 标识 | `LinkId` | `LinkId`（`int` 子类） | `dynibo::LinkId` | `size_t` |
 
 C++ wrapper 有意复用与 ABI 兼容的 C 值结构体，同时为对象 handle 增加 RAII、方法、
 移动语义和异常。

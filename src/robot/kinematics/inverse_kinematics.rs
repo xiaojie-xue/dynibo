@@ -1,6 +1,6 @@
 use nalgebra::{SMatrix, SVector};
 
-use crate::{Error, Frame, Result};
+use crate::{Error, Frame, JointType, Result};
 
 use super::super::{LinkId, Model, Robot, Workspace};
 
@@ -222,7 +222,21 @@ impl Model {
             };
             for &joint_index in path.iter().rev() {
                 if let Some(dof_index) = self.joint_dof_indices[joint_index] {
-                    q_work[dof_index] += scale * step[dof_index];
+                    let joint = &self.joints[joint_index];
+                    let mut next = q_work[dof_index] + scale * step[dof_index];
+                    if joint.joint_type() == JointType::Revolute
+                        && joint.lower_limit().is_finite()
+                        && joint.upper_limit().is_finite()
+                        && joint.is_over_limit(next)
+                    {
+                        let center = 0.5 * (joint.lower_limit() + joint.upper_limit());
+                        let turns = ((center - next) / std::f64::consts::TAU).round();
+                        let wrapped = next + turns * std::f64::consts::TAU;
+                        if !joint.is_over_limit(wrapped) {
+                            next = wrapped;
+                        }
+                    }
+                    q_work[dof_index] = next.clamp(joint.lower_limit(), joint.upper_limit());
                 }
             }
         }

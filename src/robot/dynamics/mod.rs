@@ -2,20 +2,27 @@ mod forward_dynamics;
 mod inverse_dynamics;
 mod mass_matrix;
 
-use crate::{Frame, Wrench};
+use crate::{Frame, Result, Wrench};
 
-use super::FLOATING_BASE_DOF;
+use super::{FLOATING_BASE_DOF, Model};
 
-fn wrench_to_parent(transform: &Frame, wrench: Wrench) -> Wrench {
-    let force = transform.rotation * wrench.force;
-    Wrench::new(
-        transform.rotation * wrench.torque + transform.translation.vector.cross(&force),
-        force,
-    )
-}
-
-fn add_wrench(lhs: Wrench, rhs: Wrench) -> Wrench {
-    Wrench::new(lhs.torque + rhs.torque, lhs.force + rhs.force)
+impl Model {
+    #[inline]
+    pub(super) fn populate_parent_from_child(
+        &self,
+        q: &[f64],
+        parent_from_child: &mut [Frame],
+    ) -> Result<()> {
+        self.validate_slice_length(
+            "transform workspace",
+            parent_from_child.len(),
+            self.model_joint_count(),
+        )?;
+        for (joint_index, frame) in parent_from_child.iter_mut().enumerate() {
+            *frame = self.joint_kinematics[joint_index].frame(self.joint_value(q, joint_index));
+        }
+        Ok(())
+    }
 }
 
 fn write_world_wrench(base_frame: &Frame, local: Wrench, output: &mut [f64]) {

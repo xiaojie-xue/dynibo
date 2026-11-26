@@ -49,7 +49,7 @@ int run(const int argc, char **argv) {
   }
 
   dynibo::Robot robot(argv[1]);
-  const std::size_t flange = robot.link_id(argv[2]);
+  const dynibo::LinkId flange = robot.link_id(argv[2]);
 
   // Only non-fixed joints occupy state-vector entries; fer_joint8 is fixed.
   const std::vector<double> q = {0.0, -0.3, 0.0, -1.8, 0.0, 1.5, 0.7};
@@ -86,9 +86,7 @@ int run(const int argc, char **argv) {
       robot.velocity_product_forces(q, qd);
 
   // A link-local downward force applied at the flange origin.
-  DyniboLoad load{};
-  load.link_id = flange;
-  load.force[2] = -5.0;
+  const DyniboLoad load = robot.make_load(flange, {0.0, 0.0, 0.0}, {0.0, 0.0, -5.0});
   const std::vector<DyniboLoad> loads = {load};
   const std::vector<double> gravity = robot.gravity(q, loads);
   const std::vector<double> joint_forces =

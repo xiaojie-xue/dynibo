@@ -67,7 +67,7 @@ Dynibo 基于 Rust 实现，并复用每个机器人的内部存储。创建 `Ro
   </tbody>
 </table>
 
-复现上述结果的源码见 [`benches/`](benches/)。
+复现上述结果的源码见 [`crates/dynibo-bench/`](crates/dynibo-bench/)。
 
 ### 可靠
 

@@ -27,13 +27,12 @@ int main(int argc, char **argv) {
     CHECK(argc >= 2);
     try {
         dynibo::Robot fixed(argv[1]);
-        const auto target = fixed.link_id("test_link_4");
+        const dynibo::LinkId target = fixed.link_id("test_link_4");
+        CHECK(target == fixed.link_id_at(target.index()));
         const std::vector<double> q{0.2, 1.0, -0.7, 0.4};
         const std::vector<double> qd{-0.3, 0.5, -0.2, 0.8};
         const std::vector<double> qdd{0.7, -0.4, 0.1, 0.3};
-        DyniboLoad load{};
-        load.link_id = target;
-        load.force[1] = 1.0;
+        const DyniboLoad load = fixed.make_load(target, {0.0, 0.0, 0.0}, {0.0, 1.0, 0.0});
         const std::vector<DyniboLoad> loads{load};
 
         const auto pose = fixed.forward_kinematics(q, target);
@@ -91,7 +90,7 @@ int main(int argc, char **argv) {
             CHECK(out_forward_dynamics == expected_forward_dynamics);
             CHECK(out_inverse_kinematics == expected_inverse_kinematics);
             for (std::size_t i = 0; i < all_poses.size(); ++i) {
-                const auto single = fixed.forward_kinematics(q, i);
+                const auto single = fixed.forward_kinematics(q, fixed.link_id_at(i));
                 for (int k = 0; k < 3; ++k) CHECK(std::abs(single.translation[k] - all_poses[i].translation[k]) < 1e-12);
                 for (int k = 0; k < 4; ++k) CHECK(std::abs(single.rotation_xyzw[k] - all_poses[i].rotation_xyzw[k]) < 1e-12);
             }
@@ -106,17 +105,46 @@ int main(int argc, char **argv) {
         fixed.set_base_frame(shift);
         CHECK(std::abs(fixed.forward_kinematics(q, target).translation[0] - pose.translation[0] - 0.2) < 1e-12);
 
+        const auto default_gravity = fixed.gravity_vector();
+        CHECK(std::abs(default_gravity[2] + 9.80665) < 1e-12);
+        fixed.set_gravity({0.0, 0.0, 0.0});
+        for (double v : fixed.gravity(q)) CHECK(v == 0.0);
+        fixed.set_gravity(default_gravity);
+
         const std::vector<double> short_q{0.0, 0.0, 0.0};
         bool invalid_length = false;
         try { static_cast<void>(fixed.jacobian(short_q, target)); } catch (const dynibo::Error& error) { invalid_length = error.status() == DYNIBO_STATUS_INVALID_ARGUMENT; }
         CHECK(invalid_length);
 
         dynibo::FloatingRobot floating(argv[1]);
-        const auto floating_target = floating.link_id("test_link_4");
+        const dynibo::LinkId floating_target = floating.link_id("test_link_4");
+        CHECK(floating_target == floating.link_id_at(floating_target.index()));
+        CHECK(floating_target != target);
+        bool foreign_rejected = false;
+        try { static_cast<void>(fixed.forward_kinematics(q, floating_target)); }
+        catch (const dynibo::Error& e) { foreign_rejected = e.status() == DYNIBO_STATUS_INVALID_ARGUMENT; }
+        CHECK(foreign_rejected);
+        foreign_rejected = false;
+        try { static_cast<void>(fixed.make_load(floating_target)); }
+        catch (const dynibo::Error& e) { foreign_rejected = e.status() == DYNIBO_STATUS_INVALID_ARGUMENT; }
+        CHECK(foreign_rejected);
+        dynibo::Robot other_fixed(argv[1]);
+        foreign_rejected = false;
+        try { static_cast<void>(other_fixed.jacobian(q, target)); }
+        catch (const dynibo::Error& e) { foreign_rejected = e.status() == DYNIBO_STATUS_INVALID_ARGUMENT; }
+        CHECK(foreign_rejected);
+        bool oob_link_rejected = false;
+        try { static_cast<void>(fixed.link_id_at(fixed.link_count())); }
+        catch (const dynibo::Error& e) { oob_link_rejected = e.status() == DYNIBO_STATUS_INVALID_ARGUMENT; }
+        CHECK(oob_link_rejected);
         dynibo::BaseState base;
         base.velocity.angular[0] = 0.1;
         base.acceleration.linear[1] = -0.2;
         CHECK(floating.generalized_count() == floating.joint_count() + 6);
+        foreign_rejected = false;
+        try { static_cast<void>(floating.forward_kinematics(base, q, target)); }
+        catch (const dynibo::Error& e) { foreign_rejected = e.status() == DYNIBO_STATUS_INVALID_ARGUMENT; }
+        CHECK(foreign_rejected);
         const auto floating_pose = floating.forward_kinematics(base, q, floating_target);
         CHECK(floating.jacobian(base, q, floating_target).size() == 6 * floating.generalized_count());
         CHECK(floating.jacobian_derivative(base, q, qd, floating_target).size() == 6 * floating.generalized_count());
@@ -124,8 +152,8 @@ int main(int argc, char **argv) {
         CHECK(floating.velocity_product_forces(base, q, qd).size() == floating.generalized_count());
         CHECK(floating.forward_velocity_kinematics(base, q, qd, floating_target).angular[0] == floating.forward_velocity_kinematics(base, q, qd, floating_target).angular[0]);
         CHECK(floating.forward_acceleration_kinematics(base, q, qd, qdd, floating_target).linear[0] == floating.forward_acceleration_kinematics(base, q, qd, qdd, floating_target).linear[0]);
-        load.link_id = floating_target;
-        const std::vector<DyniboLoad> floating_loads{load};
+        const DyniboLoad floating_load = floating.make_load(floating_target, {0.0, 0.0, 0.0}, {0.0, 1.0, 0.0});
+        const std::vector<DyniboLoad> floating_loads{floating_load};
         CHECK(floating.gravity(base, q, floating_loads).size() == floating.generalized_count());
         const auto floating_forces = floating.inverse_dynamics(base, q, qd, qdd, floating_loads);
         CHECK(floating_forces.size() == floating.generalized_count());
@@ -169,7 +197,7 @@ int main(int argc, char **argv) {
             CHECK(out_inverse_dynamics == expected_inverse_dynamics);
             CHECK(out_forward_dynamics == expected_forward_dynamics);
             for (std::size_t i = 0; i < all_poses.size(); ++i) {
-                const auto single = floating.forward_kinematics(base, q, i);
+                const auto single = floating.forward_kinematics(base, q, floating.link_id_at(i));
                 for (int k = 0; k < 3; ++k) CHECK(std::abs(single.translation[k] - all_poses[i].translation[k]) < 1e-12);
                 for (int k = 0; k < 4; ++k) CHECK(std::abs(single.rotation_xyzw[k] - all_poses[i].rotation_xyzw[k]) < 1e-12);
             }
@@ -191,10 +219,26 @@ int main(int argc, char **argv) {
         dynibo::Robot assigned_fixed(argv[1]);
         assigned_fixed = std::move(moved_fixed);
         CHECK(assigned_fixed.joint_count() == q.size());
+        static_cast<void>(assigned_fixed.forward_kinematics(q, target));
         dynibo::FloatingRobot moved_floating(std::move(floating));
         dynibo::FloatingRobot assigned_floating(argv[1]);
         assigned_floating = std::move(moved_floating);
         CHECK(assigned_floating.generalized_count() == q.size() + 6);
+        static_cast<void>(assigned_floating.forward_kinematics(base, q, floating_target));
+
+        // LinkIds from a destroyed robot must remain rejected even if a new robot reuses memory.
+        dynibo::LinkId stale_id = assigned_fixed.link_id("test_link_4");
+        {
+            dynibo::Robot temp(argv[1]);
+            stale_id = temp.link_id("test_link_4");
+        }
+        for (int attempt = 0; attempt < 8; ++attempt) {
+            dynibo::Robot fresh(argv[1]);
+            bool stale_rejected = false;
+            try { static_cast<void>(fresh.forward_kinematics(q, stale_id)); }
+            catch (const dynibo::Error& e) { stale_rejected = e.status() == DYNIBO_STATUS_INVALID_ARGUMENT; }
+            CHECK(stale_rejected);
+        }
     } catch (const dynibo::Error& error) {
         std::fprintf(stderr, "dynibo error: %s\n", error.what());
         return 1;

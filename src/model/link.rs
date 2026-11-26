@@ -1,6 +1,6 @@
 use nalgebra::{Matrix3, Vector3};
 
-use crate::{Error, Result};
+use crate::{Error, Result, spatial::inertia::SpatialInertia};
 
 /// Identity and immutable inertial properties of one URDF link.
 #[derive(Clone, Debug, PartialEq)]
@@ -14,8 +14,7 @@ pub(crate) struct LinkDynamics {
     pub(crate) mass: f64,
     pub(crate) center_of_mass: Vector3<f64>,
     pub(crate) inertia: Matrix3<f64>,
-    pub(crate) first_moment: Vector3<f64>,
-    pub(crate) origin_inertia: Matrix3<f64>,
+    pub(crate) spatial_inertia: SpatialInertia,
 }
 
 impl Link {
@@ -59,8 +58,7 @@ impl Link {
                 mass,
                 center_of_mass,
                 inertia,
-                first_moment,
-                origin_inertia,
+                spatial_inertia: SpatialInertia::new(mass, first_moment, origin_inertia),
             },
         })
     }
@@ -110,12 +108,12 @@ mod tests {
         let expected_origin_inertia = inertia
             + mass * (center.norm_squared() * Matrix3::identity() - center * center.transpose());
         assert_relative_eq!(
-            dynamics.first_moment,
+            dynamics.spatial_inertia.first_moment,
             expected_first_moment,
             epsilon = 1.0e-14
         );
         assert_relative_eq!(
-            dynamics.origin_inertia,
+            dynamics.spatial_inertia.origin_inertia,
             expected_origin_inertia,
             epsilon = 1.0e-14
         );

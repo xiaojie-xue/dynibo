@@ -143,8 +143,10 @@ class BindingContractTests(unittest.TestCase):
                     ("forward_dynamics", (q, huge_velocity, np.zeros_like(out))),
                 ):
                     with self.subTest(robot=robot_type.__name__, operation=name):
+                        out.fill(123.0)
                         with self.assertRaises(dynibo.SolverError):
                             getattr(robot, name)(*prefix, *args, out=out)
+                        np.testing.assert_array_equal(out, 123.0)
                         self.assertIs(robot.inverse_dynamics(*prefix, q, q, q, out=out), out)
                         np.testing.assert_allclose(out, expected, atol=1.0e-11, rtol=1.0e-10)
 
@@ -161,10 +163,12 @@ class BindingContractTests(unittest.TestCase):
                         self.assertEqual(getattr(direct, name), expected)
                         self.assertEqual(getattr(factory, name), expected)
                     prefix = (dynibo.BaseState(),) if robot_type is dynibo.FloatingRobot else ()
-                    target = direct.link_id("test_link_4")
-                    args = prefix + (reference("q"), target)
+                    direct_target = direct.link_id("test_link_4")
+                    factory_target = factory.link_id("test_link_4")
+                    args = prefix + (reference("q"), direct_target)
                     self.assertEqual(
-                        direct.forward_kinematics(*args), factory.forward_kinematics(*args)
+                        direct.forward_kinematics(*args),
+                        factory.forward_kinematics(*(prefix + (reference("q"), factory_target))),
                     )
                 direct.close()
                 for name in ("name", "joint_count", "generalized_count", "link_count"):
@@ -297,6 +301,14 @@ class BindingContractTests(unittest.TestCase):
                     robot.link_id("missing")
                 with self.assertRaisesRegex(ValueError, "invalid link id"):
                     robot.gravity(*prefix, q, loads=[dynibo.Load(robot.link_count)])
+                for bad_array in (
+                    np.array([True, False, True, False]),
+                    np.array([1.0 + 2.0j, 0.0, 0.0, 0.0]),
+                    np.array(["0.1", "0.2", "0.3", "0.4"]),
+                    np.array([0.1, 0.2, 0.3, 0.4], dtype=object),
+                ):
+                    with self.assertRaises(TypeError):
+                        robot.mass_matrix(*prefix, bad_array)
                 for invalid in (float("nan"), float("inf"), float("-inf")):
                     bad = (invalid,) + q[1:]
                     for name, args in (
@@ -383,16 +395,20 @@ class BindingContractTests(unittest.TestCase):
         )
         with dynibo.Robot(URDF) as fixed, dynibo.FloatingRobot(URDF) as floating:
             target = fixed.link_id("test_link_4")
+            floating_target = floating.link_id("test_link_4")
             expected = fixed.forward_kinematics(q, target)
             for pose in invalid_poses:
                 with self.assertRaisesRegex(ValueError, "pose contains"):
                     fixed.set_base_frame(pose)
                 with self.assertRaisesRegex(ValueError, "pose contains"):
-                    floating.forward_kinematics(dynibo.BaseState(frame=pose), q, target)
-                for robot, prefix in ((fixed, ()), (floating, (motion_base(),))):
+                    floating.forward_kinematics(dynibo.BaseState(frame=pose), q, floating_target)
+                for robot, prefix, link in (
+                    (fixed, (), target),
+                    (floating, (motion_base(),), floating_target),
+                ):
                     with self.assertRaisesRegex(ValueError, "pose contains"):
                         robot.forward_velocity_kinematics(
-                            *prefix, q, reference("qd"), target, tool=pose
+                            *prefix, q, reference("qd"), link, tool=pose
                         )
             for name in ("velocity", "acceleration"):
                 for component in ("angular", "linear"):

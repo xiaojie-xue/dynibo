@@ -1,7 +1,8 @@
 //! Python spatial values and inverse-kinematics options.
 use crate::errors::core_error;
 use dynibo::{BaseState as CoreBaseState, Frame, InverseKinematicsOptions, Twist as CoreTwist};
-use nalgebra::{Quaternion, Translation3, UnitQuaternion, Vector3};
+use dynibo_binding_support::{frame_from_xyzw, xyzw_from_frame};
+use nalgebra::Vector3;
 use pyo3::{
     exceptions::{PyTypeError, PyValueError},
     prelude::*,
@@ -9,20 +10,7 @@ use pyo3::{
 };
 
 fn checked_frame(translation: [f64; 3], rotation_xyzw: [f64; 4]) -> PyResult<Frame> {
-    let [x, y, z, w] = rotation_xyzw;
-    let norm_squared = x * x + y * y + z * z + w * w;
-    if !translation.iter().all(|value| value.is_finite())
-        || !norm_squared.is_finite()
-        || norm_squared <= 1.0e-24
-    {
-        return Err(PyValueError::new_err(
-            "pose contains non-finite values or a zero quaternion",
-        ));
-    }
-    Ok(Frame::from_parts(
-        Translation3::from(Vector3::from(translation)),
-        UnitQuaternion::new_normalize(Quaternion::new(w, x, y, z)),
-    ))
+    frame_from_xyzw(translation, rotation_xyzw).map_err(PyValueError::new_err)
 }
 
 #[pyclass(name = "Pose", module = "dynibo", frozen, eq, skip_from_py_object)]
@@ -45,10 +33,10 @@ impl PyPose {
     }
 
     pub(super) fn from_frame(frame: &Frame) -> Self {
-        let quaternion = frame.rotation.quaternion();
+        let (translation, rotation_xyzw) = xyzw_from_frame(frame);
         Self {
-            translation: frame.translation.vector.into(),
-            rotation_xyzw: [quaternion.i, quaternion.j, quaternion.k, quaternion.w],
+            translation,
+            rotation_xyzw,
         }
     }
 }
@@ -210,35 +198,37 @@ impl From<PyIkOptions> for InverseKinematicsOptions {
 #[pymethods]
 impl PyIkOptions {
     #[new]
-    #[pyo3(signature = (max_iterations=None, translation_tolerance=1.0e-6, rotation_tolerance=1.0e-6, damping=1.0e-3, max_step_norm=0.5))]
+    #[pyo3(signature = (max_iterations=None, translation_tolerance=None, rotation_tolerance=None, damping=None, max_step_norm=None))]
     fn new(
         max_iterations: Option<&Bound<'_, PyAny>>,
-        translation_tolerance: f64,
-        rotation_tolerance: f64,
-        damping: f64,
-        max_step_norm: f64,
+        translation_tolerance: Option<f64>,
+        rotation_tolerance: Option<f64>,
+        damping: Option<f64>,
+        max_step_norm: Option<f64>,
     ) -> PyResult<Self> {
+        let defaults = InverseKinematicsOptions::default();
         let max_iterations = if let Some(value) = max_iterations {
             if value.is_instance_of::<PyBool>() {
                 return Err(PyTypeError::new_err("max_iterations must be an integer"));
             }
-            value
+            let parsed = value
                 .extract::<isize>()
-                .map_err(|_| PyTypeError::new_err("max_iterations must be an integer"))?
+                .map_err(|_| PyTypeError::new_err("max_iterations must be an integer"))?;
+            if parsed <= 0 {
+                return Err(PyValueError::new_err(
+                    "max_iterations must be greater than zero",
+                ));
+            }
+            parsed as usize
         } else {
-            100
+            defaults.max_iterations
         };
-        if max_iterations <= 0 {
-            return Err(PyValueError::new_err(
-                "max_iterations must be greater than zero",
-            ));
-        }
         Ok(Self {
-            max_iterations: max_iterations as usize,
-            translation_tolerance,
-            rotation_tolerance,
-            damping,
-            max_step_norm,
+            max_iterations,
+            translation_tolerance: translation_tolerance.unwrap_or(defaults.translation_tolerance),
+            rotation_tolerance: rotation_tolerance.unwrap_or(defaults.rotation_tolerance),
+            damping: damping.unwrap_or(defaults.damping),
+            max_step_norm: max_step_norm.unwrap_or(defaults.max_step_norm),
         })
     }
 

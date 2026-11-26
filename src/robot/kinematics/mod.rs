@@ -10,7 +10,7 @@ use super::Model;
 use super::topology::incoming_joint_index;
 
 impl Model {
-    fn prepare_ancestor_path(&self, target_index: usize, path: &mut [usize]) -> usize {
+    pub(super) fn prepare_ancestor_path(&self, target_index: usize, path: &mut [usize]) -> usize {
         let mut current_link_index = target_index;
         let mut depth = 0;
         while current_link_index != 0 {

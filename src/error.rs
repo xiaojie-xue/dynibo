@@ -1,11 +1,27 @@
 use std::fmt;
 
+/// Opaque wrapper around a URDF parsing or I/O error.
+#[derive(Debug)]
+pub struct UrdfError(urdf_rs::UrdfError);
+
+impl fmt::Display for UrdfError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl std::error::Error for UrdfError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
+    }
+}
+
 /// Errors returned while constructing or evaluating a robot model.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
     /// The URDF file could not be read or parsed.
-    Urdf(urdf_rs::UrdfError),
+    Urdf(UrdfError),
     /// The URDF describes an invalid or unsupported kinematic graph.
     InvalidModel(String),
     /// A joint uses a motion type not supported by this crate.
@@ -58,8 +74,6 @@ pub enum Error {
         /// Constraint violated by the component.
         reason: &'static str,
     },
-    /// Inverse kinematics is not defined for floating-base robots.
-    FloatingBaseIkUnsupported,
     /// One of the inverse-kinematics options is zero, negative, or non-finite.
     InvalidIkOptions {
         /// Name of the rejected option.
@@ -135,7 +149,6 @@ impl Error {
             | Self::InvalidJointIndex { .. }
             | Self::InvalidLinkId
             | Self::InvalidBaseState { .. }
-            | Self::FloatingBaseIkUnsupported
             | Self::InvalidIkOptions { .. }
             | Self::NonFiniteIkInput { .. } => ErrorCategory::InvalidInput,
             Self::IkNumericalFailure { .. }
@@ -175,9 +188,6 @@ impl fmt::Display for Error {
             Self::InvalidLinkId => write!(f, "link identifier does not belong to this robot model"),
             Self::InvalidBaseState { field, reason } => {
                 write!(f, "invalid base {field}: {reason}")
-            }
-            Self::FloatingBaseIkUnsupported => {
-                write!(f, "inverse kinematics does not support a floating base")
             }
             Self::InvalidIkOptions { option, reason } => {
                 write!(f, "invalid inverse-kinematics option {option}: {reason}")
@@ -238,7 +248,7 @@ impl std::error::Error for Error {
 impl From<urdf_rs::UrdfError> for Error {
     /// Wraps a URDF parser error in the crate's general error type.
     fn from(value: urdf_rs::UrdfError) -> Self {
-        Self::Urdf(value)
+        Self::Urdf(UrdfError(value))
     }
 }
 
@@ -310,10 +320,6 @@ mod tests {
                     reason: "must be finite",
                 },
                 "invalid base velocity: must be finite".to_owned(),
-            ),
-            (
-                Error::FloatingBaseIkUnsupported,
-                "inverse kinematics does not support a floating base".to_owned(),
             ),
             (
                 Error::InvalidIkOptions {
@@ -394,5 +400,12 @@ mod tests {
             Error::ForwardDynamicsSingularBaseInertia.category(),
             ErrorCategory::Solver
         );
+        let urdf_err = crate::Robot::from_urdf("/nonexistent/dynibo_missing.urdf").unwrap_err();
+        assert_eq!(urdf_err.category(), ErrorCategory::Model);
+        if let Error::Urdf(inner) = &urdf_err {
+            assert!(std::error::Error::source(inner).is_some());
+        } else {
+            panic!("expected Error::Urdf");
+        }
     }
 }

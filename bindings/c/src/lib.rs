@@ -19,10 +19,12 @@ pub use handles::{
     dynibo_floating_robot_destroy, dynibo_floating_robot_from_urdf,
     dynibo_floating_robot_generalized_count, dynibo_floating_robot_joint_count,
     dynibo_floating_robot_link_count, dynibo_floating_robot_link_id, dynibo_floating_robot_name,
-    dynibo_floating_workspace_create, dynibo_floating_workspace_destroy, dynibo_robot_destroy,
+    dynibo_floating_workspace_create, dynibo_floating_workspace_destroy,
+    dynibo_floating_workspace_gravity, dynibo_floating_workspace_set_gravity, dynibo_robot_destroy,
     dynibo_robot_from_urdf, dynibo_robot_generalized_count, dynibo_robot_joint_count,
     dynibo_robot_link_count, dynibo_robot_link_id, dynibo_robot_name, dynibo_robot_set_base_frame,
-    dynibo_workspace_create, dynibo_workspace_destroy,
+    dynibo_workspace_create, dynibo_workspace_destroy, dynibo_workspace_gravity,
+    dynibo_workspace_set_base_frame, dynibo_workspace_set_gravity,
 };
 pub use kinematics::{
     dynibo_floating_forward_acceleration_kinematics, dynibo_floating_forward_kinematics,

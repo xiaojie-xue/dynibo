@@ -62,6 +62,12 @@ with FloatingRobot.from_urdf("robot.urdf") as robot:
 
 For floating robots, `generalized_count == joint_count + 6`; generalized
 outputs begin with world-frame angular then linear base components. Only fixed
-`Robot` exposes `set_base_frame()`.
+`Robot` exposes `set_base_frame()`; both `Robot` and `FloatingRobot` expose
+`gravity_vector` and `set_gravity()`.
+
+`link_id()` and `link_id_at()` return a model-scoped `LinkId` (an `int`
+subclass) that rejects cross-model use while still indexing NumPy arrays.
+Passing a plain `int` remains accepted with a `DeprecationWarning`. The package
+ships PEP 561 type stubs (`py.typed` and `__init__.pyi`).
 
 [Open the Python API reference](../reference/python.md){ .md-button }

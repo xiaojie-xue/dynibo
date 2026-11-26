@@ -1,5 +1,6 @@
-#![cfg(feature = "pinocchio-tests")]
+#![cfg(feature = "pinocchio")]
 
+#[path = "../../../tests/support/mod.rs"]
 mod support;
 
 use support::context::TestRootType as RootType;
@@ -7,6 +8,7 @@ use support::context::TestRootType as RootType;
 use std::collections::HashMap;
 
 use dynibo::{BaseState, FloatingRobot, Frame, Twist, Wrench};
+use dynibo_oracle::pinocchio::{PinocchioContext, PinocchioLoad};
 use nalgebra::{Rotation3, Translation3, UnitQuaternion, Vector3};
 use support::{
     context::TestContext,
@@ -15,7 +17,6 @@ use support::{
     model_gen::{generate_case, selected_model_cases},
     numeric::DYNAMICS,
     observation::{Observation, ObservedResult, assert_observation_close},
-    pinocchio::PinocchioContext,
     states::deterministic_joint_state,
 };
 
@@ -35,7 +36,7 @@ fn floating_expected(
     pin_q: &[f64],
     pin_qd: &[f64],
     pin_qdd: &[f64],
-    loads: &[support::pinocchio::PinocchioLoad],
+    loads: &[PinocchioLoad],
     generalized_count: usize,
 ) -> ObservedResult {
     match algorithm {

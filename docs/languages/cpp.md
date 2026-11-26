@@ -35,14 +35,16 @@ The wrapper intentionally reuses ABI-compatible C value types:
 
 | Meaning | Type |
 |---|---|
+| Link identifier | `dynibo::LinkId` (model-scoped, `.index()`, `make_load(...)`) |
 | Pose | `DyniboPose` |
 | Spatial motion | `DyniboTwist` |
 | External load | `DyniboLoad` |
 | IK settings | `DyniboIkOptions` |
 | Floating state | `dynibo::BaseState` calculation argument |
 
-Matrix operations return flat `std::vector<double>` values in column-major
-order. See [Frames and Spatial Vectors](../user-guide/frames-and-spatial-vectors.md).
+Both `dynibo::Robot` and `dynibo::FloatingRobot` support `set_gravity()` and
+`gravity_vector()`. Matrix operations return flat `std::vector<double>` values in
+column-major order. See [Frames and Spatial Vectors](../user-guide/frames-and-spatial-vectors.md).
 
 ## Native interoperation
 

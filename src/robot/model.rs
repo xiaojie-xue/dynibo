@@ -1,6 +1,9 @@
 //! Immutable runtime model storage, shared handles, and metadata queries.
 //! URDF parsing and source joint/link descriptions live in crate::model.
-use super::{FloatingRobot, LinkId, LoadBuffer, Robot, RootMode, Workspace, generalized_count};
+use super::{
+    BaseKind, DEFAULT_GRAVITY, FloatingRobot, LinkId, LoadBuffer, Robot, StateCache, Workspace,
+    generalized_count,
+};
 use crate::{
     Error, Frame, JointType, Result,
     model::{Joint, JointKinematics, Link, LinkDynamics, Tree, load_urdf},
@@ -119,13 +122,12 @@ impl Model {
         }
     }
 
-    pub(super) fn validate_output(
+    pub(super) fn validate_output<B: BaseKind>(
         &self,
-        base_mode: RootMode,
         name: &'static str,
         output: &[f64],
     ) -> Result<()> {
-        self.validate_slice_length(name, output.len(), generalized_count(self, base_mode))
+        self.validate_slice_length(name, output.len(), generalized_count::<B>(self))
     }
 
     pub(super) fn validate_joint_output(&self, name: &'static str, output: &[f64]) -> Result<()> {
@@ -199,7 +201,9 @@ impl RobotModel {
         Robot {
             model: Arc::clone(&self.model),
             workspace: Workspace::new(&self.model),
+            state_cache: StateCache::new(&self.model),
             world_from_root: Frame::identity(),
+            world_gravity: DEFAULT_GRAVITY,
         }
     }
 
@@ -216,6 +220,8 @@ impl RobotModel {
         Ok(FloatingRobot {
             model: Arc::clone(&self.model),
             workspace: Workspace::new(&self.model),
+            state_cache: StateCache::new(&self.model),
+            world_gravity: DEFAULT_GRAVITY,
         })
     }
 

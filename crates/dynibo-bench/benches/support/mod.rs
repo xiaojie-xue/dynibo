@@ -54,7 +54,9 @@ pub struct Case {
 
 impl Case {
     pub fn new(model: Model) -> Self {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(model.path);
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(model.path);
         let robot = if model.floating {
             BenchmarkRobot::Floating(FloatingRobot::from_urdf(&path).unwrap())
         } else {

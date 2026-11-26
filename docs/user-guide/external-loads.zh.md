@@ -42,11 +42,8 @@ link ID、torque 和 force 分量组成。逆动力学会把该 wrench 加到所
 === "C++"
 
     ```cpp
-    DyniboLoad load{
-        tool,
-        {0.0, 0.0, 0.0},
-        {0.0, 0.0, -10.0},
-    };
+    const DyniboLoad load =
+        robot.make_load(tool, {0.0, 0.0, 0.0}, {0.0, 0.0, -10.0});
     const auto gravity = robot.gravity(q, {load});
     ```
 

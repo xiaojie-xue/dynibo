@@ -110,15 +110,7 @@ pub unsafe extern "C" fn dynibo_gravity(
         reject_output_overlap!(out, on; q, n, "q");
         let q = unsafe { input_slice(q, n, "q") }?;
         // SAFETY: The C caller supplies a readable load array for this call.
-        let ls = unsafe {
-            loads(
-                &r.link_ids,
-                &mut w.converted_loads,
-                &mut w.load_positions,
-                lp,
-                ln,
-            )
-        }?;
+        let ls = unsafe { loads(&r.link_ids, &mut w.loads, lp, ln) }?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner.gravity(q, ls, out).map_err(core_error)
     })
@@ -142,15 +134,7 @@ pub unsafe extern "C" fn dynibo_floating_gravity(
         let b = base_from_c(unsafe { required_ref(b, "base") }?)?;
         let q = unsafe { input_slice(q, n, "q") }?;
         // SAFETY: The C caller supplies a readable load array for this call.
-        let ls = unsafe {
-            loads(
-                &r.link_ids,
-                &mut w.converted_loads,
-                &mut w.load_positions,
-                lp,
-                ln,
-            )
-        }?;
+        let ls = unsafe { loads(&r.link_ids, &mut w.loads, lp, ln) }?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner.gravity(&b, q, ls, out).map_err(core_error)
     })
@@ -176,15 +160,7 @@ pub unsafe extern "C" fn dynibo_inverse_dynamics(
         let qd = unsafe { input_slice(qd, n, "qd") }?;
         let qdd = unsafe { input_slice(qdd, n, "qdd") }?;
         // SAFETY: The C caller supplies a readable load array for this call.
-        let ls = unsafe {
-            loads(
-                &r.link_ids,
-                &mut w.converted_loads,
-                &mut w.load_positions,
-                lp,
-                ln,
-            )
-        }?;
+        let ls = unsafe { loads(&r.link_ids, &mut w.loads, lp, ln) }?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner
             .inverse_dynamics(q, qd, qdd, ls, out)
@@ -214,15 +190,7 @@ pub unsafe extern "C" fn dynibo_floating_inverse_dynamics(
         let qd = unsafe { input_slice(qd, n, "qd") }?;
         let qdd = unsafe { input_slice(qdd, n, "qdd") }?;
         // SAFETY: The C caller supplies a readable load array for this call.
-        let ls = unsafe {
-            loads(
-                &r.link_ids,
-                &mut w.converted_loads,
-                &mut w.load_positions,
-                lp,
-                ln,
-            )
-        }?;
+        let ls = unsafe { loads(&r.link_ids, &mut w.loads, lp, ln) }?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner
             .inverse_dynamics(&b, q, qd, qdd, ls, out)
@@ -251,15 +219,7 @@ pub unsafe extern "C" fn dynibo_forward_dynamics(
         let qd = unsafe { input_slice(qd, n, "qd") }?;
         let f = unsafe { input_slice(f, fn_, "generalized_forces") }?;
         // SAFETY: The C caller supplies a readable load array for this call.
-        let ls = unsafe {
-            loads(
-                &r.link_ids,
-                &mut w.converted_loads,
-                &mut w.load_positions,
-                lp,
-                ln,
-            )
-        }?;
+        let ls = unsafe { loads(&r.link_ids, &mut w.loads, lp, ln) }?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner
             .forward_dynamics(q, qd, f, ls, out)
@@ -290,15 +250,7 @@ pub unsafe extern "C" fn dynibo_floating_forward_dynamics(
         let qd = unsafe { input_slice(qd, n, "qd") }?;
         let f = unsafe { input_slice(f, fn_, "generalized_forces") }?;
         // SAFETY: The C caller supplies a readable load array for this call.
-        let ls = unsafe {
-            loads(
-                &r.link_ids,
-                &mut w.converted_loads,
-                &mut w.load_positions,
-                lp,
-                ln,
-            )
-        }?;
+        let ls = unsafe { loads(&r.link_ids, &mut w.loads, lp, ln) }?;
         let out = unsafe { output_slice(out, on, "output") }?;
         w.inner
             .forward_dynamics(&b, q, qd, f, ls, out)

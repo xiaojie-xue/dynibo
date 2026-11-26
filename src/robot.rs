@@ -1,34 +1,36 @@
-use crate::{Frame, Result};
+use crate::{Error, Frame, Result};
+use nalgebra::Vector3;
 use std::{path::Path, sync::Arc};
 
+mod base_kind;
 mod dynamics;
 mod kinematics;
 mod loads;
 mod model;
+mod state;
 mod topology;
 mod workspace;
 
+use base_kind::{BaseKind, BaseMotion, FLOATING_BASE_DOF, Fixed, Floating};
 pub use kinematics::InverseKinematicsOptions;
 pub use loads::{IndexedLoad, LoadBuffer};
 use model::Model;
 pub use model::RobotModel;
+pub use state::{FloatingRobotState, RobotState};
 pub use topology::LinkId;
-use workspace::Workspace;
+use workspace::{StateCache, Workspace};
 
-const FLOATING_BASE_DOF: usize = 6;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum RootMode {
-    Fixed,
-    Floating,
-}
+/// Standard Earth gravitational acceleration along the world `-z` axis (m/s²).
+pub(super) const DEFAULT_GRAVITY: Vector3<f64> = Vector3::new(0.0, 0.0, -9.80665);
 
 /// A fixed-base robot model with reusable, instance-local calculation storage.
 #[derive(Debug)]
 pub struct Robot {
     model: Arc<Model>,
     workspace: Workspace,
+    state_cache: StateCache,
     world_from_root: Frame,
+    world_gravity: Vector3<f64>,
 }
 
 /// A floating-base robot model with reusable, instance-local calculation storage.
@@ -36,17 +38,20 @@ pub struct Robot {
 pub struct FloatingRobot {
     model: Arc<Model>,
     workspace: Workspace,
+    state_cache: StateCache,
+    world_gravity: Vector3<f64>,
 }
 
-const fn base_dof_count(base_mode: RootMode) -> usize {
-    match base_mode {
-        RootMode::Fixed => 0,
-        RootMode::Floating => FLOATING_BASE_DOF,
+fn generalized_count<B: BaseKind>(model: &Model) -> usize {
+    B::DOF + model.joint_count()
+}
+
+fn validate_gravity(gravity: &Vector3<f64>) -> Result<()> {
+    if gravity.iter().all(|value| value.is_finite()) {
+        Ok(())
+    } else {
+        Err(Error::NonFiniteInput { input: "gravity" })
     }
-}
-
-fn generalized_count(model: &Model, base_mode: RootMode) -> usize {
-    base_dof_count(base_mode) + model.joint_count()
 }
 
 impl Robot {
@@ -71,6 +76,24 @@ impl Robot {
         Ok(())
     }
 
+    /// Returns the world-frame gravitational acceleration vector in m/s².
+    ///
+    /// Defaults to `[0.0, 0.0, -9.80665]`.
+    pub const fn gravity_vector(&self) -> &Vector3<f64> {
+        &self.world_gravity
+    }
+
+    /// Replaces the world-frame gravitational acceleration vector in m/s².
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NonFiniteInput`] if any component is non-finite.
+    pub fn set_gravity(&mut self, gravity: Vector3<f64>) -> Result<()> {
+        validate_gravity(&gravity)?;
+        self.world_gravity = gravity;
+        Ok(())
+    }
+
     /// Shares the immutable model without allocating calculation storage.
     pub fn model(&self) -> RobotModel {
         RobotModel {
@@ -85,19 +108,21 @@ impl Robot {
     pub fn fork(&self) -> Self {
         let model = Arc::clone(&self.model);
         let workspace = Workspace::new(model.as_ref());
+        let state_cache = StateCache::new(model.as_ref());
         Self {
             model,
             workspace,
+            state_cache,
             world_from_root: self.world_from_root,
+            world_gravity: self.world_gravity,
         }
     }
 
-    /// Returns the runtime generalized-vector size for this robot.
+    /// Returns the runtime generalized-vector size for this fixed-base robot.
     ///
-    /// Floating-base generalized vectors are ordered `[base angular, base
-    /// linear, joints]`; fixed-base vectors contain only non-fixed joint entries.
+    /// Fixed-base generalized vectors contain only non-fixed joint entries.
     pub fn generalized_count(&self) -> usize {
-        self.model.joint_count()
+        generalized_count::<Fixed>(self.model.as_ref())
     }
 }
 
@@ -105,6 +130,24 @@ impl FloatingRobot {
     /// Loads a tree robot model with a six-degree-of-freedom floating root.
     pub fn from_urdf(path: impl AsRef<Path>) -> Result<Self> {
         RobotModel::from_urdf(path)?.floating_robot()
+    }
+
+    /// Returns the world-frame gravitational acceleration vector in m/s².
+    ///
+    /// Defaults to `[0.0, 0.0, -9.80665]`.
+    pub const fn gravity_vector(&self) -> &Vector3<f64> {
+        &self.world_gravity
+    }
+
+    /// Replaces the world-frame gravitational acceleration vector in m/s².
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NonFiniteInput`] if any component is non-finite.
+    pub fn set_gravity(&mut self, gravity: Vector3<f64>) -> Result<()> {
+        validate_gravity(&gravity)?;
+        self.world_gravity = gravity;
+        Ok(())
     }
 
     /// Shares the immutable model without allocating calculation storage.
@@ -118,12 +161,18 @@ impl FloatingRobot {
     pub fn fork(&self) -> Self {
         let model = Arc::clone(&self.model);
         let workspace = Workspace::new(model.as_ref());
-        Self { model, workspace }
+        let state_cache = StateCache::new(model.as_ref());
+        Self {
+            model,
+            workspace,
+            state_cache,
+            world_gravity: self.world_gravity,
+        }
     }
 
     /// Returns the runtime generalized-vector size (six base coordinates plus joints).
     pub fn generalized_count(&self) -> usize {
-        generalized_count(self.model.as_ref(), RootMode::Floating)
+        generalized_count::<Floating>(self.model.as_ref())
     }
 }
 

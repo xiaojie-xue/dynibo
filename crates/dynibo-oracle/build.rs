@@ -1,6 +1,6 @@
-#[cfg(feature = "pinocchio-tests")]
+#[cfg(feature = "pinocchio")]
 fn main() {
-    println!("cargo:rerun-if-changed=tests/support/pinocchio_bridge.cpp");
+    println!("cargo:rerun-if-changed=cpp/pinocchio_bridge.cpp");
     println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
 
     let pinocchio = pkg_config::Config::new()
@@ -17,7 +17,7 @@ fn main() {
     bridge
         .cpp(true)
         .warnings(false)
-        .file("tests/support/pinocchio_bridge.cpp")
+        .file("cpp/pinocchio_bridge.cpp")
         .flag_if_supported("-std=c++17")
         .flag_if_supported("-O3")
         .define("NDEBUG", None);
@@ -27,5 +27,5 @@ fn main() {
     bridge.compile("dynibo_pinocchio_bridge");
 }
 
-#[cfg(not(feature = "pinocchio-tests"))]
+#[cfg(not(feature = "pinocchio"))]
 fn main() {}

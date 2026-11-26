@@ -71,7 +71,7 @@ The table below shows Dynibo's speedup over Pinocchio for each operation.
   </tbody>
 </table>
 
-Source code to reproduce these results is available in [`benches/`](benches/).
+Source code to reproduce these results is available in [`crates/dynibo-bench/`](crates/dynibo-bench/).
 
 ### Reliable
 

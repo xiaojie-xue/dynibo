@@ -14,7 +14,7 @@ mod tests;
 
 use errors::{DyniboError, ModelError, PanicError, SolverError};
 use floating_robot::PyFloatingRobot;
-use loads::{PyLoad, PyLoadBuffer};
+use loads::{PyLoad, PyLoadBuffer, PyModelTag};
 use pyo3::{prelude::*, types::PyModule};
 use robot::PyRobot;
 use values::{PyBaseState, PyIkOptions, PyPose, PyTwist};
@@ -24,6 +24,7 @@ fn _dynibo(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyPose>()?;
     module.add_class::<PyTwist>()?;
     module.add_class::<PyBaseState>()?;
+    module.add_class::<PyModelTag>()?;
     module.add_class::<PyLoad>()?;
     module.add_class::<PyLoadBuffer>()?;
     module.add_class::<PyIkOptions>()?;
@@ -33,5 +34,6 @@ fn _dynibo(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("ModelError", py.get_type::<ModelError>())?;
     module.add("SolverError", py.get_type::<SolverError>())?;
     module.add("PanicError", py.get_type::<PanicError>())?;
+    module.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

@@ -1,6 +1,9 @@
-use nalgebra::{Matrix3, SMatrix, Vector3};
+use nalgebra::Vector3;
 
-use crate::{Frame, Twist, Wrench};
+use crate::{
+    Frame, Twist, Wrench,
+    spatial::inertia::{ArticulatedInertia, SpatialInertia},
+};
 
 use super::Model;
 
@@ -27,13 +30,11 @@ pub(super) struct Workspace {
     pub(super) origin_accelerations: Vec<Vector3<f64>>,
     pub(super) link_accelerations: Vec<Vector3<f64>>,
     pub(super) link_loads: Vec<Wrench>,
-    pub(super) composite_masses: Vec<f64>,
-    pub(super) composite_moments: Vec<Vector3<f64>>,
-    pub(super) composite_inertias: Vec<Matrix3<f64>>,
+    pub(super) composite_inertias: Vec<SpatialInertia>,
     pub(super) spatial_velocities: Vec<Twist>,
     pub(super) bias_accelerations: Vec<Twist>,
     pub(super) spatial_accelerations: Vec<Twist>,
-    pub(super) articulated_inertias: Vec<SMatrix<f64, 6, 6>>,
+    pub(super) articulated_inertias: Vec<ArticulatedInertia>,
     pub(super) articulated_bias_forces: Vec<Wrench>,
     pub(super) articulated_u: Vec<Wrench>,
     pub(super) articulated_d: Vec<f64>,
@@ -58,13 +59,11 @@ impl Workspace {
             origin_accelerations: vec![Vector3::zeros(); model_joint_count],
             link_accelerations: vec![Vector3::zeros(); model_joint_count],
             link_loads: vec![Wrench::zeros(); model_joint_count],
-            composite_masses: vec![0.0; model_joint_count],
-            composite_moments: vec![Vector3::zeros(); model_joint_count],
-            composite_inertias: vec![Matrix3::zeros(); model_joint_count],
+            composite_inertias: vec![SpatialInertia::zeros(); model_joint_count],
             spatial_velocities: vec![Twist::zeros(); model_joint_count],
             bias_accelerations: vec![Twist::zeros(); model_joint_count],
             spatial_accelerations: vec![Twist::zeros(); model_joint_count],
-            articulated_inertias: vec![SMatrix::zeros(); model_joint_count],
+            articulated_inertias: vec![ArticulatedInertia::zeros(); model_joint_count],
             articulated_bias_forces: vec![Wrench::zeros(); model_joint_count],
             articulated_u: vec![Wrench::zeros(); model_joint_count],
             articulated_d: vec![0.0; model_joint_count],
@@ -75,6 +74,31 @@ impl Workspace {
             q_work: vec![0.0; joint_count],
             step: vec![0.0; joint_count],
             ancestor_path: vec![0; model_joint_count],
+        }
+    }
+}
+
+/// Cached kinematics snapshot populated once by [`super::Robot::state`] or
+/// [`super::FloatingRobot::state`] and read immutably by snapshot queries.
+#[derive(Debug)]
+pub(super) struct StateCache {
+    pub(super) parent_from_child: Vec<Frame>,
+    pub(super) root_from_link: Vec<Frame>,
+    pub(super) root_angular_velocities: Vec<Vector3<f64>>,
+    pub(super) root_origin_velocities: Vec<Vector3<f64>>,
+    pub(super) qd: Vec<f64>,
+}
+
+impl StateCache {
+    pub(super) fn new(model: &Model) -> Self {
+        let joint_count = model.joint_count();
+        let model_joint_count = model.model_joint_count();
+        Self {
+            parent_from_child: vec![Frame::identity(); model_joint_count],
+            root_from_link: vec![Frame::identity(); model_joint_count],
+            root_angular_velocities: vec![Vector3::zeros(); model_joint_count],
+            root_origin_velocities: vec![Vector3::zeros(); model_joint_count],
+            qd: vec![0.0; joint_count],
         }
     }
 }

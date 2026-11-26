@@ -163,6 +163,12 @@ fn metadata_and_factory_error_paths_are_reported() {
             DyniboStatus::InvalidArgument
         );
 
+        let mut sentinel_fixed = ptr::dangling_mut();
+        assert_eq!(
+            dynibo_workspace_create(ptr::null(), &mut sentinel_fixed),
+            DyniboStatus::InvalidArgument
+        );
+        assert!(sentinel_fixed.is_null());
         assert_eq!(
             dynibo_workspace_create(ptr::null(), ptr::null_mut()),
             DyniboStatus::InvalidArgument
@@ -171,6 +177,12 @@ fn metadata_and_factory_error_paths_are_reported() {
             dynibo_workspace_create(handles.fixed, ptr::null_mut()),
             DyniboStatus::InvalidArgument
         );
+        let mut sentinel_floating = ptr::dangling_mut();
+        assert_eq!(
+            dynibo_floating_workspace_create(ptr::null(), &mut sentinel_floating),
+            DyniboStatus::InvalidArgument
+        );
+        assert!(sentinel_floating.is_null());
         assert_eq!(
             dynibo_floating_workspace_create(ptr::null(), ptr::null_mut()),
             DyniboStatus::InvalidArgument
@@ -1102,5 +1114,109 @@ fn invalid_c_poses_preserve_the_base_frame_and_allow_recovery() {
             assert_eq!(actual.translation, expected.translation);
             assert_eq!(actual.rotation_xyzw, expected.rotation_xyzw);
         }
+    }
+}
+
+#[test]
+fn workspace_base_frame_and_gravity_are_workspace_scoped_and_validated() {
+    let handles = Handles::new();
+    let q = [0.2, 0.3, -0.4, 0.1];
+    unsafe {
+        let mut second_workspace = ptr::null_mut();
+        assert_eq!(
+            dynibo_workspace_create(handles.fixed, &mut second_workspace),
+            DyniboStatus::Ok
+        );
+        let shifted = DyniboPose {
+            translation: [1.0, -2.0, 0.5],
+            rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
+        };
+        assert_eq!(
+            dynibo_workspace_set_base_frame(handles.fixed_workspace, &shifted),
+            DyniboStatus::Ok
+        );
+        let mut shifted_pose = DyniboPose::default();
+        let mut default_pose = DyniboPose::default();
+        assert_eq!(
+            dynibo_forward_kinematics(
+                handles.fixed,
+                handles.fixed_workspace,
+                q.as_ptr(),
+                q.len(),
+                handles.target,
+                &mut shifted_pose,
+            ),
+            DyniboStatus::Ok
+        );
+        assert_eq!(
+            dynibo_forward_kinematics(
+                handles.fixed,
+                second_workspace,
+                q.as_ptr(),
+                q.len(),
+                handles.target,
+                &mut default_pose,
+            ),
+            DyniboStatus::Ok
+        );
+        assert!((shifted_pose.translation[0] - default_pose.translation[0] - 1.0).abs() < 1e-12);
+        dynibo_workspace_destroy(second_workspace);
+
+        let mut g = [0.0; 3];
+        assert_eq!(
+            dynibo_workspace_gravity(handles.fixed_workspace, &mut g),
+            DyniboStatus::Ok
+        );
+        assert_eq!(g, [0.0, 0.0, -9.80665]);
+        assert_eq!(
+            dynibo_workspace_set_gravity(handles.fixed_workspace, &[0.0, 0.0, 0.0]),
+            DyniboStatus::Ok
+        );
+        assert_eq!(
+            dynibo_workspace_gravity(handles.fixed_workspace, &mut g),
+            DyniboStatus::Ok
+        );
+        assert_eq!(g, [0.0, 0.0, 0.0]);
+        let mut tau = [1.0; 4];
+        assert_eq!(
+            dynibo_gravity(
+                handles.fixed,
+                handles.fixed_workspace,
+                q.as_ptr(),
+                q.len(),
+                ptr::null(),
+                0,
+                tau.as_mut_ptr(),
+                tau.len(),
+            ),
+            DyniboStatus::Ok
+        );
+        assert!(tau.iter().all(|v| *v == 0.0));
+        assert_eq!(
+            dynibo_workspace_set_gravity(handles.fixed_workspace, &[f64::NAN, 0.0, 0.0]),
+            DyniboStatus::InvalidArgument
+        );
+
+        assert_eq!(
+            dynibo_floating_workspace_gravity(handles.floating_workspace, &mut g),
+            DyniboStatus::Ok
+        );
+        assert_eq!(g, [0.0, 0.0, -9.80665]);
+        assert_eq!(
+            dynibo_floating_workspace_set_gravity(handles.floating_workspace, &[0.0, 0.0, 0.0]),
+            DyniboStatus::Ok
+        );
+        assert_eq!(
+            dynibo_floating_workspace_gravity(handles.floating_workspace, &mut g),
+            DyniboStatus::Ok
+        );
+        assert_eq!(g, [0.0, 0.0, 0.0]);
+        assert_eq!(
+            dynibo_floating_workspace_set_gravity(
+                handles.floating_workspace,
+                &[0.0, f64::INFINITY, 0.0]
+            ),
+            DyniboStatus::InvalidArgument
+        );
     }
 }

@@ -1,4 +1,5 @@
 use super::{Case, OPERATIONS, assert_close};
+extern crate dynibo_oracle;
 use std::{
     ffi::{CString, c_char, c_void},
     hint::black_box,
@@ -60,7 +61,9 @@ impl Drop for Pinocchio {
 
 impl Pinocchio {
     pub fn new(case: &Case) -> Self {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(case.model.path);
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(case.model.path);
         let path = CString::new(path.to_str().unwrap()).unwrap();
         let frame = CString::new(case.model.target).unwrap();
         // SAFETY: both strings are NUL-terminated and valid during the calls.

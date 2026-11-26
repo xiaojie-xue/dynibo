@@ -7,13 +7,13 @@
 - 带完整 case 上下文的绝对误差加相对误差数值断言；
 - 算法矩阵与 workspace 序列执行器。
 
-`robot_arm` 和 `pinocchio_oracle` 集成测试保留根目录下的 `.rs` 入口，
-具体用例按职责放在同名子目录中，每套测试仍只生成一个可执行文件。
-C ABI 单元测试在 `bindings/c/src/tests.rs` 中共享辅助函数，计算、缓冲区重叠检查和
-所有权检查分别放在 `bindings/c/src/tests/` 的子模块中。
+根目录的 `robot_arm` 集成测试和 `crates/dynibo-oracle` 中的 `pinocchio_oracle`
+集成测试均保留各自的 `.rs` 入口，具体用例按职责放在同名子目录中，每套测试仍只生成一个
+可执行文件。C ABI 单元测试在 `bindings/c/src/tests.rs` 中共享辅助函数，计算、缓冲区
+重叠检查和所有权检查分别放在 `bindings/c/src/tests/` 的子模块中。
 
 `support/model_gen/` 分别组织模型规格与校验、确定性生成、语料选择、临时文件和
-URDF 序列化；`support/pinocchio/` 分开桥接声明与计算封装。
+URDF 序列化；`crates/dynibo-oracle/src/pinocchio/` 分开 Pinocchio 桥接声明与计算封装。
 Python 安装包测试仍通过 `python/test_package.py` 运行，测试类与共享 fixture 位于
 `python/package_cases/`。分配测试继续作为独立目标，分别使用自己的全局分配器。
 
@@ -30,13 +30,14 @@ PR 使用的生成模型语料包含 24 个可复现的伪随机 `u64` seed，�
 cargo test --workspace --all-targets --locked
 ```
 
-当 `pkg-config` 能找到 Pinocchio 时，`pinocchio-tests` feature 会增加两层独立 oracle。
-`pinocchio_oracle` 覆盖长期维护的串联、混合关节、分叉树和 free-flyer fixture，包括 RNEA、ABA
-的单 link 与多 link 外载荷；`generated_pinocchio` 则让同一套 24 个模型、每个八组状态分别对比
-FK、速度和加速度运动学、Jacobian 与其导数、质量矩阵、重力、速度乘积力、RNEA 和 ABA：
+当 `pkg-config` 能找到 Pinocchio 时，workspace 内部的 `dynibo-oracle` crate（`pinocchio`
+feature）会增加两层独立 oracle。`pinocchio_oracle` 覆盖长期维护的串联、混合关节、分叉树
+和 free-flyer fixture，包括 RNEA、ABA 的单 link 与多 link 外载荷；`generated_pinocchio`
+则让同一套 24 个模型、每个八组状态分别对比 FK、速度和加速度运动学、Jacobian 与其导数、
+质量矩阵、重力、速度乘积力、RNEA 和 ABA：
 
 ```bash
-cargo test -p dynibo --locked --features pinocchio-tests --tests
+cargo test -p dynibo-oracle --locked --features pinocchio --tests
 ```
 
 生成模型 conformance 测试接受下文记录的复现与语料规模环境变量。

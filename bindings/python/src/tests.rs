@@ -4,7 +4,7 @@ use pyo3::prelude::*;
 use std::{
     panic::{AssertUnwindSafe, catch_unwind, panic_any},
     path::Path,
-    sync::Mutex,
+    sync::{Mutex, atomic::AtomicBool},
 };
 
 type PanicCase = (fn() -> PyResult<()>, &'static str);
@@ -42,9 +42,12 @@ fn caught_calculation_panics_leave_the_robot_usable_and_closable() {
             let q = [0.2, -0.3, 0.4, -0.1];
             let mut fresh = robot.fork();
             let expected = fresh.forward_kinematics(&q, target).unwrap();
+            let closed = AtomicBool::new(false);
             let inner = Mutex::new(Some(Calculation {
                 robot,
                 poses: Vec::new(),
+                output: Vec::new(),
+                loads: Vec::new(),
             }));
             let result: PyResult<()> = if through_robot {
                 with_robot(&inner, py, |robot| {
@@ -64,8 +67,9 @@ fn caught_calculation_panics_leave_the_robot_usable_and_closable() {
             })
             .unwrap();
             assert_eq!(actual, expected);
-            close_calculation(&inner, py).unwrap();
-            close_calculation(&inner, py).unwrap();
+            close_calculation(&inner, &closed, py).unwrap();
+            close_calculation(&inner, &closed, py).unwrap();
+            assert!(ensure_open(&closed).is_err());
             let error = lock_calculation(&inner, py).err().unwrap();
             assert!(error.is_instance_of::<pyo3::exceptions::PyRuntimeError>(py));
             assert_eq!(
@@ -78,9 +82,12 @@ fn caught_calculation_panics_leave_the_robot_usable_and_closable() {
 
 #[test]
 fn poisoned_locks_report_python_errors_for_calculation_and_close() {
+    let closed = AtomicBool::new(false);
     let inner = Mutex::new(Some(Calculation {
         robot: (),
         poses: Vec::new(),
+        output: Vec::new(),
+        loads: Vec::new(),
     }));
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
@@ -101,7 +108,7 @@ fn poisoned_locks_report_python_errors_for_calculation_and_close() {
                 panic!("must not execute")
             })
             .unwrap_err(),
-            close_calculation(&inner, py).unwrap_err(),
+            close_calculation(&inner, &closed, py).unwrap_err(),
         ] {
             assert_panic_error(py, error, "robot workspace lock is poisoned");
         }
